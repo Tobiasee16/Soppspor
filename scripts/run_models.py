@@ -15,6 +15,7 @@ the output rather than left for a reader to notice.
     python scripts/run_models.py
     python scripts/run_models.py --tag terrain-only
     python scripts/run_models.py --no-vol-bounds
+    python scripts/run_models.py --no-elevation
 """
 from __future__ import annotations
 
@@ -85,6 +86,9 @@ SR16_NUMERIC = {
 }
 
 
+INCLUDE_ELEVATION = True
+
+
 def layers() -> list[RasterLayer]:
     """The feature stack, in the order it will be reported.
 
@@ -92,7 +96,18 @@ def layers() -> list[RasterLayer]:
     present is listed in the output, so a run can never quietly claim more
     features than it used.
     """
-    out = [RasterLayer(str(INTERIM / "terrain_agder_32m.tif"), method="nearest")]
+    # `--no-elevation` refits everything on the same stack minus one band, to
+    # answer whether elevation is measuring terrain or measuring how easy a
+    # place is to reach. The prediction is registered in FINDINGS section 15,
+    # written before the first run of it. Bands are 1-indexed and elevation is
+    # band 1; the other five terrain derivatives stay.
+    if INCLUDE_ELEVATION:
+        out = [RasterLayer(str(INTERIM / "terrain_agder_32m.tif"), method="nearest")]
+    else:
+        out = [RasterLayer(str(INTERIM / "terrain_agder_32m.tif"), method="nearest",
+                           bands=[2, 3, 4, 5, 6],
+                           names=["slope_deg", "northness", "eastness",
+                                  "curvature", "twi"])]
 
     climate = INTERIM / "autumn_rain_agder_1km.tif"
     if climate.exists():
@@ -167,8 +182,11 @@ def presences(sp: dict, boundary: Boundary, max_prec: float, thin_m: float):
 
 
 def main() -> int:
-    global INCLUDE_VOL_BOUNDS
+    global INCLUDE_VOL_BOUNDS, INCLUDE_ELEVATION
     tag = None
+    if "--no-elevation" in sys.argv:
+        INCLUDE_ELEVATION = False
+        tag = "no-elevation"
     if "--tag" in sys.argv:
         tag = sys.argv[sys.argv.index("--tag") + 1]
     if "--no-vol-bounds" in sys.argv:
@@ -411,9 +429,20 @@ def write_report(rows, importances, designs, spp, stack, block_m, n_folds,
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     body = "\n".join(w)
-    OUT.write_text(body, encoding="utf-8")
+    # A tagged run is a variant - one feature dropped, one bound relaxed - and
+    # must not overwrite the canonical results. It used to, so running
+    # `--no-elevation` to compare against the baseline silently replaced the
+    # baseline with the very thing being compared, and the comparison then
+    # reported a change of exactly 0.000 for every species. That reads like a
+    # broken experiment rather than a clobbered file, and the only reason the
+    # real numbers survived is that model_results.md had been committed.
+    #
+    # Tagged runs now write only their archive below. FINDINGS links to both.
+    if not tag:
+        OUT.write_text(body, encoding="utf-8")
     print("\n" + body)
-    print(f"written: {OUT.relative_to(ROOT)}")
+    if not tag:
+        print(f"written: {OUT.relative_to(ROOT)}")
 
     # Also keep a per-tag copy. `model_results.md` is the latest run and every
     # run overwrites it, which quietly left FINDINGS section 8 linking to a file

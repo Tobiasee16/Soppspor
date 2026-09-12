@@ -1925,6 +1925,156 @@ is frozen at whatever weather was baked in at build time. Hosting fixes the
 daily refresh at the same time.
 
 
+## 15. Elevation, dropped - registered before the run - 2026-09-12
+
+Section 13 recorded that elevation is the dominant feature in every model here,
+that across eight species its permutation importance and blocked AUC track
+together at Spearman +0.69, and that the one species getting nothing from it
+(*L. versipelle*, +0.007 against the null's +0.002) is also the one scoring
+closest to the null. Two readings were left open:
+
+- **Benign.** Elevation is a real ecological gradient for most of these species
+  and genuinely does not structure a birch associate.
+- **Uncomfortable.** Elevation is carrying an accessibility or effort signal
+  the target-group background did not remove, and AUC here partly measures how
+  much of that signal a species happens to absorb.
+
+Section 13 registered the test that separates them. This section runs it, and
+is written **before** the run so the outcome cannot be reinterpreted.
+
+### The test
+
+Refit every species on the identical stack with the six terrain bands reduced
+to five: elevation removed, slope, northness, eastness, curvature and TWI kept.
+Everything else unchanged - same background, same blocks, same buffer, same
+null, same seed.
+
+### What each reading predicts
+
+| | benign: real ecology | uncomfortable: accessibility proxy |
+|---|---|---|
+| Species with high elevation importance | lose AUC roughly in proportion to what elevation was contributing, and keep their ordering | lose a lot, and the losses concentrate in exactly the species that scored best |
+| *L. versipelle* | barely moves, and stays worst | barely moves, and stops being an outlier because everything else falls to meet it |
+| The spread between best and worst | roughly preserved | collapses |
+| The null | 0.5 either way | 0.5 either way |
+
+### Registered prediction
+
+Stated now, in advance:
+
+1. **The null stays under 0.60.** If it does not, the run means nothing,
+   whatever else it shows.
+2. ***L. versipelle* moves least of the eight**, in absolute AUC. It is the
+   only species whose model was not using elevation, so it is the only one with
+   nothing to lose.
+3. **Every other species loses AUC**, because elevation is the largest single
+   contributor to all of them.
+4. **The spread between best and worst narrows.** If the gap between the top
+   species and *L. versipelle* closes by more than half, that is evidence the
+   ranking was substantially elevation, and a national fit - where elevation
+   correlates with population even more strongly - would score better and mean
+   less.
+
+Prediction 4 is the one that matters. 2 and 3 are close to arithmetic; 4 is the
+question.
+
+### Why this runs before the national download
+
+A national model needs roughly 31 GB of rasters and an overnight pipeline, and
+it would be fitted on a landscape where the elevation-versus-settlement
+confound is *stronger* than in Agder, not weaker. Spending that effort before
+knowing whether the existing models are measuring terrain or accessibility
+would be doing the expensive thing first. This costs one 25-minute run and no
+new data.
+
+
+### Result - and the benign reading wins
+
+| species | with elevation | without | change |
+|---|---|---|---|
+| *Craterellus cornucopioides* | 0.766 | 0.739 | −0.027 |
+| *Craterellus tubaeformis* | 0.705 | 0.669 | −0.036 |
+| *Boletus edulis* | 0.695 | 0.647 | −0.048 |
+| *Cantharellus cibarius* | 0.690 | 0.647 | −0.043 |
+| *Hydnum repandum* | 0.666 | 0.636 | −0.030 |
+| *Amanita muscaria* | 0.658 | 0.631 | −0.027 |
+| *Suillus luteus* | 0.653 | 0.614 | −0.039 |
+| *Leccinum versipelle* | 0.574 | **0.578** | **+0.004** |
+| synthetic null | 0.492 | 0.486 | −0.006 |
+
+Scored against the four predictions registered above:
+
+1. **Null under 0.60** — 0.486. Holds, so the run can be read.
+2. ***L. versipelle* moves least** — holds, and more sharply than predicted: it
+   is the only species that did not lose anything at all. The one model that was
+   not using elevation is the one model unaffected by removing it, which is as
+   clean a confirmation as this kind of test produces.
+3. **Every other species loses AUC** — holds. All seven, between −0.027 and
+   −0.048, mean −0.031.
+4. **The spread narrows by more than half** — **does not hold.** 0.192 → 0.161,
+   a 16% narrowing, nowhere near the 50% that would have implicated the
+   ranking.
+
+Prediction 4 was the one that mattered and it failed in the direction that is
+good news. **The ordering is essentially untouched**: cornucopioides still
+first, versipelle still last, and the only movement anywhere is *B. edulis* and
+*C. cibarius* converging into a tie for third. A ranking that was really a
+proxy for accessibility would not survive deleting the proxy.
+
+So the benign reading stands. Elevation is a real contributor and a modest one:
+about 0.03 of AUC, applied fairly evenly, on top of a ranking that comes from
+somewhere else.
+
+### What this corrects about section 13
+
+Section 13 called elevation "the dominant feature in every model" on the
+strength of its permutation importance, which is the largest of any feature for
+seven of the eight species. Removing it costs 0.031. **Those two facts are both
+true and the first one oversells it.**
+
+The explanation is ordinary and worth writing down: permutation importance
+measures what a feature contributes *when the others cannot compensate*, and
+these features compensate heavily. Elevation correlates with slope, with TWI,
+with tree species, with autumn rainfall. Shuffle it alone and the model has
+nothing to fall back on; remove it and refit, and the remaining eighteen
+features absorb most of what it was doing. Permutation importance on correlated
+predictors attributes shared signal to whichever one is being shuffled, and
+reading it as "how much this feature is worth" overstates every member of a
+correlated group.
+
+The section 13 elevation-versus-AUC correlation of +0.69 across species still
+stands as an observation. What it does not support, now that it has been
+tested, is the causal reading.
+
+### What it means for a national map
+
+The specific objection to expanding — that a national fit would inherit a
+stronger elevation-versus-settlement confound and so score better while meaning
+less — is **not supported**. The models are not resting on elevation; removing
+it entirely costs three AUC points and leaves the ordering intact.
+
+That does not make a national model *good*, and nothing here touches the
+deeper problem: presence-only data, no absences, effort bias corrected only as
+far as a target-group background can correct it. But it removes the reason to
+refuse the download.
+
+### A bug this run exposed
+
+The first comparison came back showing a change of exactly 0.000 for all eight
+species, which is not a result. `run_models.py --no-elevation` was writing both
+its tagged archive **and** `model_results.md`, so the baseline was replaced by
+the variant and then compared against itself.
+
+The comment beside the archiving code already warned about this exact hazard in
+a different form - "every run overwrites it, which quietly left FINDINGS section
+8 linking to a file that no longer held the numbers section 8 quotes" - and the
+fix at the time was to add the archive rather than to stop the overwrite.
+
+Tagged runs now write only their archive. The baseline survived solely because
+`model_results.md` had been committed an hour earlier, which is an argument for
+committing generated reports rather than a plan.
+
+
 ## Open questions
 
 - **Should the maps still be blurred at all?** `build_maps.py` applies a 500 m
