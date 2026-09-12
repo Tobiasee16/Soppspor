@@ -59,6 +59,34 @@ map that looks convincing and means nothing:
 | `scripts/build_hosted.py` | a static site, 4.5 MB, tiles from Kartverket at runtime. Works across Norway, refreshes the weather daily, installs to a home screen. |
 | `scripts/build_interface.py` | one self-contained HTML file, 14.8 MB, everything inlined. Needs no server and cannot leave Kristiansand — the basemap alone would be a gigabyte nationally. See `EXPANSION.md`. |
 
+## Working on a second machine
+
+```
+git clone https://github.com/Tobiasee16/SoppKompis
+cd SoppKompis
+uv sync                                    # or: pip install -e .
+python scripts/fetch_recent_weather.py     # ~2 min, the only missing input
+python scripts/build_hosted.py             # -> dist/
+```
+
+The model surface (`payload.js`) and the marked routes are committed, because
+regenerating the first one means 31 GB of rasters and an overnight pipeline
+run. So a clone builds the app without downloading anything but the weather.
+
+**Two things deliberately do not come across.**
+
+`config/supabase.json` holds the project URL and anon key. Copy
+`config/supabase.example.json` and fill it in, or leave it out entirely — the
+app is fully usable without sync, it just keeps saved places on the one device.
+
+`data/processed/conditions.json` is the daily rainfall layer. It changes every
+day, so committing it across two machines would generate nothing but conflicts.
+`fetch_recent_weather.py --if-new` is two minutes and safe to run on a timer.
+
+Everything else — the rasters, the GeoTIFFs, the built HTML — stays out. The
+generated *reports* under `data/processed/` are committed, because they are the
+evidence for every number in FINDINGS.md.
+
 ## Reading order
 
 | | |

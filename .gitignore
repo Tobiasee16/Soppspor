@@ -16,6 +16,32 @@ data/processed/*
 !data/processed/runs/
 !data/processed/runs/*.md
 
+# And the two build inputs, so a clone can actually build the app.
+#
+# Generated files in source control is normally a smell. The alternative here
+# is worse: `payload.js` is the model surface, and regenerating it means 31 GB
+# of rasters and an overnight pipeline run. A repository that cannot build its
+# own product on a second machine is not much of a repository, and a second
+# machine is the reason this one was pushed.
+#
+# The cost is honest: payload.js is 3.8 MB of base64, so every refit adds that
+# much to history for good. Refits happen a handful of times a season, so this
+# is tens of megabytes over years - cheap against not being able to build.
+#
+# conditions.json is deliberately NOT here. It changes every day, the build
+# works without it, and `fetch_recent_weather.py --if-new` takes two minutes.
+# Committing a file that changes daily across two machines is a conflict
+# generator and nothing else.
+!data/processed/web_preview/
+!data/processed/web_preview/payload.js
+!data/interim/trails.json
+
+# Re-close the door. Un-ignoring the directory above also exposed the built
+# 13.4 MB single-file interface that lives beside the payload, which is exactly
+# the sort of thing these rules exist to keep out. Only the payload is wanted.
+data/processed/web_preview/*.html
+data/processed/web_preview/*.png
+
 __pycache__/
 *.pyc
 .venv/
