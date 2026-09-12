@@ -1,0 +1,49 @@
+# Ignore directory *contents*, not the directories themselves, so the .gitkeep
+# placeholders survive. Git cannot re-include a file whose parent dir is excluded.
+data/raw/*
+data/interim/*
+data/processed/*
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+
+# The generated reports, though. They are 114 kB of markdown against 13 MB of
+# built HTML and 10 MB GeoTIFFs, and they are the evidence for every claim the
+# README and FINDINGS make - blocked AUC, the null control, the record counts,
+# the Boyce diagnosis. A project whose selling point is honest validation that
+# ships none of its validation output is asking to be taken on trust.
+!data/processed/*.md
+!data/processed/runs/
+!data/processed/runs/*.md
+
+__pycache__/
+*.pyc
+.venv/
+.ipynb_checkpoints/
+
+# Supabase project URL and anon key. The anon key is not a secret - RLS is what
+# protects the rows - but the file is per-developer, so it stays out of git.
+# config/supabase.example.json is committed instead.
+config/supabase.json
+
+# Build output. dist/index.html has the Supabase project URL and anon key baked
+# into it. The anon key is not a secret - row-level security is what protects
+# the rows - but a built artefact has no business in source control, and the
+# habit of committing one is how the *next* key ends up public.
+dist/
+
+# Wrangler's local state. `wrangler-account.json` holds the Cloudflare account
+# id and the account holder's email address; neither belongs in a public repo.
+.wrangler/
+node_modules/
+
+# Anything that looks like a private key, wherever it lands. The dev
+# certificate under data/interim/ is already covered by the data rules above;
+# this is the backstop for the one that is not.
+*.pem
+*.key
+*.pfx
+*.p12
+
+.DS_Store
+Thumbs.db

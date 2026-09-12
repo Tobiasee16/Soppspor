@@ -1,0 +1,20 @@
+{
+  "name": "Soppkart",
+  "short_name": "Soppkart",
+  "description": "Turkart for soppturer i hele Norge: merkede stier, nedbøren der du er, og dine egne steder lagret privat. Soneanslaget er foreløpig regnet ut for Kristiansand.",
+  "lang": "no",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "id": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f7f7fa",
+  "theme_color": "#f7f7fa",
+  "categories": ["navigation", "utilities"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

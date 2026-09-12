@@ -1,0 +1,39 @@
+[project]
+name = "soppkart"
+version = "0.0.1"
+description = "Fungal habitat suitability from public Norwegian geodata — Kristiansand, Agder"
+requires-python = ">=3.11"
+
+# Exactly the stack named in CLAUDE.md, nothing beyond it. Installed 2026-09-09
+# with explicit approval, after establishing what actually needed it: all seven
+# environmental endpoints are reachable as stdlib point queries, so the feature
+# stack itself does not require this. Two things do — the topographic wetness
+# index, which needs flow accumulation over a raster, and the 16 m GeoTIFF/PNG
+# suitability maps. Bulk raster download also spares NIBIO and NGU roughly
+# 19,000 point requests.
+#
+# Everything written before this date still runs on the standard library plus
+# PyYAML, deliberately, so no earlier result depends on an environment decision.
+# Ask before adding anything to this list.
+dependencies = [
+    "pyyaml",
+    "rasterio",
+    "rioxarray",
+    "xarray",
+    "geopandas",
+    "shapely",
+    "pyproj",
+    "scikit-learn",
+    "lightgbm",
+    "duckdb",
+    "matplotlib",
+]
+
+[dependency-groups]
+dev = ["pytest"]
+
+# Terrain derivatives (richdem or whitebox) are deliberately not listed. The
+# choice between them has not been made and neither is needed yet.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

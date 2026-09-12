@@ -1,0 +1,59 @@
+# Two extents, deliberately kept distinct. See CLAUDE.md "Study area".
+# Never merge these. Training is regional; prediction/validation is local.
+# This is a transferability test.
+
+crs: "EPSG:25833"   # ETRS89 / UTM 33N. Norwegian national standard.
+
+training_extent:
+  name: "Agder fylke"
+  kind: "fylke"
+  code: "42"
+  boundary_url: "https://ws.geonorge.no/kommuneinfo/v1/fylker/42/omrade?utkoordsys=25833"
+  boundary_file: "data/interim/boundary_agder_25833.geojson"
+
+prediction_extent:
+  name: "Kristiansand kommune (post-2020 merge)"
+  kind: "kommune"
+  code: "4204"
+  # Post-2020: includes former Søgne (1018) and Songdalen (1017).
+  merged_from: ["1001 Kristiansand", "1017 Songdalen", "1018 Søgne"]
+  boundary_url: "https://ws.geonorge.no/kommuneinfo/v1/kommuner/4204/omrade?utkoordsys=25833"
+  boundary_file: "data/interim/boundary_kristiansand_25833.geojson"
+
+# Spatial block cross-validation. Blocks must be large enough to break the
+# autocorrelation range of the occurrence data. CLAUDE.md mandates 5-10 km.
+spatial_cv:
+  block_size_m: 7500
+  n_folds: 5
+
+  # Training points within this distance of any test point are dropped.
+  # Blocking alone is NOT sufficient: a test block sits directly against
+  # training blocks, so a cluster straddling that edge lands in both sets.
+  # Measured on synthetic data containing no ecology whatsoever, unbuffered
+  # 7.5 km blocking still returned AUC 0.66. See scripts/harness_selftest.py.
+  #
+  # 4000 m is a DECLARED TRADE-OFF, not an autocorrelation range. There is no
+  # range in this data to derive one from: spatial dependence in the records
+  # declines smoothly from g = 6.5 at 1 km to 1.2 at 20 km and never reaches a
+  # floor, at any kernel width, for any of the three species. The buffer is
+  # instead set to the largest value that still leaves 85% of training
+  # presences in the sparsest species. At 4000 m at least a third to a half of
+  # the short-range dependence survives, so blocked CV here remains optimistic
+  # and the null control - not the buffer - is the load-bearing check.
+  # Derivation and the full cost/leakage table:
+  # data/processed/autocorrelation_range.md
+  buffer_m: 4000
+
+  # Blocked CV runs on the TRAINING extent only. Kristiansand yields 6-12
+  # presences per fold, too few to grade per-fold, so it is used as a single
+  # held-out transferability evaluation rather than being cross-validated.
+  # See data/processed/cv_block_adequacy.md.
+  cv_extent: training_extent
+
+# Occurrence thinning. Reported at several distances rather than one, so the
+# sensitivity of record counts to this choice is visible instead of hidden.
+thinning_distances_m: [0, 250, 500, 1000]
+reporting_thinning_m: 1000
+
+# Records coarser than this cannot inform a 16 m model. Reported both ways.
+max_coordinate_precision_m: 250

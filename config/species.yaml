@@ -1,0 +1,169 @@
+# Three real species plus a synthetic null. The null is NEVER mixed with a real
+# presence set (CLAUDE.md hard constraint 4) and runs on EVERY model run
+# (hard constraint 5).
+#
+# artskart_taxon_id resolved 2026-09-09 via
+#   https://artskart.artsdatabanken.no/publicapi/api/taxon?term=<name>
+# gbif_usage_key resolved 2026-09-09 via
+#   https://api.gbif.org/v1/species/match?name=<name>
+
+species:
+  - key: "craterellus_tubaeformis"
+    scientific_name: "Craterellus tubaeformis"
+    vernacular_no: "traktkantarell"
+    vernacular_en: "winter chanterelle"
+    artskart_taxon_id: 39039
+    gbif_usage_key: 2554536
+    predicted_rank: 1
+    habitat_signal: >-
+      Tight. Moist mossy spruce forest, damp hollows, often near decaying wood.
+      TWI and SR16 tree species should both bite hard.
+
+  - key: "cantharellus_cibarius"
+    scientific_name: "Cantharellus cibarius"
+    vernacular_no: "kantarell"
+    vernacular_en: "chanterelle"
+    artskart_taxon_id: 160585
+    gbif_usage_key: null   # resolve before use
+    predicted_rank: 2
+    habitat_signal: >-
+      Generalist across spruce, pine, birch, oak. The commercial target.
+
+  - key: "amanita_muscaria"
+    scientific_name: "Amanita muscaria"
+    vernacular_no: "rød fluesopp"
+    vernacular_en: "fly agaric"
+    artskart_taxon_id: 199186
+    gbif_usage_key: null   # resolve before use
+    predicted_rank: 3
+    habitat_signal: >-
+      Conspicuous, photogenic, heavily over-recorded relative to actual
+      distribution, not strongly habitat-restricted.
+
+# ---------------------------------------------------------------------------
+# Species added for the product, NOT for the Phase 0 test
+# ---------------------------------------------------------------------------
+#
+# The three above are a falsification instrument. Their ordering was registered
+# in FINDINGS before any model existed and that test has already been run and
+# failed; adding species to that list now would silently redefine what was
+# predicted, so these live in their own key instead. Nothing here has a
+# `predicted_rank`, nothing here enters the ordering test, and the result of
+# the ordering test is not restated or softened because of them.
+#
+# What they DO get is identical treatment otherwise: the same target-group
+# background, the same spatial block CV, the same transfer test on Kristiansand,
+# and the same null control running alongside. A species only reaches the
+# interface with its own measured AUC next to it.
+#
+# Selection rule, applied before any model was fitted: species people actually
+# go looking for, with enough Agder records to train on. Counts are Artskart
+# TotalCount on the access date, via filter.taxons + filter.countys=42, and
+# filter.areas=4204 for the kommune.
+#
+# Deliberately excluded, with the reason recorded so it is not quietly revisited:
+#   Albatrellus ovinus (faresopp)      117 Agder but **0 in Kristiansand**.
+#                                      A map for a species never recorded in the
+#                                      prediction extent is extrapolation with
+#                                      nothing to check it against.
+#   Macrolepiota procera (parasollsopp) 31 in Agder, below the 50-record floor.
+#   Hydnum rufescens (rødgul piggsopp) 98 Agder / 7 Krs, and routinely recorded
+#                                      as H. repandum; the pair is not cleanly
+#                                      separated in the source.
+#
+# taxon ids resolved 2026-09-12 via publicapi/api/taxon?term=<name>
+additional_species:
+  - key: "boletus_edulis"
+    scientific_name: "Boletus edulis"
+    vernacular_no: "steinsopp"
+    vernacular_en: "penny bun"
+    artskart_taxon_id: 96845
+    agder_records: 330       # 2026-09-12
+    kristiansand_records: 52
+    habitat_signal: >-
+      Broad. Spruce, pine, birch and oak, often on poorer well-drained soil and
+      along forest edges. Heavily sought, so expect strong effort bias.
+
+  - key: "craterellus_cornucopioides"
+    scientific_name: "Craterellus cornucopioides"
+    vernacular_no: "svart trompetsopp"
+    vernacular_en: "black trumpet"
+    artskart_taxon_id: 146812
+    agder_records: 237
+    kristiansand_records: 34
+    habitat_signal: >-
+      Tight. Rich deciduous forest on calcareous ground, often beech, oak or
+      hazel in mossy hollows. Losmasse and AR50 should both bite if anything does.
+
+  - key: "leccinum_versipelle"
+    scientific_name: "Leccinum versipelle"
+    vernacular_no: "rødskrubb"
+    vernacular_en: "orange birch bolete"
+    artskart_taxon_id: 38817
+    agder_records: 175
+    kristiansand_records: 21
+    habitat_signal: >-
+      Obligately with birch. The single clearest tree-species association in
+      this set, which makes it a useful check on whether SR16 treslag carries
+      any weight at all.
+
+  - key: "suillus_luteus"
+    scientific_name: "Suillus luteus"
+    vernacular_no: "smørsopp"
+    vernacular_en: "slippery jack"
+    artskart_taxon_id: 38895
+    agder_records: 220
+    kristiansand_records: 37
+    habitat_signal: >-
+      With pine, typically young stands and plantations on poor sandy ground.
+      Stand age and treslag should both matter, in the opposite direction to
+      C. tubaeformis.
+
+  - key: "hydnum_repandum"
+    scientific_name: "Hydnum repandum"
+    vernacular_no: "blek piggsopp"
+    vernacular_en: "hedgehog mushroom"
+    artskart_taxon_id: 219592
+    agder_records: 121
+    kristiansand_records: 8
+    habitat_signal: >-
+      Mixed forest, mossy ground, often with the chanterelles. The thinnest
+      presence set here and the one whose Kristiansand figure rests on fewest
+      records - read its transfer AUC with that in mind.
+
+null_control:
+  key: "synthetic_null"
+  label: "SYNTHETIC - NOT REAL DATA"
+  description: >-
+    Fake presences drawn from the sampling-effort surface with no ecology at
+    all. Expected blocked-CV AUC ~= 0.5. If it scores meaningfully above that,
+    background sampling is broken and no other number in the run means anything.
+  predicted_auc: 0.5
+
+# Target-group background: background points are drawn from the distribution of
+# ALL fungal records in the region, not uniformly. Artskart TaxonGroup for fungi.
+target_group:
+  taxon_group: "Sopper"
+  taxon_group_id: 9
+
+  # Server-side filtered pull, verified 2026-09-09 to actually change
+  # TotalCount. Parameters are namespaced under `filter.` - bare names are
+  # silently ignored and look like they worked. See data/SOURCES.md.
+  query:
+    "filter.taxongroups": 9
+    "filter.countys": 42      # Agder, the training/cross-validated extent
+  raw_file: "data/raw/artskart/target_group_sopper_agder.jsonl"
+
+  # Counts on the access date. Norway 1,325,029; Agder 82,129;
+  # Kristiansand 11,668. A live database - expect small drift.
+  agder_records: 82129
+
+  # Background gets exactly the treatment the presences get: same extent, same
+  # precision filter, same thinning. Thinning matters more here - one heavily
+  # visited forest carries hundreds of records and would otherwise contribute
+  # hundreds of background points.
+  #
+  # The three focal species are deliberately NOT removed from the pool.
+  # Target-group background is the set of places the group was recorded;
+  # removing them would make background systematically less likely to sit
+  # where the species occurs, which is a bias in the opposite direction.

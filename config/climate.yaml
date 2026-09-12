@@ -1,0 +1,17 @@
+# The climate window, registered before any model was fitted.
+#
+# Derived from the observed phenology of the three species' own records,
+# not from field-guide months. Full derivation and the reasoning behind
+# each choice: data/processed/climate_window.md, and FINDINGS.md section 6.
+#
+# Do not edit these numbers by hand. scripts/derive_climate_window.py
+# recomputes them and fails if they have moved.
+autumn_rain:
+  doy_from: 221
+  doy_to: 293
+  year_from: 1991
+  year_to: 2020
+  variable: rr
+  source: MET seNorge_2018 via THREDDS/OPeNDAP
+  derived_by: scripts/derive_climate_window.py
+  derived_on: '2026-09-09'

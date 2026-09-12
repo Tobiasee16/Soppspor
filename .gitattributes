@@ -1,0 +1,29 @@
+# Line endings, stated rather than left to whatever each machine has configured.
+#
+# Git stores text as LF and checks it out per-platform, which is right for
+# almost everything here. The exception is shell scripts: a `.sh` checked out
+# with CRLF fails on Linux and macOS with "bad interpreter: No such file or
+# directory", which is a confusing error for a file that looks fine.
+* text=auto
+
+*.sh            text eol=lf
+*.py            text eol=lf
+*.js            text eol=lf
+*.sql           text eol=lf
+*.yml           text eol=lf
+*.json          text eol=lf
+*.md            text eol=lf
+*.html          text eol=lf
+*.webmanifest   text eol=lf
+_headers        text eol=lf
+_redirects      text eol=lf
+
+*.png    binary
+*.jpg    binary
+*.tif    binary
+*.gml    binary
+*.lock   -diff
+
+# FINDINGS.md is the project's running log and is append-mostly; a union merge
+# keeps both sides of a conflict rather than making somebody pick.
+FINDINGS.md  merge=union

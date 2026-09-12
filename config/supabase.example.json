@@ -1,0 +1,22 @@
+{
+  "_comment": [
+    "Copy this file to config/supabase.json and fill in the two values.",
+    "config/supabase.json is gitignored; this example is not.",
+    "",
+    "Where to find them: Supabase dashboard -> your project -> Project Settings",
+    "-> API (newer dashboards call it 'API Keys').",
+    "",
+    "  url  = 'Project URL', e.g. https://abcdefghijklm.supabase.co",
+    "  anon = the key labelled 'anon' and 'public' (newer dashboards call it",
+    "         'publishable'). This one is DESIGNED to ship inside client code;",
+    "         row-level security is what protects the data, not the key.",
+    "",
+    "NEVER put the 'service_role' key (newer dashboards: 'secret') here or",
+    "anywhere near the app. It bypasses row-level security entirely, so a copy",
+    "of it in the page would hand every user's private spots to every other",
+    "user. build_interface.py decodes the key and refuses to build if it sees",
+    "a service_role one, but do not rely on that - just never copy it."
+  ],
+  "url": "https://YOUR-PROJECT-REF.supabase.co",
+  "anon": "PASTE-THE-ANON-OR-PUBLISHABLE-KEY-HERE"
+}
