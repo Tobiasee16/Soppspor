@@ -20,6 +20,48 @@ prediction_extent:
   boundary_url: "https://ws.geonorge.no/kommuneinfo/v1/kommuner/4204/omrade?utkoordsys=25833"
   boundary_file: "data/interim/boundary_kristiansand_25833.geojson"
 
+# ---------------------------------------------------------------------------
+# National extents, added 2026-09-12 for the expansion
+# ---------------------------------------------------------------------------
+#
+# The two extents above are the Phase 0 design and must not be touched: every
+# published number, the registered ordering test and the shipped map all come
+# from Agder -> Kristiansand. These are a second, separate pair.
+#
+# The held-out region is Nordland, chosen and written into FINDINGS *before*
+# any national model exists. The point of holding out a northern county rather
+# than another southern one is that it tests the thing actually in doubt: a
+# model that transfers to Nordland has learned something about terrain, while a
+# model that only transfers to Vestfold has learned where Norwegians live.
+#
+# Power check, run before committing to it (FINDINGS section 16). Nordland
+# holds 690 thinned precision-filtered records across the eight species, and
+# six of the eight clear 30. Two do not, and one of those is not a sampling
+# problem: *Craterellus cornucopioides* has 7, because it is a southern
+# calcareous-deciduous species that barely reaches Nordland. Its absence there
+# is the ecology, not a gap in the data - which means no single held-out region
+# can test every species, and that limitation is stated rather than designed
+# around.
+national_training_extent:
+  name: "Norway, mainland, minus the held-out region"
+  kind: "fylker"
+  # All 15, unioned. Kartverket has no single national outline through the
+  # kommuneinfo API, and unioning the fylker gives the same thing with per-fylke
+  # geometry available for free.
+  boundary_dir: "data/interim/fylker"
+  exclude_code: "18"
+  # Union bbox measured from the fetched geometry: 1,221 x 1,537 km. That is
+  # within 1% of the independently hand-computed panning bounds in
+  # scripts/build_hosted.py, which is a useful cross-check on both.
+  bbox_25833: [-99551, 6426048, 1121941, 7962744]
+
+national_holdout_extent:
+  name: "Nordland fylke"
+  kind: "fylke"
+  code: "18"
+  boundary_url: "https://ws.geonorge.no/kommuneinfo/v1/fylker/18/omrade?utkoordsys=25833"
+  boundary_file: "data/interim/fylker/boundary_nordland_25833.geojson"
+
 # Spatial block cross-validation. Blocks must be large enough to break the
 # autocorrelation range of the occurrence data. CLAUDE.md mandates 5-10 km.
 spatial_cv:

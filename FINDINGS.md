@@ -2075,6 +2075,137 @@ Tagged runs now write only their archive. The baseline survived solely because
 committing generated reports rather than a plan.
 
 
+## 16. The national design, and the region it will be judged on - 2026-09-13
+
+Registered before any national model exists, before the national feature stack
+is built, and before the national background finished downloading. The point of
+writing it now is that a held-out region chosen after seeing the results is not
+a held-out region.
+
+Reproduce the counts with `scripts/check_holdout_power.py`.
+
+### 16a. The design
+
+Fit on fourteen fylker. Test on Nordland, which the model never sees.
+
+Nordland rather than a second southern county, because the two choices test
+different things. A model that transfers to Vestfold has demonstrated that
+Norwegians record mushrooms near where they live in both places. A model that
+transfers to Nordland has had to carry something about terrain across roughly
+ten degrees of latitude, a different growing season and a different forest.
+The second is the claim the app actually makes when it draws a zone outside
+Agder, so it is the one worth testing.
+
+The Phase 0 extents are untouched and stay untouched. Every published number,
+the registered ordering test and the shipped map all come from Agder ->
+Kristiansand. This is a second design running alongside, not a replacement, and
+`config/study_area.yaml` keeps the two pairs in separate keys for that reason.
+
+### 16b. Power, checked before committing
+
+Thinned to 1 km, coordinate precision 250 m or better, exactly as everywhere
+else in this project.
+
+| species | training (14 fylker) | Nordland | share in Nordland |
+|---|---|---|---|
+| *Craterellus tubaeformis* | 2,256 | 46 | 2.0% |
+| *Cantharellus cibarius* | 3,345 | 160 | 4.6% |
+| *Amanita muscaria* | 3,022 | 126 | 4.0% |
+| *Boletus edulis* | 2,383 | 115 | 4.6% |
+| *Craterellus cornucopioides* | 663 | **7** | **1.0%** |
+| *Leccinum versipelle* | 2,207 | 150 | 6.4% |
+| *Suillus luteus* | 1,670 | 57 | 3.3% |
+| *Hydnum repandum* | 640 | **29** | 4.3% |
+
+690 thinned records in the held-out region; six of eight clear 30. The floor is
+30 rather than the 50 `report_counts.py` uses, because that 50 is about whether
+a species can be *fitted*; this is a test set. At 30 the AUC standard error is
+around 0.09 - wide, but still able to separate 0.75 from 0.50.
+
+### 16c. The two shortfalls are not the same shortfall, and the share column is why
+
+A raw count cannot distinguish "nobody looked there" from "it does not grow
+there", and those mean opposite things: the first makes a low score an artefact
+of recording effort, the second makes a low score the correct answer. The share
+of each species' records that falls in Nordland separates them, because a
+species that is merely uncommon everywhere still has a *normal* share of its
+few records up there.
+
+- ***Hydnum repandum*, 29 records, share 4.3%.** That share is exactly the
+  median across the eight. Blek piggsopp is not absent from Nordland; it is
+  thin everywhere, with 669 precision-filtered thinned records nationally
+  against 2,000-3,500 for the common species. This is a **rarity** problem, and
+  one record short of the floor, which is itself an argument against treating
+  30 as a cliff edge.
+- ***Craterellus cornucopioides*, 7 records, share 1.0%.** A quarter of the
+  median, and the lowest of the eight. Svart trompetsopp is a southern species
+  of calcareous deciduous woodland and it barely reaches Nordland. Its near
+  absence there **is the ecology**.
+
+That second one has a consequence worth stating plainly rather than designing
+around: **no single held-out region can test every species.** A region far
+enough away to be a real test of transfer is, for a southern specialist, a
+region where the species does not live. Holding out a southern county instead
+would fix *cornucopioides* and destroy the test for everything else.
+
+So the national transfer will be reported for six species and *cornucopioides*
+will be reported as untestable at n=7, not quoted with a number that looks like
+a measurement. An AUC on seven points has a standard error near 0.19.
+
+### 16d. What the national test can and cannot resolve
+
+Section 9c could not resolve the registered ordering because the Kristiansand
+test held 45-53 presences per species and the confidence intervals overlapped
+almost completely. Nordland is better, but not uniformly, and the exception is
+the awkward one:
+
+| species | Kristiansand test | Nordland test | interval |
+|---|---|---|---|
+| *Cantharellus cibarius* | 45 | 160 | ~1.9x narrower |
+| *Amanita muscaria* | 47 | 126 | ~1.6x narrower |
+| *Craterellus tubaeformis* | 53 | 46 | slightly **wider** |
+
+*C. tubaeformis* is the species the whole three-species design hinges on, and
+it is the one species the national test resolves no better than the test that
+already failed to resolve it. Registered now so it cannot be presented later as
+though the national run settled a question it was never powered to settle.
+
+### 16e. Registered predictions for the national run
+
+1. **The null sits near 0.5** on national blocked CV and on the Nordland
+   transfer. This is a gate, not a prediction: if the null scores meaningfully
+   above 0.5 the national background sampling is broken and nothing else in the
+   run means anything. CLAUDE.md requires this and the national background is a
+   new artefact, so it gets checked fresh.
+2. **National blocked-CV AUC comes out HIGHER than the Agder figures** of
+   roughly 0.63-0.74, probably by 0.05-0.15. **This will not mean the model got
+   better.** AUC rises with the environmental range of the background, because
+   a wider extent hands the model easy discriminations it did not have to earn
+   - a national background contains high fjeld, tundra and outer coast where
+   none of these species occur at all. Registering it in advance so the rise
+   cannot be reported afterwards as an improvement.
+3. **The Nordland transfer comes out below the national blocked-CV figure** for
+   every species. If it does not - if transfer to unseen northern ground
+   matches or beats internal cross-validation - something is leaking and the
+   fold assignment is the first place to look.
+4. **The registered ordering fails again.** It failed on both models on
+   Agder -> Kristiansand (9c). Nothing in a national fit addresses the reason
+   it failed, so predicting a pass here would be hope rather than a hypothesis.
+5. **A falsification bound.** If any real species exceeds **0.85** on national
+   blocked CV, treat it as the extent effect in prediction 2 having swamped the
+   signal entirely - the model separating forest from mountain and sea rather
+   than good habitat from ordinary habitat - and check it against the null and
+   against a background restricted to forested ground before believing it.
+
+### 16f. What is still owed
+
+The share baseline in 16c is the median across these eight species, which is a
+stand-in. The honest baseline is the share of *all* fungal recording effort
+that falls in Nordland - which is exactly what the target-group background
+measures, and which is the file currently downloading. Recompute 16c against it
+once that exists, and correct this section if it moves the conclusion.
+
+
 ## Open questions
 
 - **Should the maps still be blurred at all?** `build_maps.py` applies a 500 m
