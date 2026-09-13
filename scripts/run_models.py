@@ -16,6 +16,7 @@ the output rather than left for a reader to notice.
     python scripts/run_models.py --tag terrain-only
     python scripts/run_models.py --no-vol-bounds
     python scripts/run_models.py --no-elevation
+    python scripts/run_models.py --no-twi
 """
 from __future__ import annotations
 
@@ -87,6 +88,7 @@ SR16_NUMERIC = {
 
 
 INCLUDE_ELEVATION = True
+INCLUDE_TWI = True
 
 
 def layers() -> list[RasterLayer]:
@@ -101,13 +103,30 @@ def layers() -> list[RasterLayer]:
     # place is to reach. The prediction is registered in FINDINGS section 15,
     # written before the first run of it. Bands are 1-indexed and elevation is
     # band 1; the other five terrain derivatives stay.
-    if INCLUDE_ELEVATION:
+    #
+    # `--no-twi` asks a different question, and a practical one. TWI is the only
+    # terrain derivative that is not a local window operation: it needs flow
+    # accumulation over a whole connected surface, which is why the Agder raster
+    # had to be built in one piece. Nationally that surface is 1.83 billion cells
+    # at 32 m, and a priority-flood over it will not run in 15.7 GB of RAM at any
+    # speed. So before choosing a way around that, measure what TWI is worth.
+    # Permutation importance says essentially nothing (+0.005 +/- 0.008 at best,
+    # negative on four of eight species) - but permutation importance understates
+    # every member of a correlated group, and TWI correlates with slope and
+    # curvature. An ablation does not have that problem.
+    TERRAIN_BANDS = [(1, "elevation", INCLUDE_ELEVATION),
+                     (2, "slope_deg", True),
+                     (3, "northness", True),
+                     (4, "eastness", True),
+                     (5, "curvature", True),
+                     (6, "twi", INCLUDE_TWI)]
+    keep = [(b, n) for b, n, on in TERRAIN_BANDS if on]
+    if len(keep) == len(TERRAIN_BANDS):
         out = [RasterLayer(str(INTERIM / "terrain_agder_32m.tif"), method="nearest")]
     else:
         out = [RasterLayer(str(INTERIM / "terrain_agder_32m.tif"), method="nearest",
-                           bands=[2, 3, 4, 5, 6],
-                           names=["slope_deg", "northness", "eastness",
-                                  "curvature", "twi"])]
+                           bands=[b for b, _ in keep],
+                           names=[n for _, n in keep])]
 
     climate = INTERIM / "autumn_rain_agder_1km.tif"
     if climate.exists():
@@ -182,11 +201,14 @@ def presences(sp: dict, boundary: Boundary, max_prec: float, thin_m: float):
 
 
 def main() -> int:
-    global INCLUDE_VOL_BOUNDS, INCLUDE_ELEVATION
+    global INCLUDE_VOL_BOUNDS, INCLUDE_ELEVATION, INCLUDE_TWI
     tag = None
     if "--no-elevation" in sys.argv:
         INCLUDE_ELEVATION = False
         tag = "no-elevation"
+    if "--no-twi" in sys.argv:
+        INCLUDE_TWI = False
+        tag = "no-twi"
     if "--tag" in sys.argv:
         tag = sys.argv[sys.argv.index("--tag") + 1]
     if "--no-vol-bounds" in sys.argv:

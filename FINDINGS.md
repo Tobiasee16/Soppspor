@@ -2351,6 +2351,96 @@ is comparing two different samplings of the same forest, and a difference of
 the size in the table above means nothing on its own.
 
 
+## 18. TWI, tested because Norway will not fit in memory - registered before the run
+
+Registered 2026-09-13, before `--no-twi` has been run once.
+
+### 18a. Why this is being asked now
+
+TWI is the only terrain derivative in the stack that is not a local window
+operation. Slope, aspect and curvature come from a 3x3 neighbourhood and tile
+trivially at any size. TWI needs **flow accumulation over a whole connected
+surface**, which is exactly why `build_terrain.py` builds Agder in one piece
+and argues against cutting at an administrative line: a TWI computed on a tile
+invents a watershed divide along the tile edge.
+
+Nationally that surface is **1.83 billion cells at 32 m**, against Agder's 44.5
+million. The machine has **15.7 GB of RAM**. One float32 band of national
+terrain is 7.3 GB and the six-band stack is 44 GB, and the priority-flood in
+`src/features/terrain.py` holds a Python heap that is already the binding
+constraint at 178 million cells. There is no patience-based route to national
+TWI at 32 m; it is a hard stop rather than a slow job.
+
+So the question is not "how do we compute it" but "is it worth computing".
+
+### 18b. What the existing evidence says, and why it is not enough
+
+Permutation importance for TWI across all eight species, maxent, from
+`model_results.md`:
+
+| species | TWI importance |
+|---|---|
+| *C. tubaeformis* | +0.005 ±0.008 |
+| *C. cibarius* | -0.001 ±0.004 |
+| *A. muscaria* | +0.000 ±0.002 |
+| *B. edulis* | -0.001 ±0.004 |
+| *C. cornucopioides* | +0.003 ±0.005 |
+| *L. versipelle* | +0.005 ±0.008 |
+| *S. luteus* | -0.004 ±0.006 |
+| *H. repandum* | -0.004 ±0.005 |
+
+Nothing there is distinguishable from zero, and four of eight are negative.
+That looks decisive and it is not, for the reason already learned the hard way
+in section 15: **permutation importance understates every member of a
+correlated group**, and TWI is built from slope and upslope area, so it
+correlates with slope and curvature which are in the same stack. A feature can
+read as worthless on permutation and still carry the model.
+
+An ablation does not have that problem. Refit everything without TWI and
+compare blocked CV against the committed baseline, exactly as section 15 did
+for elevation.
+
+### 18c. Registered prediction
+
+CLAUDE.md's species table says of *C. tubaeformis*: "Tight: moist mossy spruce
+forest, damp hollows, often near decaying wood. **TWI and SR16 tree species
+should both bite hard**." That is the claim under test.
+
+**Prediction: removing TWI moves blocked-CV AUC by less than 0.01 for every
+species on both models, and the null stays near 0.5.** If that holds, the
+ecological reasoning behind putting TWI in the stack was wrong - or 32 m TWI
+does not resolve "damp hollows", which at 32 m is a plausible failure and
+amounts to the same thing for this project.
+
+### 18d. Decision thresholds, fixed in advance
+
+Written down now so the national terrain decision cannot be reverse-engineered
+from whichever answer is convenient.
+
+| worst |delta AUC| across species | reading | what follows nationally |
+|---|---|---|
+| **< 0.01** | TWI carries nothing | Drop it nationally. National terrain becomes slope, aspect, curvature and elevation - all local, all tileable, no memory ceiling. Say plainly in the writeup that the national stack has one fewer feature than the Agder stack and why. |
+| **0.01 to 0.03** | marginal | A judgement call, and one for the team rather than for me. The options in 18e are the menu. |
+| **> 0.03** | TWI matters | It has to be computed nationally, and the only correct route is per-catchment (18e option 3). The cheap options are then off the table. |
+
+### 18e. The options, if TWI turns out to matter
+
+1. **Coarser national terrain**, 100 m or more. Norway's bbox at 100 m is 188
+   million cells - still four times Agder's and still probably too big for this
+   heap, and it changes what TWI measures rather than just where.
+2. **Tiles with buffers.** Cheap and wrong in a way that is hard to bound: a
+   buffer cannot guarantee correctness when a catchment is larger than the
+   buffer, and Norway has rivers whose catchments run for hundreds of km.
+3. **Per-catchment processing** using NVE's vassdragsomrade boundaries. Correct
+   by construction, because flow does not cross a watershed divide - this is
+   the same argument `build_terrain.py` already makes about not cutting at the
+   kommune boundary, applied properly. Costs a new data source and a rewrite of
+   the terrain build.
+4. **Drop TWI nationally and keep it for Agder.** Rejected on sight: the
+   national model and the Agder model would then have different feature stacks,
+   and nothing they produced could be compared.
+
+
 ## Open questions
 
 - **Should the maps still be blurred at all?** `build_maps.py` applies a 500 m
