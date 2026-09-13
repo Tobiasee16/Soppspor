@@ -2585,6 +2585,37 @@ the window does not need to move with latitude. The feature's weakness is
 elsewhere and already recorded: permutation importance for `autumn_rain_mm` is
 +0.002 to +0.020 across the eight species, small but consistently positive.
 
+### 19a. The national build corroborates it from a second direction
+
+`build_climate.py` accumulates the registered window and the same window
+shifted 14 days earlier and later, then correlates the three. Run over the whole
+country rather than over Agder:
+
+| window | days | national median | correlation with registered |
+|---|---|---|---|
+| registered | 221-293 | 207 mm | 1.0000 |
+| earlier | 207-279 | 209 mm | 0.9905 |
+| later | 235-307 | 210 mm | 0.9969 |
+
+A fortnight either way changes the *spatial pattern* of autumn rainfall across
+Norway by almost nothing. That is a second, independent reason not to re-derive
+the window per region: even granting that the northern season really is 19 days
+earlier, moving the window that far barely changes what the model reads. The
+totals shift; the pattern does not, and a model reads the pattern.
+
+The national grid is 1,195 x 1,515 at 1 km, with 606,579 cells carrying data -
+33.5% of the rectangle, the rest being sea and territory outside Norway. Median
+autumn total is **207 mm against Agder's 342 mm**, and the national maximum is
+**1,238 mm against Agder's 783 mm**. Agder is wetter than the country as a whole
+and much drier than its wettest part, which is what the west coast should do to
+both ends of that range.
+
+One reporting limitation, stated rather than left to be discovered: the
+sensitivity table above is only produced on a run that actually downloads. A
+rerun against the cached raster writes a shorter report, because the shifted
+windows are not re-accumulated. The numbers here come from the download run of
+2026-09-13.
+
 
 ## 20. A second losmasser file that Agder never had - 2026-09-13
 

@@ -61,7 +61,13 @@ INTERIM = ROOT / "data" / "interim"
 OUT_PATHS = {False: INTERIM / "autumn_rain_agder_1km.tif",
              True: INTERIM / "autumn_rain_norge_1km.tif"}
 OUT_PATH = OUT_PATHS[False]      # rebound in main() when --national is given
-REPORT = ROOT / "data" / "processed" / "climate_raster.md"
+# One report per extent. The national run overwrote the Agder one the first
+# time it was run, which is the same failure that hit model_results.md when
+# tagged model runs shared a filename: a generated report silently replaced by
+# a different run of a different thing, still looking authoritative.
+REPORTS = {False: ROOT / "data" / "processed" / "climate_raster.md",
+           True: ROOT / "data" / "processed" / "climate_raster_norge.md"}
+REPORT = REPORTS[False]      # rebound in main() when --national is given
 
 # Two weeks either side. Wide enough that a real sensitivity would show, narrow
 # enough to stay inside a plausible reading of "the fruiting season".
@@ -69,9 +75,10 @@ SHIFT_DAYS = 14
 
 
 def main() -> int:
-    global OUT_PATH
+    global OUT_PATH, REPORT
     national = "--national" in sys.argv
     OUT_PATH = OUT_PATHS[national]
+    REPORT = REPORTS[national]
     reg = yaml.safe_load((ROOT / "config" / "climate.yaml").read_text(encoding="utf-8"))
     ar = reg["autumn_rain"]
     lo, hi = int(ar["doy_from"]), int(ar["doy_to"])
