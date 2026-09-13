@@ -2507,6 +2507,40 @@ By the thresholds registered in 18d, 0.012 falls in the **0.01 to 0.03 band,
 which was reserved for the team's decision rather than mine.**
 
 
+### 18g. Decision - TWI is dropped from the national stack
+
+Put to the team on 2026-09-13 with the four options in 18e, the measured worst
+case of 0.012, and the note that every delta sits inside a quarter of one fold
+standard deviation. **Decision: drop TWI nationally.**
+
+So the national feature stack is elevation, slope, northness, eastness and
+curvature - all 3x3 window operations, all tileable, no memory ceiling - plus
+climate, SR16, losmasser and AR50 unchanged.
+
+Two consequences, both deliberate:
+
+**The no-TWI Agder run is the comparator for the national run**, not the
+headline Phase 0 baseline. That costs nothing, because the ablation already
+produced it, and it means Agder and Norway are compared on the same feature
+stack instead of on stacks differing by one column. Any national number quoted
+against Agder must be quoted against
+`data/processed/runs/model_results_no-twi.md`, and it is a mistake to compare it
+to `model_results.md`.
+
+**Phase 0's published numbers are untouched.** Sections 7 to 15 keep TWI and
+keep their figures. The option of restating them on the no-TWI run was
+considered and declined: it would rewrite published results for a difference
+that is inside noise, which is a worse trade than carrying one stated
+difference between the two designs.
+
+The rejected option worth recording is the per-species one. *L. versipelle* is
+the only species where both models move past 0.01 in the same direction, and it
+is a birch associate, so keeping TWI for that species alone was tempting. It
+was declined because a per-species feature stack means the species are no
+longer compared on equal footing - which is the one thing the three-species
+design exists to do.
+
+
 ## 19. Does an Agder fruiting window survive being used in Finnmark? - 2026-09-13
 
 A concern raised and then tested, rather than carried as an unexamined risk.
@@ -2611,6 +2645,24 @@ The national substrate layer reads **both** files. Any future NGU download must
 be checked for additional `LosmasseFlate_*` layers rather than assumed to carry
 one, because the extraction date in the filename is the only signal that a
 second one exists.
+
+
+### 20a. Decision - the Agder gap is recorded, not rerun
+
+Put to the team on 2026-09-13. **Decision: keep Phase 0's numbers as published
+and carry the gap here.**
+
+The reasoning it rests on is a measurement rather than an assumption. Section 9a
+found losmasser moves every species by less than 0.02 and that every one of the
+eleven substrate columns has a permutation importance at or below +0.012 -
+indistinguishable from zero on both models. 2.42% more of a layer that does
+nothing cannot move a published number.
+
+If that ever stops being true - if a future run finds substrate carrying real
+weight - this gap becomes a reason to rebuild the Agder layer from both files
+and refit. Recorded so that the condition is explicit rather than remembered.
+
+The national layer is unaffected: it reads both files from the start.
 
 
 ## Open questions
