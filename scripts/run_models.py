@@ -496,7 +496,12 @@ def main() -> int:
     thin_m = area["reporting_thinning_m"]
     cv = area["spatial_cv"]
     block_m, n_folds, buffer_m = cv["block_size_m"], cv["n_folds"], cv["buffer_m"]
-    print(f"extent: {ext.label}  ->  data/processed/{ext.report}", flush=True)
+    # Name the file this run will ACTUALLY write. A tagged run goes to runs/,
+    # and announcing the canonical path would tell a reader the opposite of
+    # what the overwrite guard is there to guarantee.
+    stem = pathlib.Path(ext.report).stem
+    dest = f"data/processed/runs/{stem}_{tag}.md" if tag else f"data/processed/{ext.report}"
+    print(f"extent: {ext.label}  ->  {dest}", flush=True)
     boundary = cv_boundary(area)
 
     stack = layers()

@@ -97,7 +97,10 @@ def main() -> int:
     buffer_m = area["spatial_cv"]["buffer_m"]
 
     ext = rm.extent()
-    print(f"extent: {ext.label}  ->  data/processed/{ext.transfer_report}", flush=True)
+    stem = pathlib.Path(ext.transfer_report).stem
+    dest = (f"data/processed/runs/{stem}_{tag}.md" if tag
+            else f"data/processed/{ext.transfer_report}")
+    print(f"extent: {ext.label}  ->  {dest}", flush=True)
     train_cfg = area[ext.cv_extent or area["spatial_cv"]["cv_extent"]]
     pred_cfg = area[ext.holdout]
     training, prediction = rm.transfer_regions(area)
