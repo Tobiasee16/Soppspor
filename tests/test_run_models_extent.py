@@ -122,6 +122,31 @@ class TestAgderStackIsUnchanged:
         assert got.count("sr16_42_SRRVOLMB.tif") == 1   # the estimate survives
         assert not [l for l in rm.layers() if l.names == ["vol_lower", "vol_upper"]]
 
+    def test_no_climate_drops_only_the_climate_layer(self, fake_interim, monkeypatch):
+        # The registered ablation on FINDINGS section 6's accessibility worry.
+        # It has to remove the rainfall layer and nothing else, or the result
+        # cannot be attributed to rainfall.
+        fake_interim(AGDER_FILES)
+        before = names_of(rm.layers())
+        monkeypatch.setattr(rm, "INCLUDE_CLIMATE", False)
+        after = names_of(rm.layers())
+        assert [n for n in before if n != "autumn_rain_agder_1km.tif"] == after
+
+    def test_no_climate_nationally_drops_the_national_climate_layer(
+            self, fake_interim, monkeypatch):
+        fake_interim(NORGE_FILES)
+        monkeypatch.setattr(rm, "EXTENT", rm.NORGE.key)
+        monkeypatch.setattr(rm, "INCLUDE_TWI", False)
+        monkeypatch.setattr(rm, "INCLUDE_CLIMATE", False)
+        got = names_of(rm.layers())
+        assert "autumn_rain_norge_1km.tif" not in got
+        assert "terrain_norge_32m.tif" in got
+
+    def test_climate_is_on_by_default(self, fake_interim):
+        fake_interim(AGDER_FILES)
+        assert rm.INCLUDE_CLIMATE is True
+        assert "autumn_rain_agder_1km.tif" in names_of(rm.layers())
+
     def test_missing_rasters_are_dropped_not_faked(self, fake_interim):
         fake_interim(["terrain_agder_32m.tif"])
         assert names_of(rm.layers()) == ["terrain_agder_32m.tif"]
@@ -381,8 +406,17 @@ class TestFlagHandling:
         monkeypatch.setattr(rm, "INCLUDE_TWI", True)
         monkeypatch.setattr(rm, "INCLUDE_ELEVATION", True)
         monkeypatch.setattr(rm, "INCLUDE_VOL_BOUNDS", True)
+        monkeypatch.setattr(rm, "INCLUDE_CLIMATE", True)
         monkeypatch.setattr(sys, "argv", ["run_models.py", *args])
         return rm.main()
+
+    def test_no_climate_sets_the_flag_and_tags_the_run(self, monkeypatch):
+        monkeypatch.setattr(rm, "cv_boundary",
+                            lambda area: (_ for _ in ()).throw(SystemExit("stop")))
+        with pytest.raises(SystemExit, match="stop"):
+            self.run_argv(monkeypatch, "--national", "--no-climate")
+        assert rm.INCLUDE_CLIMATE is False
+        assert rm.EXTENT == rm.NORGE.key
 
     def test_no_twi_with_national_is_refused(self, monkeypatch):
         # Silently accepting it would tag a run "no-twi" that never had TWI,

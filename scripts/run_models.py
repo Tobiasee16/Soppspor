@@ -17,6 +17,7 @@ the output rather than left for a reader to notice.
     python scripts/run_models.py --tag terrain-only
     python scripts/run_models.py --no-vol-bounds
     python scripts/run_models.py --no-elevation
+    python scripts/run_models.py --no-climate
     python scripts/run_models.py --no-twi
 
 Two extents, and they never share a file. The default is Agder, which is what
@@ -190,6 +191,28 @@ SR16_NUMERIC = {
 INCLUDE_ELEVATION = True
 INCLUDE_TWI = True
 
+# Set by --no-climate. FINDINGS section 6 registered, before the feature was
+# ever fitted, that autumn rainfall follows the same coast-inland and orographic
+# gradient as the population, so a model leaning on it may be reading
+# accessibility rather than ecology - the exact failure the target-group
+# background exists to prevent. On Agder that worry was closed as "largely
+# moot": importance ran between -0.007 and +0.039 across every species, both
+# models, every run.
+#
+# The national run breaks that. Autumn rainfall is *C. tubaeformis*'s single
+# most important feature at +0.069, and across the eight species the gain in
+# rainfall importance predicts the gain in AUC at Spearman +0.826 while the
+# gain in elevation importance predicts nothing (+0.024). The feature that
+# explains the national result is the feature the project already flagged.
+#
+# So the question is reopened and this is how it gets answered: refit the whole
+# national stack without the climate layer and see what survives. The null
+# control cannot settle it - null presences and background are drawn from the
+# same pool, so they are environmentally identical and no feature can separate
+# them - and permutation importance cannot either, because it says a feature is
+# used, not what it is a proxy for. Only deleting it can.
+INCLUDE_CLIMATE = True
+
 
 def layers() -> list[RasterLayer]:
     """The feature stack, in the order it will be reported.
@@ -230,7 +253,7 @@ def layers() -> list[RasterLayer]:
                            names=[n for _, n in keep])]
 
     climate = INTERIM / ext.climate
-    if climate.exists():
+    if climate.exists() and INCLUDE_CLIMATE:
         # Bilinear: sampled nearest, a 1 km field gives neighbouring points a
         # few hundred metres apart identical values for no physical reason.
         out.append(RasterLayer(str(climate), bands=[1], names=["autumn_rain_mm"],
@@ -439,7 +462,8 @@ def target_group_pool(role: str = "training") -> list[dict]:
 
 
 def main() -> int:
-    global INCLUDE_VOL_BOUNDS, INCLUDE_ELEVATION, INCLUDE_TWI, EXTENT
+    global INCLUDE_VOL_BOUNDS, INCLUDE_ELEVATION, INCLUDE_TWI, INCLUDE_CLIMATE
+    global EXTENT
     tag = None
     if "--national" in sys.argv:
         EXTENT = NORGE.key
@@ -449,6 +473,9 @@ def main() -> int:
     if "--no-elevation" in sys.argv:
         INCLUDE_ELEVATION = False
         tag = "no-elevation"
+    if "--no-climate" in sys.argv:
+        INCLUDE_CLIMATE = False
+        tag = "no-climate"
     if "--no-twi" in sys.argv:
         if EXTENT == NORGE.key:
             raise SystemExit("--no-twi is meaningless with --national: the "
