@@ -2131,16 +2131,45 @@ of each species' records that falls in Nordland separates them, because a
 species that is merely uncommon everywhere still has a *normal* share of its
 few records up there.
 
-- ***Hydnum repandum*, 29 records, share 4.3%.** That share is exactly the
-  median across the eight. Blek piggsopp is not absent from Nordland; it is
-  thin everywhere, with 669 precision-filtered thinned records nationally
-  against 2,000-3,500 for the common species. This is a **rarity** problem, and
-  one record short of the floor, which is itself an argument against treating
-  30 as a cliff edge.
-- ***Craterellus cornucopioides*, 7 records, share 1.0%.** A quarter of the
-  median, and the lowest of the eight. Svart trompetsopp is a southern species
+**"Normal" is now measured rather than assumed.** Nordland holds **4.29%** of
+all Norwegian fungal recording effort - 55,385 of 1,290,016 target-group
+records placed in a fylke (`scripts/effort_by_fylke.py`). That is the right
+baseline because the target-group background *is* recording effort; it is the
+same reasoning that makes it the bias correction in the model. The stand-in
+used when this section was first written, the median across our own eight
+species, came out at 4.3% - so the conclusions below are unchanged, but they
+now rest on something that is not circular.
+
+- ***Hydnum repandum*, 29 records, share 4.3% = 1.01x effort.** As close to the
+  baseline as this measurement can resolve. Blek piggsopp is not absent from
+  Nordland; it is thin everywhere, with 669 precision-filtered thinned records
+  nationally against 2,000-3,500 for the common species. This is a **rarity**
+  problem, and one record short of the floor, which is itself an argument
+  against treating 30 as a cliff edge.
+- ***Craterellus cornucopioides*, 7 records, share 1.0% = 0.24x effort.** The
+  lowest of the eight by a wide margin. Svart trompetsopp is a southern species
   of calcareous deciduous woodland and it barely reaches Nordland. Its near
   absence there **is the ecology**.
+
+Against the measured baseline the whole set separates, and it separates the way
+ecology would predict rather than the way effort would:
+
+| species | share in Nordland | vs effort |
+|---|---|---|
+| *Craterellus cornucopioides* | 1.0% | **0.24x** |
+| *Craterellus tubaeformis* | 2.0% | 0.47x |
+| *Suillus luteus* | 3.3% | 0.77x |
+| *Amanita muscaria* | 4.0% | 0.93x |
+| *Hydnum repandum* | 4.3% | 1.01x |
+| *Cantharellus cibarius* | 4.6% | 1.06x |
+| *Boletus edulis* | 4.6% | 1.07x |
+| *Leccinum versipelle* | 6.4% | **1.48x** |
+
+*L. versipelle* is the only one clearly over-represented in the north, which is
+what a birch associate should look like where birch dominates the forest. The
+two chanterelles sit at the other end. None of this is a model result - it is
+the occurrence data describing itself - but it is a useful check that the
+background behaves like recording effort and not like something else.
 
 That second one has a consequence worth stating plainly rather than designing
 around: **no single held-out region can test every species.** A region far
@@ -2197,13 +2226,31 @@ though the national run settled a question it was never powered to settle.
    than good habitat from ordinary habitat - and check it against the null and
    against a background restricted to forested ground before believing it.
 
-### 16f. What is still owed
+### 16f. The owed baseline, now measured - and it did not move the conclusion
 
-The share baseline in 16c is the median across these eight species, which is a
-stand-in. The honest baseline is the share of *all* fungal recording effort
-that falls in Nordland - which is exactly what the target-group background
-measures, and which is the file currently downloading. Recompute 16c against it
-once that exists, and correct this section if it moves the conclusion.
+This section previously recorded a debt: 16c's baseline was the median across
+our own eight species, which is circular, and the real baseline had to come
+from the target-group background that was still downloading.
+
+It is downloaded, and **the conclusion is unchanged**. Nordland holds 4.29% of
+national fungal recording effort against the 4.3% stand-in. *H. repandum* sits
+at 1.01x that and is a rarity problem; *C. cornucopioides* sits at 0.24x and is
+a range limit. 16c now quotes the measured figure.
+
+One thing it added rather than confirmed: ***C. tubaeformis* is at 0.47x
+effort** in Nordland - under-represented for reasons that look like ecology
+rather than looking. That compounds the power problem already registered in
+16d, where it gets 46 held-out presences against the Kristiansand test's 53.
+The species the three-species design hinges on is being asked to prove itself
+in a region where it is both scarcer than effort predicts and no better
+represented than in the test that already failed to resolve it. Registered now,
+so a weak *tubaeformis* result on the national transfer is read as the
+predictable consequence of the test set rather than as news about the model.
+
+The national background also cross-checks clean against Phase 0: clipped to
+Agder it holds **82,158** records where the independently ordered Agder-only
+download held **82,129**, a difference of 0.035% on a database documented to
+drift day to day.
 
 
 ## 17. The national feature stack, and a 9 m offset that had to be explained - 2026-09-13

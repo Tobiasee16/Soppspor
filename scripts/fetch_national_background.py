@@ -69,16 +69,25 @@ def main() -> int:
               f"eta {eta/60:.0f} min", flush=True)
 
     got = artskart.download_filtered(FILTERS, DEST, progress=progress)
-    META.write_text(json.dumps({
+
+    # MERGE rather than rebuild. download_filtered writes its own sidecar at
+    # this exact path, and an earlier version of this block hand-picked a few
+    # keys out of it - which silently dropped `empty_pages_skipped`, the record
+    # of which pages the endpoint refused to serve. The download reported the
+    # skip on stderr and then threw away the only durable trace of it.
+    #
+    # Anything download_filtered learns belongs in the file it learned it about,
+    # so take its whole dict and add to it.
+    meta = dict(got)
+    meta.update({
         "source": artskart.BASE,
-        "filters": FILTERS,
-        "total_count_reported": got.get("total_count_reported", expected),
+        "filters": {k: str(v) for k, v in FILTERS.items()},
         "records": got.get("records_downloaded"),
-        "network_retries": got.get("network_retries", 0),
         "complete": True,
         "bytes": DEST.stat().st_size,
         "seconds": round(time.time() - t0),
-    }, indent=1), encoding="utf-8")
+    })
+    META.write_text(json.dumps(meta, indent=1), encoding="utf-8")
     print(f"\ndone: {DEST.stat().st_size/1e9:.2f} GB in "
           f"{(time.time()-t0)/60:.0f} min", flush=True)
     return 0

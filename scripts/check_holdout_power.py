@@ -39,12 +39,15 @@ for _s in (sys.stdout, sys.stderr):
 
 import yaml
 
+NL_OUT = chr(10)
+
 from src import species as species_cfg
 from src.features.thin import thin
 from src.geometry import Boundary
 from src.ingest import artskart
 
 RAW = ROOT / "data" / "raw" / "artskart"
+EFFORT = ROOT / "data" / "processed" / "effort_by_fylke.json"
 
 # The floor below which a held-out score is not worth quoting. Lower than the
 # 50 that report_counts.py uses to judge whether a species can be *fitted* at
@@ -124,22 +127,37 @@ def main() -> int:
     short = [r for r in rows if not r[4]]
     shares = sorted(r[5] for r in rows)
     median = shares[len(shares) // 2]
+
+    # The honest baseline is the share of ALL fungal recording effort falling
+    # in the held-out region, which is exactly what the target-group background
+    # measures. The median across our own eight species is only a fallback, and
+    # it is circular: it assumes these species are collectively typical of
+    # fungal recording, which is the thing being tested.
+    baseline, source = median, "median across these eight species (CIRCULAR)"
+    if EFFORT.exists():
+        eff = json.loads(EFFORT.read_text(encoding="utf-8"))
+        key = hold_cfg["name"].split()[0].lower()
+        if key in eff["share"]:
+            baseline = eff["share"][key]
+            source = (f"{eff['assigned_to_a_fylke']:,} target-group records "
+                      f"(scripts/effort_by_fylke.py)")
     print(f"\n{sum(r[3] for r in rows):,} thinned records in the held-out region, "
           f"{len(rows) - len(short)}/{len(rows)} species at or above {MIN_HOLDOUT}.")
-    print(f"median share of records falling in the held-out region: {100*median:.1f}%")
+    print(f"median share across these eight species: {100*median:.1f}%")
+    print(f"RECORDING-EFFORT BASELINE: {100*baseline:.2f}%  - {source}")
     if short:
         print("\nBelow the floor. The share column is the evidence for which kind of")
         print("short it is - a normal share means the species is thin everywhere, a low")
         print("one means it is thinning out toward the north:")
         for name, common, _, n, _, sh in short:
             kind = ("uncommon everywhere, not specifically absent here"
-                    if sh >= 0.75 * median else
+                    if sh >= 0.75 * baseline else
                     "under-represented here even for its own rarity")
-            print(f"  {name} ({common}): {n} at {100*sh:.1f}% - {kind}")
-    print("\nNOTE: the honest baseline for `share` is not the median across these")
-    print("eight species, it is the share of ALL fungal recording effort falling in")
-    print("the held-out region - which is exactly what the target-group background")
-    print("measures. Recompute against it once that download exists.")
+            print(f"  {name} ({common}): {n} at {100*sh:.1f}% "
+                  f"({sh/baseline:.2f}x effort) - {kind}")
+    print(NL_OUT + "share against recording effort, all eight:")
+    for name, common, _, n, ok, sh in sorted(rows, key=lambda r: r[5]):
+        print(f"  {name:34s}{100*sh:6.1f}%  {sh/baseline:5.2f}x effort")
     return 0
 
 
