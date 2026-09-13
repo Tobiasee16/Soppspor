@@ -118,6 +118,76 @@ def curvature(dem: np.ndarray, cell_m: float) -> np.ndarray:
     return out
 
 
+def derivatives_windowed(src, dst_path, cell_m: float, block: int = 2048,
+                         progress=None) -> dict:
+    """Write elevation, slope, northness, eastness and curvature, in windows.
+
+    Agder fits in memory. Norway at 32 m is 1.83 billion cells and one float32
+    band of it is 7.3 GB, so the national build cannot hold the array, never
+    mind six of them.
+
+    Every derivative here is a 3x3 operation, so a window can be computed
+    independently PROVIDED it is read with a one-cell halo of real neighbouring
+    data. Without the halo each block boundary is computed as though the
+    terrain stopped there, and the output grows a lattice of false ridges at
+    exactly the block spacing - which looks like terrain, not like a bug.
+
+    At the true edge of the raster there is no real data to read, and the halo
+    falls back to edge replication, which is what `_neighbours` does for the
+    whole array anyway. So the windowed result equals the unwindowed one
+    everywhere, which is what `tests/test_terrain_windowed.py` asserts.
+
+    TWI is deliberately absent. It is not a local operation - it needs flow
+    accumulation over a whole connected surface - and it cannot be recovered by
+    any amount of haloing. See FINDINGS section 18.
+    """
+    import rasterio
+
+    names = ["elevation", "slope_deg", "northness", "eastness", "curvature"]
+    profile = src.profile.copy()
+    profile.update(count=len(names), dtype="float32", nodata=np.nan,
+                   compress="deflate", predictor=2, tiled=True,
+                   blockxsize=256, blockysize=256)
+    profile.pop("photometric", None)
+
+    H, W = src.height, src.width
+    nblocks = ((H + block - 1) // block) * ((W + block - 1) // block)
+    done = 0
+    with rasterio.open(dst_path, "w", **profile) as out:
+        for row0 in range(0, H, block):
+            for col0 in range(0, W, block):
+                h = min(block, H - row0)
+                w = min(block, W - col0)
+
+                # Halo of one cell, clipped to the raster. `pad` records how
+                # many rows/cols of real data were actually available on each
+                # side, so the interior can be cut back out precisely.
+                r0 = max(row0 - 1, 0)
+                c0 = max(col0 - 1, 0)
+                r1 = min(row0 + h + 1, H)
+                c1 = min(col0 + w + 1, W)
+                tile = src.read(1, window=rasterio.windows.Window(
+                    c0, r0, c1 - c0, r1 - r0)).astype("float64")
+
+                slope, aspect = slope_aspect(tile, cell_m)
+                vals = [tile, slope, northness(aspect, slope),
+                        eastness(aspect, slope), curvature(tile, cell_m)]
+
+                top, left = row0 - r0, col0 - c0
+                sl = (slice(top, top + h), slice(left, left + w))
+                win = rasterio.windows.Window(col0, row0, w, h)
+                for i, v in enumerate(vals, start=1):
+                    out.write(v[sl].astype("float32"), i, window=win)
+
+                done += 1
+                if progress:
+                    progress(done, nblocks)
+        for i, name in enumerate(names, start=1):
+            out.set_band_description(i, name)
+    return {"path": str(dst_path), "bands": names, "blocks": nblocks,
+            "width": W, "height": H}
+
+
 def fill_depressions(dem: np.ndarray, epsilon: float = 1e-3) -> np.ndarray:
     """Depression filling by priority-flood (Barnes, Lehman & Mulla 2014).
 
