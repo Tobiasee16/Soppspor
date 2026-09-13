@@ -22,8 +22,17 @@ Two extra things come out of the same download:
   daily data and correlated against the registered one. The extra cost is the
   wider span, not a second download.
 
-    python scripts/build_climate.py            # skips work already done
+    python scripts/build_climate.py            # Agder; skips work already done
     python scripts/build_climate.py --refresh  # re-downloads
+    python scripts/build_climate.py --national # all of Norway, about 14 min
+
+The window registered in config/climate.yaml is used unchanged nationally. It
+was derived from the phenology of the three species' own records in Agder, and
+re-deriving it per region would make the climate feature mean something
+different in each place - which is the opposite of what a transferability test
+needs. Whether an Agder-derived fruiting window is right for Finnmark is a real
+question, and it is one for the writeup rather than something to paper over by
+quietly fitting a second window.
 """
 from __future__ import annotations
 
@@ -49,7 +58,9 @@ from src.ingest import senorge
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 INTERIM = ROOT / "data" / "interim"
-OUT_PATH = INTERIM / "autumn_rain_agder_1km.tif"
+OUT_PATHS = {False: INTERIM / "autumn_rain_agder_1km.tif",
+             True: INTERIM / "autumn_rain_norge_1km.tif"}
+OUT_PATH = OUT_PATHS[False]      # rebound in main() when --national is given
 REPORT = ROOT / "data" / "processed" / "climate_raster.md"
 
 # Two weeks either side. Wide enough that a real sensitivity would show, narrow
@@ -58,21 +69,33 @@ SHIFT_DAYS = 14
 
 
 def main() -> int:
+    global OUT_PATH
+    national = "--national" in sys.argv
+    OUT_PATH = OUT_PATHS[national]
     reg = yaml.safe_load((ROOT / "config" / "climate.yaml").read_text(encoding="utf-8"))
     ar = reg["autumn_rain"]
     lo, hi = int(ar["doy_from"]), int(ar["doy_to"])
     years = range(int(ar["year_from"]), int(ar["year_to"]) + 1)
 
     area = yaml.safe_load((ROOT / "config" / "study_area.yaml").read_text(encoding="utf-8"))
-    slot = area["spatial_cv"]["cv_extent"]
-    fc = json.loads((ROOT / area[slot]["boundary_file"]).read_text(encoding="utf-8"))
-    geom = fc["features"][0]["geometry"]
-    coords = ([c for r in geom["coordinates"] for c in r]
-              if geom["type"] == "Polygon"
-              else [c for p in geom["coordinates"] for r in p for c in r])
-    xs = [c[0] for c in coords]
-    ys = [c[1] for c in coords]
-    w = senorge.window_for((min(xs), min(ys), max(xs), max(ys)))
+    if national:
+        # The FULL national bbox, all fifteen fylker including the held-out
+        # one. Climate is a predictor, not a training set: the model has to be
+        # able to score Nordland even though it never trains there, and a
+        # climate grid stopping at the training boundary would leave the
+        # transfer test with no rainfall to read.
+        bbox = tuple(area["national_training_extent"]["bbox_25833"])
+    else:
+        slot = area["spatial_cv"]["cv_extent"]
+        fc = json.loads((ROOT / area[slot]["boundary_file"]).read_text(encoding="utf-8"))
+        geom = fc["features"][0]["geometry"]
+        coords = ([c for r in geom["coordinates"] for c in r]
+                  if geom["type"] == "Polygon"
+                  else [c for p in geom["coordinates"] for r in p for c in r])
+        xs = [c[0] for c in coords]
+        ys = [c[1] for c in coords]
+        bbox = (min(xs), min(ys), max(xs), max(ys))
+    w = senorge.window_for(bbox)
 
     variants = {
         "registered": (lo, hi),

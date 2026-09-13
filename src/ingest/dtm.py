@@ -61,6 +61,45 @@ def snap_bbox(bbox: tuple[float, float, float, float], res_m: float) -> tuple[fl
     )
 
 
+def grid_for(bbox: tuple[float, float, float, float], res_m: float,
+             origin: tuple[float, float] | None = None):
+    """The raster grid a bbox will be fetched on: (snapped bbox, width, height).
+
+    With no `origin` this is the old behaviour - expand outwards to whole
+    multiples of the resolution. That is fine when the grid it will be stacked
+    against also sits on a multiple of the resolution, which for Agder it did:
+    the 32 m DTM starts at -21824 = -682 * 32, and SR16's Agder raster starts
+    there too.
+
+    Nationally that coincidence is gone. SR16's landsdekkende mosaic starts at
+    x = -99513.02, which is not a multiple of 16, never mind 32 (FINDINGS 17d).
+    Snapping Norway's bbox to 32 m would put terrain about 7 m out of step with
+    the forest data underneath it - a sub-cell offset on every cell of the
+    country, invisible in any output and impossible to correct afterwards.
+
+    Given an `origin`, the grid is aligned to it instead, so a 32 m terrain cell
+    is exactly the 2x2 block of 16 m SR16 cells beneath it. The bbox is still
+    only ever expanded, never clipped.
+    """
+    minx, miny, maxx, maxy = bbox
+    if origin is None:
+        snapped = (math.floor(minx / res_m) * res_m,
+                   math.floor(miny / res_m) * res_m,
+                   math.ceil(maxx / res_m) * res_m,
+                   math.ceil(maxy / res_m) * res_m)
+    else:
+        ox, oy = origin
+        # Columns run right from ox, rows run DOWN from oy, which is how a
+        # north-up raster transform is defined. Getting that direction wrong
+        # would put the country in the sea.
+        snapped = (ox + math.floor((minx - ox) / res_m) * res_m,
+                   oy - math.ceil((oy - miny) / res_m) * res_m,
+                   ox + math.ceil((maxx - ox) / res_m) * res_m,
+                   oy - math.floor((oy - maxy) / res_m) * res_m)
+    minx, miny, maxx, maxy = snapped
+    return snapped, int(round((maxx - minx) / res_m)), int(round((maxy - miny) / res_m))
+
+
 def _tile(minx: float, miny: float, maxx: float, maxy: float, w: int, h: int) -> np.ndarray:
     q = urllib.parse.urlencode({
         "service": "WCS", "request": "GetCoverage", "version": "1.0.0",
@@ -94,6 +133,7 @@ def download_dtm(
     tile_px: int = MAX_TILE_PX,
     pause_s: float = 0.5,
     progress=None,
+    origin: tuple[float, float] | None = None,
 ) -> dict:
     """Fetch a DTM mosaic for a bbox and write it as a single GeoTIFF.
 
@@ -105,9 +145,7 @@ def download_dtm(
     if tile_px > MAX_TILE_PX:
         raise ValueError(f"tile_px {tile_px} risks HTTP 504; the measured ceiling is ~3000")
 
-    minx, miny, maxx, maxy = snap_bbox(bbox, resolution_m)
-    width = int(round((maxx - minx) / resolution_m))
-    height = int(round((maxy - miny) / resolution_m))
+    (minx, miny, maxx, maxy), width, height = grid_for(bbox, resolution_m, origin)
     nx = math.ceil(width / tile_px)
     ny = math.ceil(height / tile_px)
 
