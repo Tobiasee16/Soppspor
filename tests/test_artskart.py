@@ -257,3 +257,79 @@ def test_retries_are_counted_rather_than_hidden(monkeypatch, no_sleep):
     monkeypatch.setattr(artskart.urllib.request, "urlopen", fake)
     artskart._get({"Taxons": 1})
     assert artskart.RETRIES == 2
+
+
+# --- download_filtered's failure paths --------------------------------------
+#
+# These exist because download_taxon's equivalents did NOT cover them. It
+# accumulates into a list and holds no file open, so its dropped-page test
+# could never catch what broke here: download_filtered calls dest.unlink()
+# from inside `with dest.open(...)`, which on Windows raises PermissionError
+# and replaces the informative error with an opaque one.
+#
+# The other lesson is in the docstring this module used to carry. It claimed "a
+# page before the last is never empty, which is what the download checks."
+# Measured 2026-09-13 on the national pull: page 1072 came back empty mid-run
+# and returned 1000 rows when asked again minutes later, and pages 1070-1326
+# all serve data. An empty page is transient flakiness, not proof of a dropped
+# page, and treating it as proof destroyed a download at 81%.
+
+def _filtered_pages(page_rows, total, fail_empty_once=()):
+    """A fake _get for download_filtered, which pages in lowercase."""
+    seen = {}
+
+    def fake(params):
+        i = int(params.get("pageIndex", 0))
+        seen[i] = seen.get(i, 0) + 1
+        rows = page_rows[i] if i < len(page_rows) else []
+        # Pages named in fail_empty_once come back empty on their FIRST ask
+        # only - exactly what the live endpoint did.
+        if i in fail_empty_once and seen[i] == 1:
+            rows = []
+        return {"TotalCount": total, "TotalPages": len(page_rows),
+                "Observations": rows}
+
+    fake.seen = seen
+    return fake
+
+
+def test_filtered_download_retries_a_transient_empty_page(tmp_path, monkeypatch):
+    """The failure that killed the national pull at 1.07 of 1.33 million."""
+    pages = [_rows(1000, 0), _rows(1000, 1000), _rows(1000, 2000), _rows(500, 3000)]
+    fake = _filtered_pages(pages, 3500, fail_empty_once={2})
+    monkeypatch.setattr(artskart, "_get", fake)
+    monkeypatch.setattr(artskart.time, "sleep", lambda s: None)
+
+    dest = tmp_path / "bg.jsonl"
+    meta = artskart.download_filtered({"f": 1}, dest, pause_s=0)
+
+    assert meta["records_downloaded"] == 3500
+    assert dest.exists()
+    assert len(dest.read_text(encoding="utf-8").strip().splitlines()) == 3500
+    assert fake.seen[2] == 2          # asked twice, kept the second answer
+    assert meta["empty_page_retries"] == 1
+
+
+def test_filtered_download_still_refuses_a_persistently_empty_page(tmp_path, monkeypatch):
+    """Absorbing a blip must not become absorbing a real hole."""
+    pages = [_rows(1000, 0), [], _rows(1000, 2000)]
+    monkeypatch.setattr(artskart, "_get", _filtered_pages(pages, 3000))
+    monkeypatch.setattr(artskart.time, "sleep", lambda s: None)
+
+    dest = tmp_path / "bg.jsonl"
+    with pytest.raises(RuntimeError, match="came back empty"):
+        artskart.download_filtered({"f": 1}, dest, pause_s=0)
+    # The real bug: this file must actually be gone. Deleting it from inside
+    # the `with` block raises PermissionError on Windows and leaves it behind.
+    assert not dest.exists()
+
+
+def test_filtered_download_removes_the_file_on_a_short_read(tmp_path, monkeypatch):
+    pages = [_rows(1000, 0), _rows(500, 1000)]
+    monkeypatch.setattr(artskart, "_get", _filtered_pages(pages, 3000))
+    monkeypatch.setattr(artskart.time, "sleep", lambda s: None)
+
+    dest = tmp_path / "bg.jsonl"
+    with pytest.raises(RuntimeError, match="shortfall"):
+        artskart.download_filtered({"f": 1}, dest, pause_s=0)
+    assert not dest.exists()

@@ -47,8 +47,19 @@ VERIFIED BEHAVIOUR - READ BEFORE CHANGING:
   Cantharellus cibarius shows the same shape in the other direction: 6800
   reported, 6801 rows, 6795 unique. So TotalCount cannot be used as a
   completeness assertion, and a fixed page size cannot be used to detect a
-  dropped page. What IS reliable is that a page before the last is never
-  empty, which is what the download checks.
+  dropped page.
+* CORRECTION (2026-09-13). This note used to end: "What IS reliable is that a
+  page before the last is never empty, which is what the download checks."
+  **That is false**, and believing it destroyed the national background pull at
+  1.07 of 1.33 million records. Page 1072 came back empty mid-run and served
+  1000 rows when asked again minutes later; pages 1070-1326 all serve data, and
+  page 1400 - past TotalPages - correctly serves none. An empty page at a valid
+  index is this endpoint being flaky, not evidence of anything.
+  Page sizes at depth are wild in the same way: 786, 1000, 1000, 964, 301, 62
+  measured across pages 1070-1326 on a PageSize of 1000.
+  So there is NO single-response signal that distinguishes a dropped page from
+  a blip. The download asks an empty page again, up to EMPTY_PAGE_ATTEMPTS
+  times, and only a page that is persistently empty counts as a hole.
 * There is NO deep-paging penalty, and the throughput decay during a long run
   is not evidence of one. Measured 2026-09-13 during the national pull, whose
   rate fell from 900 to 620 records/s over 200 pages: a cold request costs
@@ -82,6 +93,7 @@ import urllib.request
 
 BASE = "https://artskart.artsdatabanken.no/publicapi/api/observations/list"
 PAGE_SIZE = 1000
+NEWLINE = chr(10)
 TIMEOUT = 180
 SOURCE_PROJECTION = 32633
 
@@ -161,6 +173,14 @@ def total_count(taxon_id: int) -> int:
 # page at PAGE_SIZE=1000 would be 20% of a 5000-record taxon and far more of a
 # smaller one. There is no realistic value that confuses the two.
 COUNT_TOLERANCE = 0.02
+
+# How many times an empty page is asked again before it counts as a real hole.
+# Measured 2026-09-13 on the national pull: page 1072 came back empty mid-run
+# and returned 1000 rows when asked again minutes later, and pages 1070-1326
+# all serve data. An empty page at a valid index is transient flakiness, and
+# treating the first one as proof of a dropped page destroyed a download at
+# 81% of 1.33 million records.
+EMPTY_PAGE_ATTEMPTS = 4
 
 
 def download_taxon(taxon_id: int, dest: pathlib.Path, pause_s: float = 0.3) -> dict:
@@ -253,26 +273,53 @@ def download_filtered(
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     written = 0
-    with dest.open("w", encoding="utf-8") as fh:
-        for o in first["Observations"]:
-            fh.write(json.dumps(o, ensure_ascii=False) + "\n")
-            written += 1
-        for page in range(1, pages):
-            time.sleep(pause_s)
-            chunk = _get({**filters, "pageSize": PAGE_SIZE, "pageIndex": page})
-            got = chunk["Observations"]
-            if not got:
-                dest.unlink(missing_ok=True)
-                raise RuntimeError(
-                    f"page {page} of {pages} came back empty for {filters}. "
-                    f"That is a dropped page, not this endpoint's usual "
-                    f"miscount. Removed the partial file rather than leave a "
-                    f"truncated background set.")
-            for o in got:
-                fh.write(json.dumps(o, ensure_ascii=False) + "\n")
+    empty_retries = 0
+    # Cleanup lives out here because the file must be CLOSED before it can be
+    # removed. Deleting from inside the `with` raises PermissionError on
+    # Windows (WinError 32) and replaces whatever actually went wrong with an
+    # opaque one - which is how the real cause of a failure at 1.07 of 1.33
+    # million records got lost.
+    #
+    # Any failure removes the file, not only the two checked for below. A
+    # truncated JSON Lines file looks entirely healthy on inspection, and a
+    # partial target-group background would quietly bias every model fitted on
+    # it. CLAUDE.md says stop and report, not leave something that could
+    # silently reach a model run.
+    try:
+        with dest.open("w", encoding="utf-8") as fh:
+            for o in first["Observations"]:
+                fh.write(json.dumps(o, ensure_ascii=False) + NEWLINE)
                 written += 1
-            if progress:
-                progress(page + 1, pages, written)
+            for page in range(1, pages):
+                time.sleep(pause_s)
+                got = []
+                for attempt in range(1, EMPTY_PAGE_ATTEMPTS + 1):
+                    chunk = _get({**filters, "pageSize": PAGE_SIZE,
+                                  "pageIndex": page})
+                    got = chunk["Observations"]
+                    if got:
+                        break
+                    if attempt < EMPTY_PAGE_ATTEMPTS:
+                        empty_retries += 1
+                        print(f"    page {page} empty on attempt {attempt}/"
+                              f"{EMPTY_PAGE_ATTEMPTS}, asking again",
+                              file=sys.stderr, flush=True)
+                        time.sleep(RETRY_BASE_S * attempt)
+                if not got:
+                    raise RuntimeError(
+                        f"page {page} of {pages} came back empty for {filters} "
+                        f"on {EMPTY_PAGE_ATTEMPTS} consecutive attempts. One "
+                        f"empty page is this endpoint being flaky; four in a "
+                        f"row is a hole. Removed the partial file rather than "
+                        f"leave a truncated background set.")
+                for o in got:
+                    fh.write(json.dumps(o, ensure_ascii=False) + NEWLINE)
+                    written += 1
+                if progress:
+                    progress(page + 1, pages, written)
+    except BaseException:
+        dest.unlink(missing_ok=True)
+        raise
 
     # Same correction as download_taxon, and it matters more here. This
     # endpoint does not agree with itself - TotalCount, the rows paging
@@ -302,6 +349,9 @@ def download_filtered(
         # came off a struggling endpoint, and whoever reads this later should
         # be able to see that rather than inherit a file that looks clean.
         "network_retries": RETRIES - retries_before,
+        # Empty pages that were asked again and then answered. Non-zero is
+        # normal for this endpoint; large is a reason to distrust the file.
+        "empty_page_retries": empty_retries,
     }
     dest.with_suffix(".meta.json").write_text(
         json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8"
