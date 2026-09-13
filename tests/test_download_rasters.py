@@ -63,3 +63,72 @@ class TestNational:
         """The dangerous default is falling back to the regional format."""
         with pytest.raises(DownloadError, match="no national spec"):
             dr.area_spec({"title": "Invented", "format": "gml"}, national=True)
+
+
+# --- which SR16 layers come out of the archive ------------------------------
+
+import extract_sr16 as ex
+
+
+class TestSR16MemberResolution:
+    """SR16 ships 23 layers; this project fits on 8. Picking the wrong member
+    is not a loud failure, so the matching is pinned here.
+
+    The national and regional downloads name members differently
+    (`SRRLAI.tif` against `sr16_42_SRRLAI.tif`), and several layer names are
+    prefixes of others (`SRRTREANTALL` of `SRRTREANTALL_GE8`,
+    `SRRDIAMMIDDEL` of `SRRDIAMMIDDEL_GE8`). A prefix match would silently
+    hand back a raster of a different quantity at the same grid, which no
+    downstream check would notice.
+    """
+
+    NATIONAL = ["SRRLAI.tif", "SRRTRESLAG.tif", "SRRVOLMB.tif", "SRRGRFLATE.tif",
+                "SRRMHOYDE.tif", "SRRTREALDER.tif", "SRRKRONEDEK.tif",
+                "SRRBONITET.tif", "SRRTREANTALL.tif", "SRRTREANTALL_GE8.tif",
+                "SRRDIAMMIDDEL.tif", "SRRDIAMMIDDEL_GE8.tif"]
+    REGIONAL = ["sr16_42_" + n for n in NATIONAL]
+
+    def test_national_names_resolve(self):
+        got = ex.wanted_members(self.NATIONAL)
+        assert got["LAI"] == "SRRLAI.tif"
+        assert set(got) == set(ex.WANTED)
+
+    def test_regional_names_resolve_to_the_same_codes(self):
+        got = ex.wanted_members(self.REGIONAL)
+        assert got["LAI"] == "sr16_42_SRRLAI.tif"
+        assert set(got) == set(ex.WANTED)
+
+    def test_a_prefix_is_not_a_match(self):
+        """SRRTREANTALL.tif must not answer a request for TREANTALL_GE8."""
+        got = ex.wanted_members(self.NATIONAL, wanted=("TREANTALL",))
+        assert got["TREANTALL"] == "SRRTREANTALL.tif"
+        got = ex.wanted_members(self.NATIONAL, wanted=("TREANTALL_GE8",))
+        assert got["TREANTALL_GE8"] == "SRRTREANTALL_GE8.tif"
+        got = ex.wanted_members(self.NATIONAL, wanted=("DIAMMIDDEL",))
+        assert got["DIAMMIDDEL"] == "SRRDIAMMIDDEL.tif"
+
+    def test_a_missing_layer_stops_rather_than_skips(self):
+        with pytest.raises(SystemExit, match="no member for LAI"):
+            ex.wanted_members(["SRRVOLMB.tif"], wanted=("LAI",))
+
+    def test_an_ambiguous_match_stops(self):
+        with pytest.raises(SystemExit, match="matched 2 members"):
+            ex.wanted_members(["SRRLAI.tif", "x/SRRLAI.tif"], wanted=("LAI",))
+
+
+class TestExtractedLayersCoverTheModel:
+    def test_wanted_matches_what_the_feature_stack_asks_for(self):
+        """A layer in the stack but not in WANTED disappears silently.
+
+        `run_models.layers()` guards every SR16 raster with `if path.exists()`,
+        which is right for optional data and dangerous here: a layer that was
+        never extracted does not raise, it just leaves a column out of the
+        feature stack, and the run reports a clean result computed on fewer
+        features than intended.
+        """
+        import run_models
+        needed = set(run_models.SR16_NUMERIC) | {"TRESLAG"}
+        assert needed == set(ex.WANTED), (
+            f"extract_sr16.WANTED and run_models.SR16_NUMERIC disagree: "
+            f"only in stack {sorted(needed - set(ex.WANTED))}, "
+            f"only in WANTED {sorted(set(ex.WANTED) - needed)}")
