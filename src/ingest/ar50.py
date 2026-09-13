@@ -137,6 +137,107 @@ def source_field(src_path: str | pathlib.Path, layer: str | None = None) -> str:
         f"one of {', '.join(FIELD_CANDIDATES)}, found {', '.join(fields) or 'none'}")
 
 
+def rasterise_windowed(src_path: str | pathlib.Path,
+                       reference: str | pathlib.Path,
+                       out_path: str | pathlib.Path,
+                       layer: str | None = None,
+                       block: int = 4096,
+                       progress=None) -> dict:
+    """Burn AR50 onto the reference grid one window at a time.
+
+    Agder's AR50 loads whole. The national geodatabase holds 1,948,279
+    MultiPolygons in a 1.86 GB table, shapely objects cost several times their
+    packed size, and the national grid is 1.83 billion cells - so neither the
+    input nor the output fits comfortably in 15.7 GB.
+
+    Each window reads only the polygons whose bounding box intersects it, with
+    one cell of slack, and burns them with the same largest-first ordering the
+    whole-array path uses. That ordering is what lets a small specific polygon
+    land on top of a large general one, and it is preserved because the bbox
+    filter returns every polygon that overlaps the window, not only those
+    centred in it. `tests/test_ar50_windowed.py` asserts the two paths agree
+    cell for cell.
+
+    Reprojection is NOT done here. The whole-array path can reproject because
+    it holds everything; a bbox filter in one CRS against a grid in another is
+    meaningless, so a mismatch is refused rather than silently wrong. The
+    national AR50 is delivered in EPSG:25833, which is the grid's CRS anyway.
+    """
+    import rasterio
+    from pyogrio import read_info
+    from rasterio.features import rasterize
+
+    src_path = pathlib.Path(src_path)
+    field = source_field(src_path, layer)
+
+    info = read_info(str(src_path), layer=layer) if layer else read_info(str(src_path))
+    src_crs = info.get("crs")
+    with rasterio.open(reference) as ref:
+        profile = ref.profile.copy()
+        transform, H, W = ref.transform, ref.height, ref.width
+        ref_epsg = ref.crs.to_epsg()
+    src_epsg = None
+    if src_crs:
+        try:
+            from pyproj import CRS as _CRS
+            src_epsg = _CRS.from_user_input(src_crs).to_epsg()
+        except Exception:
+            src_epsg = None
+    if src_epsg is not None and ref_epsg is not None and src_epsg != ref_epsg:
+        raise AR50Error(
+            f"{src_path.name} is EPSG:{src_epsg} but the reference grid is "
+            f"EPSG:{ref_epsg}. The windowed path filters by bounding box, which "
+            f"is meaningless across projections. Reproject the source first, or "
+            f"use rasterise() which holds everything and can reproject.")
+
+    profile.update(count=1, dtype="uint8", nodata=NODATA, compress="deflate",
+                   tiled=True, blockxsize=256, blockysize=256)
+    profile.pop("photometric", None)
+
+    import geopandas as gpd
+    cell = abs(transform.a)
+    nblocks = ((H + block - 1) // block) * ((W + block - 1) // block)
+    done = 0
+    burned_total = 0
+    with rasterio.open(out_path, "w", **profile) as out:
+        for row0 in range(0, H, block):
+            for col0 in range(0, W, block):
+                h = min(block, H - row0)
+                w = min(block, W - col0)
+                win = rasterio.windows.Window(col0, row0, w, h)
+                wt = rasterio.windows.transform(win, transform)
+                left, top = wt.c, wt.f
+                bbox = (left - cell, top - h * cell - cell,
+                        left + w * cell + cell, top + cell)
+
+                read_kw = {"columns": [field], "engine": "pyogrio", "bbox": bbox}
+                if layer:
+                    read_kw["layer"] = layer
+                gdf = gpd.read_file(src_path, **read_kw)
+
+                tile = np.full((h, w), NODATA, dtype="uint8")
+                if len(gdf):
+                    values = gdf[field].to_numpy()
+                    burn = group_codes(values)
+                    order = np.argsort(-gdf.geometry.area.to_numpy())
+                    shapes = [(gdf.geometry.iloc[i], int(burn[i]))
+                              for i in order if burn[i] != NODATA]
+                    if shapes:
+                        tile = rasterize(shapes, out_shape=(h, w), transform=wt,
+                                         fill=NODATA, dtype="uint8",
+                                         all_touched=False)
+                burned_total += int((tile != NODATA).sum())
+                out.write(tile, 1, window=win)
+                done += 1
+                if progress:
+                    progress(done, nblocks)
+
+    return {"path": str(out_path), "source_field": field, "blocks": nblocks,
+            "cells": H * W, "cells_covered": burned_total,
+            "coverage_pct": 100.0 * burned_total / (H * W) if H * W else 0.0,
+            "source_crs": f"EPSG:{src_epsg}", "target_crs": f"EPSG:{ref_epsg}"}
+
+
 def rasterise(src_path: str | pathlib.Path, reference: str | pathlib.Path,
               out_path: str | pathlib.Path, layer: str | None = None) -> dict:
     """Reproject AR50 to 25833 and burn it onto the reference raster's grid.
