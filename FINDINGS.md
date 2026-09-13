@@ -2206,6 +2206,104 @@ measures, and which is the file currently downloading. Recompute 16c against it
 once that exists, and correct this section if it moves the conclusion.
 
 
+## 17. The national feature stack, and a 9 m offset that had to be explained - 2026-09-13
+
+The three bulk datasets are down. Nothing is fitted yet; this section is what
+the data turned out to be, including one discrepancy that looked like a wrong
+product and was not.
+
+### 17a. One national order per dataset, not fifteen
+
+All three publish a `landsdekkende` area, and all three publish it in
+EPSG:25833 - checked against each dataset's own area codelist before being
+relied on. That avoids fifteen per-fylke orders, fifteen seams, and fifteen
+chances to take the wrong projection. It matters most for AR50, whose per-fylke
+orders come in a patchwork of 25832 (Agder), 25833 (Nordland, Troms) and 25835
+(Finnmark).
+
+AR50 nationally is offered as a **geodatabase only**, where the regional order
+is GML. No new dependency was needed - fiona's GDAL already carries
+OpenFileGDB - but the format was verified rather than assumed: Kristiansand was
+ordered as gdb, 20,000 random points were sampled inside it, and the land-cover
+code each source reports at each point was compared. **They agreed 20,000 out
+of 20,000.** The only difference is the column name, `arealtype` in GML against
+`artype` in the geodatabase.
+
+### 17b. The storage estimate was wrong, and the reason generalises
+
+| | Agder | predicted (x7.1) | measured |
+|---|---|---|---|
+| SR16, all 23 layers | 1.85 GB | 13.1 GB | **34.77 GB** |
+| AR50 | 0.25 GB | 1.8 GB | 0.83 GB |
+| Losmasser | 0.05 GB | 0.4 GB | 0.88 GB |
+
+Section 14 scaled Agder by land area, 7.1x, and SR16 came in at 2.6 times that.
+**Area is not what a raster covers; its bounding box is.** Agder is compact and
+its land fills essentially all of its bounding box. Norway is long, thin and
+diagonal: 323,808 km2 of mainland inside a bounding box of 1,221 x 1,537 km =
+1,877,062 km2, so **land fills 17% of it**. The bbox ratio is 41.2x against an
+area ratio of 7.1x, and the measured 18.8x sits between - nodata compresses
+well, but it is not free.
+
+Only **8 of SR16's 23 layers** are fitted, which brings 34.77 GB down to 11.81.
+The other fifteen are largely the same quantity at different diameter
+thresholds; a near-duplicate of a column already in the stack splits its
+permutation importance rather than adding information.
+
+### 17c. The national and Agder rasters disagree on 40% of cells. They are the same data.
+
+Sampling 4,000 random points inside Agder in both the national and the regional
+SR16 gave only about 60% identical values, with differences up to 714 m3/ha of
+standing volume. That is the shape of a different product version, and if it
+were one, no national number could be compared to anything in sections 7-15.
+
+It is not. The two grids are **offset by 9.02 m in x**:
+
+    national origin  x = -99513.02   y = 8000000.00
+    regional origin  x = -21824.00   y = 6640704.00
+    difference       x = 4855.5635 cells   y = -84956.0000 cells
+
+y is exactly aligned; x is off by 0.5635 of a 16 m cell. So the same coordinate
+falls in cells whose centres are 9 m apart, and in a 16 m forest raster
+neighbouring cells genuinely differ.
+
+The test that settles it is comparing against the right baseline: the regional
+raster sampled at x, against the **same raster** sampled at x + 9.02 m.
+
+| layer | national vs regional | regional vs itself shifted 9 m | corr(nat, reg) | corr(reg, reg+9m) |
+|---|---|---|---|---|
+| VOLMB | 59.6% | 50.2% | 0.894 | 0.875 |
+| LAI | 59.1% | 49.2% | 0.902 | 0.849 |
+| MHOYDE | 60.2% | 50.1% | 0.910 | 0.878 |
+| TREALDER | 60.5% | 51.1% | 0.886 | 0.841 |
+| GRFLATE | 61.7% | 53.0% | 0.894 | 0.866 |
+| KRONEDEK | 63.5% | 53.9% | 0.890 | 0.863 |
+| BONITET | 81.3% | 77.4% | 0.909 | 0.890 |
+| TRESLAG | 92.4% | 89.7% | 0.874 | 0.813 |
+
+For every layer the national raster agrees with the regional one **better than
+that raster agrees with itself shifted by the offset**, and correlates better
+too. The disagreement is fully accounted for by the grid, with room to spare.
+Same product.
+
+### 17d. Two things that follow
+
+**The national origin is off the canonical grid.** x = -99513.02 is not a
+multiple of 16, while y = 8000000.00 is exactly 500,000 cells. The national
+mosaic was assembled to a bounding box rather than snapped to SR16's own grid.
+All eight national layers share this identical grid, so the stack is internally
+consistent - but `build_maps.py` hardcodes `SR16_ORIGIN = (-21824.0,
+6640704.0)`, the *Agder* raster's origin. Used unchanged for a national run
+that would put every prediction cell centre 9 m from the SR16 cell it reads: a
+systematic half-cell offset, on every cell, silently. The national build must
+snap to the national raster's own origin.
+
+**Phase 0 and national feature values are not cell-for-cell comparable.** Any
+comparison of feature distributions between the Agder run and the national run
+is comparing two different samplings of the same forest, and a difference of
+the size in the table above means nothing on its own.
+
+
 ## Open questions
 
 - **Should the maps still be blurred at all?** `build_maps.py` applies a 500 m
