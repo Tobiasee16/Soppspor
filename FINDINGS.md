@@ -2847,6 +2847,33 @@ negative and would never have been looked for afterwards - a weak Nordland
 number would have been attributed to transfer distance, which is exactly the
 conclusion the national design exists to test.
 
+### 21g. The Agder path reruns to the same 1,590 numbers
+
+A refactor that silently changes what a published number was computed from is
+indistinguishable, from the outside, from a refactor that did not. So the Agder
+run was repeated on the refactored code and diffed against
+`model_results.md` as committed.
+
+**Every one of the 1,590 numbers is identical** - AUC, both Boyce columns, all
+standard deviations, every permutation-importance mean and spread, every
+dropped-row count. The only textual differences are the date line, the new
+`**Extent:**` line, and the deliberate `../boyce_diagnosis.md` link rewrite
+that tagged runs apply on the way into `runs/`.
+
+The order in which the pipeline was made safe matters as much as the result.
+Fifteen tests pinned the Agder feature stack **before** anything was changed,
+and the first version of that pin was itself wrong: it did not know that VOLMB
+appears twice in the stack, once as the estimate and once carrying its own
+bounds. A pin written after the refactor would have been written against
+whatever the refactor produced.
+
+The diff turned up one further thing, unrelated and small. The two
+ordering-verdict lines were emitted by iterating a `set` of model names, and
+Python randomises string hashing per process, so two runs of identical code
+produced files that did not compare equal. Harmless to any conclusion, and
+exactly the kind of noise that stops people diffing results at all. Now sorted;
+`run_transfer.py` already was.
+
 ## Open questions
 
 - **Should the maps still be blurred at all?** `build_maps.py` applies a 500 m

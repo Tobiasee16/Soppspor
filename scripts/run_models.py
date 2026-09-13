@@ -632,7 +632,13 @@ def write_report(rows, importances, designs, spp, stack, block_m, n_folds,
     a("## Predicted ordering\n")
     a("Registered in FINDINGS before any model existed: *C. tubaeformis* best,")
     a("*C. cibarius* middle, *A. muscaria* worst.\n")
-    for model_name in {r["model"] for r in rows} - {Constant().name}:
+    # Sorted, because iterating a set of strings puts these two lines in a
+    # different order on every run - Python randomises string hashing per
+    # process. Harmless in itself, but it meant two runs of identical code
+    # produced files that did not compare equal, and a diff that is noisy by
+    # default is a diff nobody reads. Found by diffing the refactored Agder run
+    # against the published one; `run_transfer.py` already sorted here.
+    for model_name in sorted({r["model"] for r in rows} - {Constant().name}):
         got = [(r["species"], r["auc"]) for r in rows
                if r["model"] == model_name and r["species"] in order]
         ranked = [s for s, _ in sorted(got, key=lambda t: -t[1])]
