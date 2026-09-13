@@ -57,7 +57,12 @@ def _whole(arr):
     slope, aspect = slope_aspect(arr, CELL)
     return {
         "elevation": arr,
-        "slope_deg": slope,
+        # DEGREES, matching what build_terrain.py writes. This helper
+        # originally returned the radian slope, which let every equality
+        # test above pass against a raster wrong by a factor of 57.3 -
+        # a test comparing new code only against the function it wraps
+        # checks nothing about convention.
+        "slope_deg": np.degrees(slope),
         "northness": northness(aspect, slope),
         "eastness": eastness(aspect, slope),
         "curvature": curvature(arr, CELL),
@@ -171,3 +176,77 @@ def test_a_failed_write_does_not_leave_a_partial_raster(tmp_path, monkeypatch):
         with pytest.raises(RuntimeError, match="disk full"):
             derivatives_windowed(src, dst_p, CELL, block=32)
     assert not dst_p.exists(), "a partial terrain stack must not survive"
+
+
+# --- units, which the equality tests above cannot see ------------------------
+#
+# `slope_aspect` returns RADIANS. `build_terrain.py` converts with np.degrees()
+# before writing, and names the band slope_deg. derivatives_windowed did not,
+# so the national raster carried radians in a band labelled degrees - values
+# 57.3 times too small, in a band every model reads.
+#
+# The equality tests above could never catch this: they compare
+# derivatives_windowed against slope_aspect, and both were in radians. The test
+# was self-consistent and checked nothing about the convention the rest of the
+# pipeline uses. Comparing new code only against the function it wraps is how a
+# units bug survives a green suite.
+
+def test_slope_band_is_in_degrees_not_radians(tmp_path):
+    """A 10% grade must read 5.71, not 0.0997."""
+    import math
+    h = w = 40
+    xx = np.tile(np.arange(w, dtype="float64"), (h, 1))
+    dem = xx * 0.1 * CELL          # a constant 10% grade to the east
+    src_p, dst_p = tmp_path / "dem.tif", tmp_path / "out.tif"
+    _write(src_p, dem)
+    with rasterio.open(src_p) as src:
+        derivatives_windowed(src, dst_p, CELL, block=16)
+    with rasterio.open(dst_p) as ds:
+        slope = ds.read(2)[5:-5, 5:-5]
+    assert slope == pytest.approx(math.degrees(math.atan(0.1)), abs=1e-3)
+
+
+def test_slope_matches_what_build_terrain_writes(tmp_path):
+    """Pinned against the Agder pipeline's own convention, not against itself.
+
+    build_terrain.py writes np.degrees(slope) into `slope_deg`. Anything that
+    produces a terrain stack has to agree with that, or the national and Agder
+    models read the same column as different quantities.
+    """
+    from src.features.terrain import slope_aspect
+    arr = _dem()
+    src_p, dst_p = tmp_path / "dem.tif", tmp_path / "out.tif"
+    _write(src_p, arr)
+    with rasterio.open(src_p) as src:
+        derivatives_windowed(src, dst_p, CELL, block=64)
+    with rasterio.open(dst_p) as ds:
+        got = ds.read(2).astype("float64")
+    want_rad, _ = slope_aspect(np.asarray(arr, dtype="float32").astype("float64"), CELL)
+    want = np.degrees(want_rad).astype("float32").astype("float64")
+    ok = ~(np.isnan(want) & np.isnan(got))
+    np.testing.assert_allclose(want[ok], got[ok], rtol=1e-5, atol=1e-4)
+
+
+def test_northness_and_eastness_still_use_the_radian_slope(tmp_path):
+    """Only the written band converts. The weighting does not.
+
+    build_terrain.py computes northness/eastness from the RADIAN slope and
+    converts only on the way out, so converting too early would silently
+    rescale two more bands.
+    """
+    from src.features.terrain import eastness, northness, slope_aspect
+    arr = _dem()
+    src_p, dst_p = tmp_path / "dem.tif", tmp_path / "out.tif"
+    _write(src_p, arr)
+    with rasterio.open(src_p) as src:
+        derivatives_windowed(src, dst_p, CELL, block=64)
+    with rasterio.open(dst_p) as ds:
+        gn, ge = ds.read(3).astype("float64"), ds.read(4).astype("float64")
+    a32 = np.asarray(arr, dtype="float32").astype("float64")
+    s, asp = slope_aspect(a32, CELL)
+    wn = northness(asp, s).astype("float32").astype("float64")
+    we = eastness(asp, s).astype("float32").astype("float64")
+    for want, got, nm in ((wn, gn, "northness"), (we, ge, "eastness")):
+        ok = ~(np.isnan(want) & np.isnan(got))
+        np.testing.assert_allclose(want[ok], got[ok], rtol=1e-5, atol=1e-4,
+                                   err_msg=nm)

@@ -187,7 +187,15 @@ def derivatives_windowed(src, dst_path, cell_m: float, block: int = 2048,
                         c0, r0, c1 - c0, r1 - r0)).astype("float64")
 
                     slope, aspect = slope_aspect(tile, cell_m)
-                    vals = [tile, slope, northness(aspect, slope),
+                    # slope_aspect returns RADIANS. build_terrain.py writes
+                    # np.degrees(slope) into the band it names slope_deg, and
+                    # weights northness/eastness by the RADIAN slope,
+                    # converting only on the way out. Both halves have to be
+                    # matched or the national and Agder stacks read the same
+                    # column as different quantities - the first national
+                    # build carried radians in slope_deg, 57.3 times too
+                    # small, and every equality test still passed.
+                    vals = [tile, np.degrees(slope), northness(aspect, slope),
                             eastness(aspect, slope), curvature(tile, cell_m)]
 
                     top, left = row0 - r0, col0 - c0
