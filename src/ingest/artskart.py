@@ -49,6 +49,15 @@ VERIFIED BEHAVIOUR - READ BEFORE CHANGING:
   completeness assertion, and a fixed page size cannot be used to detect a
   dropped page. What IS reliable is that a page before the last is never
   empty, which is what the download checks.
+* There is NO deep-paging penalty, and the throughput decay during a long run
+  is not evidence of one. Measured 2026-09-13 during the national pull, whose
+  rate fell from 900 to 620 records/s over 200 pages: a cold request costs
+  0.4-5.4 s with no relationship to page index (pageIndex 1200 cold came back
+  in 2.66 s, pageIndex 400 cold in 5.39 s), and an immediate repeat of either
+  costs 0.5-0.6 s. Responses are cached per (filter, pageIndex); the variance is
+  server load. Do not "fix" this by splitting the query into per-region pulls to
+  keep page indices low - that was the hypothesis, it was tested, and it was
+  wrong.
 * Coordinates arrive as East/North with Projection=32633 (WGS84 UTM33N), not
   25833 (ETRS89 UTM33N). The two differ by roughly half a metre in Norway and
   the offset grows with plate motion. Irrelevant at our thinning distances,
