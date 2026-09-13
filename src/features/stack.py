@@ -303,7 +303,67 @@ class Design:
         return int((self.y == 0).sum())
 
 
-def build(presence_coords, background_coords, layers: list[RasterLayer]) -> Design:
+@dataclass
+class SampleCache:
+    """Sampled feature rows kept by coordinate, so a point is read once.
+
+    `build` is called once per species and every call passes the same
+    background. Nationally that is 52,249 target-group points against nine
+    presence sets, and sampling them nine times is nine passes over 40 GB of
+    raster to obtain one pass worth of numbers - several hours of pure I/O for
+    nothing. The null control shares the pool with the background, so its rows
+    come back free as well.
+
+    Deliberately **not** used by the Agder run. The cache cannot change a
+    value - `test_stack_cache.py` pins cached and uncached output to be
+    identical - but Phase 0's published numbers have no reason to depend on a
+    mechanism introduced for a different extent, and the Agder run takes
+    minutes either way.
+
+    The layer signature is checked on every call. A cached row is a fixed set
+    of columns in a fixed order; serving it against a different stack would
+    silently mislabel every feature.
+    """
+
+    signature: tuple | None = None
+    names: list[str] | None = None
+    rows: dict[tuple[float, float], np.ndarray] = field(default_factory=dict)
+
+    @staticmethod
+    def _signature(layers: list[RasterLayer]) -> tuple:
+        return tuple(
+            (l.path, tuple(l.bands or ()), tuple(l.names or ()), l.method,
+             l.prefix, l.missing_as, l.missing_indicator,
+             tuple(l.categories or ()), tuple(l.category_labels or ()))
+            for l in layers
+        )
+
+    def sample(self, layers: list[RasterLayer], coords) -> tuple[np.ndarray, list[str]]:
+        sig = self._signature(layers)
+        if self.signature is None:
+            self.signature = sig
+        elif self.signature != sig:
+            raise ValueError(
+                "the feature stack changed between calls; cached rows would be "
+                "served under the wrong column names. Use a new SampleCache.")
+        wanted = [tuple(c) for c in coords]
+        fresh = [c for c in dict.fromkeys(wanted) if c not in self.rows]
+        if fresh or self.names is None:
+            X, names = sample_layers(layers, fresh)
+            self.names = names
+            for c, row in zip(fresh, X):
+                self.rows[c] = row
+        if not wanted:
+            return np.empty((0, len(self.names))), list(self.names)
+        return np.vstack([self.rows[c] for c in wanted]), list(self.names)
+
+    @property
+    def n_cached(self) -> int:
+        return len(self.rows)
+
+
+def build(presence_coords, background_coords, layers: list[RasterLayer],
+          cache: "SampleCache | None" = None) -> Design:
     """Sample both point sets and drop rows that any layer could not answer for.
 
     Rows with a missing feature are dropped rather than imputed. Imputation
@@ -320,7 +380,8 @@ def build(presence_coords, background_coords, layers: list[RasterLayer]) -> Desi
     coords = np.vstack([pres, back]) if len(pres) or len(back) else np.empty((0, 2))
     y = np.concatenate([np.ones(len(pres), dtype=int), np.zeros(len(back), dtype=int)])
 
-    X, names = sample_layers(layers, [tuple(c) for c in coords])
+    pts = [tuple(c) for c in coords]
+    X, names = cache.sample(layers, pts) if cache is not None else sample_layers(layers, pts)
     good = np.isfinite(X).all(axis=1) if X.size else np.ones(len(coords), dtype=bool)
 
     dropped = {

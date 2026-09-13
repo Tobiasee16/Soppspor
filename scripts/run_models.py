@@ -13,10 +13,18 @@ and nothing else in the run means anything. That is checked here and stated in
 the output rather than left for a reader to notice.
 
     python scripts/run_models.py
+    python scripts/run_models.py --national
     python scripts/run_models.py --tag terrain-only
     python scripts/run_models.py --no-vol-bounds
     python scripts/run_models.py --no-elevation
     python scripts/run_models.py --no-twi
+
+Two extents, and they never share a file. The default is Agder, which is what
+every published Phase 0 number came from, and it writes `model_results.md`.
+`--national` fits on fourteen fylker with Nordland held out and writes
+`model_results_norge.md`. Which rasters, which background pool, which boundary
+and which output file are all read off one `Extent` record rather than being
+decided in eight separate places.
 """
 from __future__ import annotations
 
@@ -24,6 +32,7 @@ import json
 import pathlib
 import sys
 import time
+from dataclasses import dataclass
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
@@ -37,9 +46,9 @@ import numpy as np
 import yaml
 
 from src.features.background import null_and_background
-from src.features.stack import RasterLayer, build
+from src.features.stack import RasterLayer, SampleCache, build
 from src.features.thin import thin
-from src.geometry import Boundary
+from src.geometry import Boundaries, Boundary
 from src.ingest import artskart
 from src.ingest.ar50 import CATEGORIES as AR50_CATEGORIES
 from src.ingest.ar50 import LABELS as AR50_LABELS
@@ -53,9 +62,100 @@ from src.validate.metrics import roc_auc
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 INTERIM = ROOT / "data" / "interim"
 RAW = ROOT / "data" / "raw" / "artskart"
-OUT = ROOT / "data" / "processed" / "model_results.md"
+PROCESSED = ROOT / "data" / "processed"
 
 AGDER_NAMES = {"Agder", "Aust-Agder", "Vest-Agder"}
+
+
+@dataclass(frozen=True)
+class Extent:
+    """Everything that differs between the Agder run and the national one.
+
+    CLAUDE.md's study-area section is explicit that the extents must never
+    silently merge, and the same discipline now has to survive a second pair.
+    Holding every path in one table makes the difference between them readable
+    in one place rather than spread across nine string literals, and makes it
+    structurally impossible for a national run to write over Phase 0's
+    published results - which is the failure this project has hit three times
+    now, on a download, on a climate report and on a tagged model run.
+    """
+
+    key: str
+    label: str
+    terrain: str
+    terrain_bands: tuple[tuple[int, str], ...]
+    climate: str
+    sr16: str                          # `{code}` is the SR16 variable code
+    losmasser: str
+    ar50: str
+    pool: str                          # target-group pool cache, in interim
+    report: str                        # in data/processed
+    transfer_report: str               # in data/processed, written by run_transfer
+    holdout: str                       # study_area.yaml entry for the held-out region
+    counties: frozenset | None         # None: use the boundary, not the label
+    cv_extent: str | None              # which study_area.yaml entry bounds CV
+
+
+AGDER = Extent(
+    key="agder",
+    label="Agder fylke",
+    terrain="terrain_agder_32m.tif",
+    terrain_bands=((1, "elevation"), (2, "slope_deg"), (3, "northness"),
+                   (4, "eastness"), (5, "curvature"), (6, "twi")),
+    climate="autumn_rain_agder_1km.tif",
+    sr16="sr16/sr16_42_SRR{code}.tif",
+    losmasser="losmasser_agder_32m.tif",
+    ar50="ar50_agder_32m.tif",
+    pool="target_group_pool_agder.json",
+    report="model_results.md",
+    transfer_report="transferability.md",
+    holdout="prediction_extent",
+    counties=frozenset(AGDER_NAMES),
+    # None: take it from `spatial_cv.cv_extent` in config/study_area.yaml,
+    # which is where Phase 0 reads it and where it stays configurable.
+    cv_extent=None,
+)
+
+NORGE = Extent(
+    key="norge",
+    label="Norway, mainland, minus the held-out region",
+    terrain="terrain_norge_32m.tif",
+    # Five bands, not six, and that is a property of the raster rather than a
+    # flag. TWI needs flow accumulation over a whole connected surface, and
+    # 1.83 billion cells will not take a priority-flood in 15.7 GB at any
+    # speed; FINDINGS 18 measured what dropping it costs before the decision
+    # was taken. A sixth entry here would be read off a five-band raster as
+    # whatever band 6 happened to be, which is nothing at all.
+    terrain_bands=((1, "elevation"), (2, "slope_deg"), (3, "northness"),
+                   (4, "eastness"), (5, "curvature")),
+    climate="autumn_rain_norge_1km.tif",
+    sr16="sr16_norge/SRR{code}.tif",
+    losmasser="losmasser_norge_32m.tif",
+    ar50="ar50_norge_32m.tif",
+    pool="target_group_pool_norge.json",
+    report="model_results_norge.md",
+    transfer_report="transferability_norge.md",
+    holdout="national_holdout_extent",
+    # No county filter nationally. The extent is fourteen polygons rather than
+    # three names, and Artskart's County field is a label attached once per
+    # administrative unit a record intersects - fine for picking one fylke out
+    # of a national download, wrong for defining the region a model is fitted
+    # on.
+    counties=None,
+    cv_extent="national_training_extent",
+)
+
+EXTENTS = {AGDER.key: AGDER, NORGE.key: NORGE}
+EXTENT = AGDER.key          # rebound by --national in main()
+
+
+def extent() -> Extent:
+    return EXTENTS[EXTENT]
+
+
+def out_path() -> pathlib.Path:
+    """Where an untagged run writes. Never the same file for two extents."""
+    return PROCESSED / extent().report
 
 # The null must sit near 0.5. This is the threshold above which the run is
 # declared broken rather than interpreted - CLAUDE.md's "meaningfully above
@@ -114,29 +214,32 @@ def layers() -> list[RasterLayer]:
     # negative on four of eight species) - but permutation importance understates
     # every member of a correlated group, and TWI correlates with slope and
     # curvature. An ablation does not have that problem.
-    TERRAIN_BANDS = [(1, "elevation", INCLUDE_ELEVATION),
-                     (2, "slope_deg", True),
-                     (3, "northness", True),
-                     (4, "eastness", True),
-                     (5, "curvature", True),
-                     (6, "twi", INCLUDE_TWI)]
-    keep = [(b, n) for b, n, on in TERRAIN_BANDS if on]
-    if len(keep) == len(TERRAIN_BANDS):
-        out = [RasterLayer(str(INTERIM / "terrain_agder_32m.tif"), method="nearest")]
+    #
+    # Which terrain bands exist is a property of the extent, not of a flag:
+    # the national raster has five and Agder's has six. Asking for band 6 of a
+    # five-band file returns nothing useful and raises nothing either.
+    ext = extent()
+    switch = {"elevation": INCLUDE_ELEVATION, "twi": INCLUDE_TWI}
+    keep = [(b, n) for b, n in ext.terrain_bands if switch.get(n, True)]
+    terrain = str(INTERIM / ext.terrain)
+    if len(keep) == len(ext.terrain_bands):
+        out = [RasterLayer(terrain, method="nearest")]
     else:
-        out = [RasterLayer(str(INTERIM / "terrain_agder_32m.tif"), method="nearest",
+        out = [RasterLayer(terrain, method="nearest",
                            bands=[b for b, _ in keep],
                            names=[n for _, n in keep])]
 
-    climate = INTERIM / "autumn_rain_agder_1km.tif"
+    climate = INTERIM / ext.climate
     if climate.exists():
         # Bilinear: sampled nearest, a 1 km field gives neighbouring points a
         # few hundred metres apart identical values for no physical reason.
         out.append(RasterLayer(str(climate), bands=[1], names=["autumn_rain_mm"],
                                method="bilinear"))
 
-    sr16 = INTERIM / "sr16"
-    treslag = sr16 / "sr16_42_SRRTRESLAG.tif"
+    def sr16_path(code: str) -> pathlib.Path:
+        return INTERIM / ext.sr16.format(code=code)
+
+    treslag = sr16_path("TRESLAG")
     if treslag.exists():
         # Tree species one-hot: 1 spruce, 2 pine, 3 deciduous. This layer also
         # carries the single shared "SR16 absent" indicator for the whole SR16
@@ -147,7 +250,7 @@ def layers() -> list[RasterLayer]:
                                categories=[1, 2, 3], missing_as=0.0,
                                missing_indicator=True))
     for code, name in SR16_NUMERIC.items():
-        path = sr16 / f"sr16_42_SRR{code}.tif"
+        path = sr16_path(code)
         if path.exists():
             out.append(RasterLayer(str(path), bands=[1], names=[name],
                                    missing_as=0.0))
@@ -157,7 +260,7 @@ def layers() -> list[RasterLayer]:
     # volume error at 30-60% of the mean. Carrying the bounds for volume lets
     # the model see where the forest estimate is weak instead of treating a
     # wide interval and a tight one as the same number.
-    vol = sr16 / "sr16_42_SRRVOLMB.tif"
+    vol = sr16_path("VOLMB")
     if vol.exists() and INCLUDE_VOL_BOUNDS:
         out.append(RasterLayer(str(vol), bands=[2, 3],
                                names=["vol_lower", "vol_upper"], missing_as=0.0))
@@ -167,7 +270,7 @@ def layers() -> list[RasterLayer]:
     # prediction for what this layer would do, in FINDINGS section 8 before it
     # was ever fitted. Categorical, so nearest sampling and one-hot: halfway
     # between peat and bare rock is not a substrate.
-    losmasser = INTERIM / "losmasser_agder_32m.tif"
+    losmasser = INTERIM / ext.losmasser
     if losmasser.exists():
         out.append(RasterLayer(str(losmasser), bands=[1], names=["losmasse"],
                                categories=LOSMASSE_CATEGORIES, missing_as=0.0,
@@ -180,7 +283,7 @@ def layers() -> list[RasterLayer]:
     # "not productive forest" flag into bog, farmland, open ground, water and
     # built-up. Predictions for what it would do were registered in FINDINGS
     # section 10 before it was fitted.
-    ar50 = INTERIM / "ar50_agder_32m.tif"
+    ar50 = INTERIM / ext.ar50
     if ar50.exists():
         out.append(RasterLayer(str(ar50), bands=[1], names=["ar50"],
                                categories=AR50_CATEGORIES, missing_as=0.0,
@@ -191,22 +294,166 @@ def layers() -> list[RasterLayer]:
     return [layer for layer in out if pathlib.Path(layer.path).exists()]
 
 
-def presences(sp: dict, boundary: Boundary, max_prec: float, thin_m: float):
-    obs = [o for o in artskart.load(RAW / f"{sp['key']}.json")
-           if o.get("County") in AGDER_NAMES]
+_FROM_EXTENT = object()
+
+
+def presences(sp: dict, boundary, max_prec: float, thin_m: float,
+              counties=_FROM_EXTENT):
+    """Thinned presence coordinates inside `boundary`.
+
+    Extent, then precision, then thinning - the same order the target-group
+    background gets, because thinning before the extent cut would let a 1 km
+    cell straddling a border be resolved differently on the two sides and turn
+    the bias correction into a bias.
+
+    `counties` is a cheap prefilter on Artskart's County label, used only by
+    the Agder run, where it removes 90% of a national download before any
+    point-in-polygon work. It is not the extent definition - the boundary is -
+    and nationally it is None, because a record on a fylke border is published
+    once per fylke it touches and picking by label would then depend on which
+    copy arrived first.
+    """
+    if counties is _FROM_EXTENT:
+        counties = extent().counties
+    obs = artskart.load(RAW / f"{sp['key']}.json")
+    if counties is not None:
+        obs = [o for o in obs if o.get("County") in counties]
     pts = artskart.usable_points(obs)
     pts = [p for p in pts if (p["east"], p["north"]) in boundary]
     pts = [p for p in pts if p["precision_m"] is not None and p["precision_m"] <= max_prec]
     return [(p["east"], p["north"]) for p in thin(pts, thin_m)]
 
 
+def cv_boundary(area: dict):
+    """The region blocked cross-validation runs inside.
+
+    Agder is one polygon from one file. The national training extent is
+    fourteen, because Kartverket publishes no single national outline through
+    the kommuneinfo API, and the fifteenth - Nordland - is excluded here rather
+    than anywhere downstream. Excluding it by fylke code at the point the
+    region is built is the only place a reader can check the held-out region
+    really is held out.
+    """
+    ext = extent()
+    cfg = area[ext.cv_extent or area["spatial_cv"]["cv_extent"]]
+    if "boundary_file" in cfg:
+        fc = json.loads((ROOT / cfg["boundary_file"]).read_text(encoding="utf-8"))
+        return Boundary(fc["features"][0]["geometry"], name=cfg["name"])
+
+    excluded = str(cfg["exclude_code"])
+    parts, left_out = [], []
+    for f in sorted((ROOT / cfg["boundary_dir"]).glob("boundary_*_25833.geojson")):
+        fc = json.loads(f.read_text(encoding="utf-8"))
+        declared = fc.get("crs_declared_by_source")
+        if declared and "25833" not in str(declared):
+            raise SystemExit(f"{f.name} declares {declared}, expected EPSG:25833")
+        props = fc["features"][0].get("properties", {})
+        code = str(fc.get("fylke_code") or props.get("fylkesnummer") or "")
+        name = f.stem.replace("boundary_", "").replace("_25833", "")
+        if code == excluded:
+            left_out.append(name)
+            continue
+        parts.append(Boundary(fc["features"][0]["geometry"], name=name))
+    if not left_out:
+        raise SystemExit(
+            f"no fylke with code {excluded} under {cfg['boundary_dir']}; the "
+            f"held-out region would end up inside the training extent")
+    print(f"training extent: {len(parts)} fylker, holding out "
+          f"{', '.join(left_out)} (code {excluded})", flush=True)
+    return Boundaries(parts, name=cfg["name"])
+
+
+def transfer_regions(area: dict):
+    """`(region the presences are drawn from, the region held out of fitting)`.
+
+    The two extents put the held-out region in opposite places and the
+    difference is easy to get wrong.
+
+    Kristiansand sits **inside** Agder, so Phase 0 draws one presence set over
+    Agder and flags the subset that falls in the kommune. Nordland sits
+    **outside** the national training extent by construction, so the draw
+    region has to be the training fylker plus Nordland or the held-out
+    presences would never be pulled at all - and the test would silently
+    report on zero points.
+
+    Splitting one set is what makes the two sides comparable: identical
+    filtering, identical thinning, identical everything except which side of
+    the line a point fell on.
+    """
+    ext = extent()
+    train = cv_boundary(area)
+    cfg = area[ext.holdout]
+    fc = json.loads((ROOT / cfg["boundary_file"]).read_text(encoding="utf-8"))
+    held = Boundary(fc["features"][0]["geometry"], name=cfg["name"])
+    if isinstance(train, Boundaries):
+        return Boundaries(list(train.parts) + [held],
+                          name="Norway, mainland, all fylker"), held
+    return train, held
+
+
+def transfer_pool() -> list[dict]:
+    """Background for the transfer test, covering both sides of the split.
+
+    The national pool is cached as two lists, cut from one pass over 1.3
+    million records so they cannot drift apart. The transfer test needs both:
+    background inside Nordland is what the held-out AUC is measured against,
+    and without it there is nothing for the held-out presences to be ranked
+    above.
+    """
+    if extent().key == AGDER.key:
+        return target_group_pool()
+    return target_group_pool("training") + target_group_pool("holdout")
+
+
+def target_group_pool(role: str = "training") -> list[dict]:
+    """The cached target-group background pool for the current extent.
+
+    Two file shapes, because they were built by different scripts for
+    different jobs. Agder's is one flat list carrying each record's precision
+    and Artskart id; the national one is split into a `training` and a
+    `holdout` pool so the fourteen fylker and Nordland are cut from a single
+    pass and cannot drift apart. Both have already had the extent, precision
+    and thinning filters applied - in that order, matching the presences - so
+    nothing here filters again.
+
+    Only the coordinates are used downstream; `null_and_background` draws the
+    null and the background disjointly from this list and reads nothing else.
+    The national file stores them rounded to 0.1 m, which is four orders of
+    magnitude below the 32 m cell being sampled.
+    """
+    ext = extent()
+    cache = INTERIM / ext.pool
+    if not cache.exists():
+        script = ("scripts/build_background_pool.py" if ext.key == NORGE.key
+                  else "scripts/report_background.py")
+        raise SystemExit(f"missing {cache} - run {script} first")
+    blob = json.loads(cache.read_text(encoding="utf-8"))
+    if "pool" in blob:
+        return [{"east": e, "north": n, "precision_m": pr, "id": i}
+                for e, n, pr, i in blob["pool"]]
+    if role not in blob.get("pools", {}):
+        raise SystemExit(f"{cache.name} has no '{role}' pool; it holds "
+                         f"{sorted(blob.get('pools', {}))}")
+    return [{"east": e, "north": n, "precision_m": None, "id": None}
+            for e, n in blob["pools"][role]["points"]]
+
+
 def main() -> int:
-    global INCLUDE_VOL_BOUNDS, INCLUDE_ELEVATION, INCLUDE_TWI
+    global INCLUDE_VOL_BOUNDS, INCLUDE_ELEVATION, INCLUDE_TWI, EXTENT
     tag = None
+    if "--national" in sys.argv:
+        EXTENT = NORGE.key
+        # Not a flag the user may countermand: the national terrain raster has
+        # five bands and no sixth to include.
+        INCLUDE_TWI = False
     if "--no-elevation" in sys.argv:
         INCLUDE_ELEVATION = False
         tag = "no-elevation"
     if "--no-twi" in sys.argv:
+        if EXTENT == NORGE.key:
+            raise SystemExit("--no-twi is meaningless with --national: the "
+                             "national terrain raster has no TWI band. See "
+                             "FINDINGS section 18.")
         INCLUDE_TWI = False
         tag = "no-twi"
     if "--tag" in sys.argv:
@@ -215,24 +462,21 @@ def main() -> int:
         INCLUDE_VOL_BOUNDS = False
         tag = tag or "no-vol-bounds"
 
+    ext = extent()
     area = yaml.safe_load((ROOT / "config" / "study_area.yaml").read_text(encoding="utf-8"))
     spp = yaml.safe_load((ROOT / "config" / "species.yaml").read_text(encoding="utf-8"))
     max_prec = area["max_coordinate_precision_m"]
     thin_m = area["reporting_thinning_m"]
     cv = area["spatial_cv"]
     block_m, n_folds, buffer_m = cv["block_size_m"], cv["n_folds"], cv["buffer_m"]
-    fc = json.loads((ROOT / area[cv["cv_extent"]]["boundary_file"]).read_text(encoding="utf-8"))
-    boundary = Boundary(fc["features"][0]["geometry"], name=area[cv["cv_extent"]]["name"])
+    print(f"extent: {ext.label}  ->  data/processed/{ext.report}", flush=True)
+    boundary = cv_boundary(area)
 
     stack = layers()
     if not stack:
         raise SystemExit("no feature rasters found - run scripts/build_terrain.py first")
 
-    cache = INTERIM / "target_group_pool_agder.json"
-    if not cache.exists():
-        raise SystemExit(f"missing {cache} - run scripts/report_background.py first")
-    pool = [{"east": e, "north": n, "precision_m": pr, "id": i}
-            for e, n, pr, i in json.loads(cache.read_text(encoding="utf-8"))["pool"]]
+    pool = target_group_pool()
 
     sets = {sp["scientific_name"]: presences(sp, boundary, max_prec, thin_m)
             for sp in species_cfg.modelled(spp)}
@@ -246,9 +490,17 @@ def main() -> int:
           f"{len(stack)} raster(s)", flush=True)
     print(f"background: {len(bg_set.coords)} target-group points\n", flush=True)
 
+    # Nationally the same 52,249 background points are passed to `build` nine
+    # times, against rasters that cost milliseconds per point to read. Cached,
+    # they are read once. Agder stays uncached: the cache cannot change a value
+    # - tests/test_stack_cache.py pins that - but Phase 0's published numbers
+    # have no reason to depend on a mechanism added for a different extent, and
+    # the Agder run takes minutes either way.
+    sample_cache = SampleCache() if ext.key == NORGE.key else None
+
     rows, importances, designs = [], {}, {}
     for name, coords in sets.items():
-        d = build(coords, bg_set.coords, stack)
+        d = build(coords, bg_set.coords, stack, cache=sample_cache)
         designs[name] = d
         print(f"{name}: {d.n_presence} presences, {d.n_background} background, "
               f"dropped {d.dropped['presence']} / {d.dropped['background']}", flush=True)
@@ -330,6 +582,7 @@ def write_report(rows, importances, designs, spp, stack, block_m, n_folds,
     a("# Model results - spatially blocked\n")
     a(f"Generated by `scripts/run_models.py` on {date.today().isoformat()}"
       + (f", tagged `{tag}`" if tag else "") + ".\n")
+    a(f"**Extent:** {extent().label}.\n")
     a(f"{block_m:.0f} m blocks, {n_folds} folds, {buffer_m:.0f} m exclusion buffer, "
       "target-group background.\n")
     a(f"**Features ({len(feature_names)}):** {', '.join(feature_names)}.\n")
@@ -449,7 +702,8 @@ def write_report(rows, importances, designs, spp, stack, block_m, n_folds,
             a(f"* {wn}")
         a("")
 
-    OUT.parent.mkdir(parents=True, exist_ok=True)
+    out = out_path()
+    out.parent.mkdir(parents=True, exist_ok=True)
     body = "\n".join(w)
     # A tagged run is a variant - one feature dropped, one bound relaxed - and
     # must not overwrite the canonical results. It used to, so running
@@ -460,18 +714,24 @@ def write_report(rows, importances, designs, spp, stack, block_m, n_folds,
     # real numbers survived is that model_results.md had been committed.
     #
     # Tagged runs now write only their archive below. FINDINGS links to both.
+    #
+    # The extent picks the filename, so a national run cannot land on Phase 0's
+    # published results however it is invoked. That is deliberately structural
+    # rather than a check: the same mistake has already been made three times
+    # in this project, and each time the file that was overwritten looked
+    # entirely normal afterwards.
     if not tag:
-        OUT.write_text(body, encoding="utf-8")
+        out.write_text(body, encoding="utf-8")
     print("\n" + body)
     if not tag:
-        print(f"written: {OUT.relative_to(ROOT)}")
+        print(f"written: {out.relative_to(ROOT)}")
 
     # Also keep a per-tag copy. `model_results.md` is the latest run and every
     # run overwrites it, which quietly left FINDINGS section 8 linking to a file
     # that no longer held the numbers section 8 quotes. A results file that
     # cannot be got back is not a record.
     if tag:
-        archive = OUT.parent / "runs" / f"model_results_{tag}.md"
+        archive = out.parent / "runs" / f"{out.stem}_{tag}.md"
         archive.parent.mkdir(parents=True, exist_ok=True)
         # The body is written for `data/processed/`, so its sibling links have
         # to be lifted a directory on the way into `runs/`. Harmless while these

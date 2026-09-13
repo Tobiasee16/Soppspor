@@ -1,13 +1,21 @@
-"""The transferability test: fit on Agder, evaluate once on Kristiansand.
+"""The transferability test: fit on one extent, evaluate once on a held-out one.
 
 CLAUDE.md's study-area section is explicit that the two extents exist for this
 reason - "we are asking whether a model fitted regionally holds up in a smaller
 held-out area" - and that it must be said so explicitly in the writeup. Every
-number produced before this script was Agder-internal: spatially blocked, but
-still trained and tested inside one region.
+number produced before this script was internal to one region: spatially
+blocked, but trained and tested inside it.
 
-    python scripts/run_transfer.py
+    python scripts/run_transfer.py              # Agder    -> Kristiansand
+    python scripts/run_transfer.py --national   # 14 fylker -> Nordland
     python scripts/run_transfer.py --tag no-vol-bounds
+
+The two pairs sit differently and `rm.transfer_regions` handles the difference.
+Kristiansand is *inside* Agder, so Phase 0 draws one presence set and flags the
+subset that falls in the kommune. Nordland is *outside* the national training
+extent by construction, so the draw region there is the fourteen training
+fylker plus Nordland - otherwise no held-out presence would be pulled at all
+and the test would report confidently on nothing.
 
 The feature stack, the presence filtering, the thinning and the background pool
 are imported from `run_models.py` rather than restated, so the two cannot drift
@@ -40,17 +48,24 @@ import yaml
 import run_models as rm
 from src import species as species_cfg
 from src.features.background import null_and_background
-from src.features.stack import build
+from src.features.stack import SampleCache, build
 from src.geometry import Boundary
 from src.model.models import Constant, LightGBM, MaxentStyle
 from src.validate.harness import held_out_extent
 
 INTERIM = ROOT / "data" / "interim"
-OUT = ROOT / "data" / "processed" / "transferability.md"
+
+
+def out_path():
+    """Where this run writes. Extent-derived, so the two can never collide."""
+    return ROOT / "data" / "processed" / rm.extent().transfer_report
 
 
 def main() -> int:
     tag = None
+    if "--national" in sys.argv:
+        rm.EXTENT = rm.NORGE.key
+        rm.INCLUDE_TWI = False
     if "--tag" in sys.argv:
         tag = sys.argv[sys.argv.index("--tag") + 1]
     if "--no-vol-bounds" in sys.argv:
@@ -63,27 +78,23 @@ def main() -> int:
     thin_m = area["reporting_thinning_m"]
     buffer_m = area["spatial_cv"]["buffer_m"]
 
-    train_cfg = area["training_extent"]
-    pred_cfg = area["prediction_extent"]
-    train_fc = json.loads((ROOT / train_cfg["boundary_file"]).read_text(encoding="utf-8"))
-    pred_fc = json.loads((ROOT / pred_cfg["boundary_file"]).read_text(encoding="utf-8"))
-    training = Boundary(train_fc["features"][0]["geometry"], name=train_cfg["name"])
-    prediction = Boundary(pred_fc["features"][0]["geometry"], name=pred_cfg["name"])
+    ext = rm.extent()
+    print(f"extent: {ext.label}  ->  data/processed/{ext.transfer_report}", flush=True)
+    train_cfg = area[ext.cv_extent or area["spatial_cv"]["cv_extent"]]
+    pred_cfg = area[ext.holdout]
+    training, prediction = rm.transfer_regions(area)
 
     stack = rm.layers()
     if not stack:
         raise SystemExit("no feature rasters found - run scripts/build_terrain.py first")
 
-    cache = INTERIM / "target_group_pool_agder.json"
-    if not cache.exists():
-        raise SystemExit(f"missing {cache} - run scripts/report_background.py first")
-    pool = [{"east": e, "north": n, "precision_m": pr, "id": i}
-            for e, n, pr, i in json.loads(cache.read_text(encoding="utf-8"))["pool"]]
+    pool = rm.transfer_pool()
 
-    # Presence sets over the whole training extent. Kristiansand sits inside
-    # Agder, so the held-out points are a subset of these rather than a
-    # separate pull - splitting one set is the only way to be certain the same
-    # filtering and thinning applied to both sides.
+    # Presence sets over the whole draw region, flagged afterwards rather than
+    # pulled twice. Kristiansand sits inside Agder and Nordland sits outside
+    # the national training extent, so `transfer_regions` returns a region that
+    # covers both sides in either case - splitting one set is the only way to
+    # be certain the same filtering and thinning applied to both.
     sets = {sp["scientific_name"]: rm.presences(sp, training, max_prec, thin_m)
             for sp in species_cfg.modelled(spp)}
     n_null = max(len(v) for v in sets.values())
@@ -95,9 +106,11 @@ def main() -> int:
           f"{len(stack)} raster(s)")
     print(f"holding out: {prediction.name}\n", flush=True)
 
+    sample_cache = SampleCache() if ext.key == rm.NORGE.key else None
+
     rows, counts = [], {}
     for name, coords in sets.items():
-        d = build(coords, bg_set.coords, stack)
+        d = build(coords, bg_set.coords, stack, cache=sample_cache)
         pts = [tuple(c) for c in d.coords]
         X = [list(r) for r in d.X]
         y = list(d.y)
@@ -147,25 +160,37 @@ def write_report(rows, counts, spp, stack, train_cfg, pred_cfg, buffer_m, tag) -
 
     w = []
     a = w.append
-    a("# Transferability - fitted on Agder, evaluated once on Kristiansand\n")
+    train_name = train_cfg["name"]
+    held_name = pred_cfg["name"]
+    # Short labels for table headers, where the full config names do not fit.
+    held_short = held_name.split(" fylke")[0].split(" kommune")[0]
+    train_short = train_name.split(",")[0].split(" fylke")[0]
+    if "exclude_code" in train_cfg:
+        # The national training extent is defined by what it leaves out, and
+        # a title reading "fitted on Norway, evaluated on Nordland" would
+        # describe a leak rather than a test.
+        train_short = f"{train_short} minus {held_short}"
+
+    a(f"# Transferability - fitted on {train_short}, evaluated once on {held_short}\n")
     a(f"Generated by `scripts/run_transfer.py` on {date.today().isoformat()}"
       + (f", tagged `{tag}`" if tag else "") + ".\n")
-    a(f"**Training extent:** {train_cfg['name']}, minus the held-out extent and "
+    a(f"**Training extent:** {train_name}, minus the held-out extent and "
       f"everything within {buffer_m:.0f} m of it.")
-    a(f"**Held-out extent:** {pred_cfg['name']}. Never seen during fitting.\n")
+    a(f"**Held-out extent:** {held_name}. Never seen during fitting.\n")
     a("This is the question CLAUDE.md's study-area section poses: does a model")
-    a("fitted regionally hold up in a smaller area it was not trained on? Every")
-    a("other number in this project is Agder-internal - spatially blocked, but")
-    a("trained and tested inside one region.\n")
+    a("fitted regionally hold up in an area it was not trained on? Every other")
+    a("number in this project is internal to its own training region -")
+    a("spatially blocked, but trained and tested inside one extent.\n")
     a("**It is not cross-validation.** There is one test set and one number per")
     a("model. The interval is a percentile bootstrap over the held-out points,")
     a("which covers sampling variation in those points and nothing else - in")
-    a("particular it says nothing about whether Kristiansand's records are a")
-    a("fair sample of Kristiansand, which on effort-biased data is the larger")
+    a(f"particular it says nothing about whether {held_short}'s records are a")
+    a(f"fair sample of {held_short}, which on effort-biased data is the larger")
     a("worry.\n")
 
     a("## Held-out record counts\n")
-    a("| set | presences in Agder | held out in Kristiansand | held-out background |")
+    a(f"| set | presences in {train_short} | held out in {held_short} "
+      f"| held-out background |")
     a("|---|---|---|---|")
     for name in list(order) + extra + [null_label]:
         c = counts.get(name)
@@ -244,10 +269,27 @@ def write_report(rows, counts, spp, stack, train_cfg, pred_cfg, buffer_m, tag) -
           f"{r['res'].n_buffered} |")
     a("")
 
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text("\n".join(w), encoding="utf-8")
-    print("\n" + "\n".join(w))
-    print(f"written: {OUT.relative_to(ROOT)}")
+    out = out_path()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    body = "\n".join(w)
+    # A tagged run is a variant and must not land on the canonical file. This
+    # script used to write it unconditionally, which is exactly the bug
+    # run_models.py has a paragraph about: `--tag no-vol-bounds` replaced the
+    # baseline with the thing being compared against it, and the comparison
+    # then reported no difference. Found while giving this script a second
+    # extent, in code that had to be touched anyway.
+    if not tag:
+        out.write_text(body, encoding="utf-8")
+    print("\n" + body)
+    if not tag:
+        print(f"written: {out.relative_to(ROOT)}")
+    else:
+        archive = out.parent / "runs" / f"{out.stem}_{tag}.md"
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        archive.write_text(body.replace("](boyce_diagnosis.md)",
+                                        "](../boyce_diagnosis.md)"),
+                           encoding="utf-8")
+        print(f"written: {archive.relative_to(ROOT)}")
 
 
 if __name__ == "__main__":

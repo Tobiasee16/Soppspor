@@ -2708,6 +2708,145 @@ saying nothing about the fylke one. What settled it was sampling the built
 raster and asking whether the values were actually there.
 
 
+## 21. Teaching the pipeline a second extent - 2026-09-13
+
+The national feature stack was finished and validated (section 17), and the
+remaining work was described as "nine hardcoded Agder paths in `run_models.py`".
+That was wrong, and the thing it missed would have stopped the national run
+dead on its first line of real work.
+
+### 21a. The blocker: a whole band does not fit in the machine
+
+`sample_layers` read each band whole, as float64, and then indexed into it. For
+Agder that is the right thing and costs nothing worth counting. Nationally:
+
+| raster | cells | one band as float64 |
+|---|---|---|
+| `terrain_agder_32m.tif` | 0.04 billion | 0.36 GB |
+| `sr16_42_SRRVOLMB.tif` (Agder) | 0.18 billion | 1.42 GB |
+| `terrain_norge_32m.tif` | **1.83 billion** | **14.67 GB** |
+| `ar50_norge_32m.tif` | 1.83 billion | 14.67 GB |
+| `sr16_norge/SRRVOLMB.tif` | **9.03 billion** | **72.23 GB** |
+
+The machine has 15.7 GB. The national SR16 mosaic is 90,016 x 100,299 cells.
+
+Nothing about this was visible from the code: `sample_layers` has no size in it,
+and the layer list is built from filenames. It appears the moment the first
+point is sampled, as a `MemoryError` on a run that has already spent twenty
+minutes filtering occurrence records.
+
+### 21b. The fix, and why it is a sampler change rather than a data change
+
+Sampling 67,000 points out of 1.83 billion cells does not need the other 1.829
+billion. Above 250 million cells a band is now read block by block: each point
+is assigned to the raster's **own** block grid, every occupied block is read
+once, and the points that fall in it are served from that read. Memory is one
+block, never a band.
+
+Reading all requested bands in a single `ds.read` matters as much as the
+windowing. NIBIO ships the national SR16 as LZW **stripes**, one row per block,
+pixel interleaved, so pulling one band decompresses the row holding all three
+anyway - asking for the three together pays that once instead of three times.
+
+Measured, 2,000 uniformly scattered points, which is a worst case because
+scattered points share almost no blocks while real occurrence records cluster
+and share many:
+
+| raster | bands | ms per point | per 67,000 points |
+|---|---|---|---|
+| `terrain_norge_32m.tif` | 5 | 5.0 | 5.6 min |
+| `sr16_norge/SRRVOLMB.tif` | 3 | 2.5 | 2.7 min |
+| `ar50_norge_32m.tif` | 1 | 0.3 | 0.3 min |
+
+About 31 minutes for a full pass over the national stack. The alternative - 
+resampling SR16 from 16 m to the 32 m model grid so the whole thing fits -
+would have been faster to run and would have thrown away half the resolution of
+the single most informative layer in the stack, to solve a problem that turned
+out to cost half an hour.
+
+**The limit sits between the two extents on purpose.** Agder's largest raster is
+0.18 billion cells and the smallest national one is 1.83 billion, so the
+threshold has an order of magnitude of clearance on both sides and every Phase 0
+number keeps coming out of the identical code path. Twenty-one tests sample the
+same points both ways, on a tiled raster and a striped one, and demand exact
+equality including where the NaNs land. Two sampling implementations that
+disagree by a cell would produce a model fitted on slightly different data, and
+no AUC could reveal it.
+
+Bilinear stays on the whole-band path and raises above the limit rather than
+guessing. The only bilinear layer is the 1 km climate raster - 1,195 x 1,515
+nationally - so the error cannot fire, but a blockwise bilinear needs the four
+neighbours of a point and two of them can sit in the next block, which is the
+kind of edge case that returns a plausible number rather than an error.
+
+### 21c. Sampling the same 52,249 points nine times
+
+`build` is called once per species and every call passes the same background.
+Nationally that is 52,249 target-group points against nine presence sets, so
+uncached it is nine passes over roughly 40 GB of raster to obtain one pass worth
+of numbers - about four and a half hours of pure I/O, for nothing.
+
+Rows are now cached by coordinate. The null control shares the pool with the
+background, so its rows come back free as well. The cache is **not** used by the
+Agder run: it cannot change a value, and there is a test file that says so, but
+Phase 0's published numbers have no reason to depend on a mechanism introduced
+for a different extent, and the Agder run takes minutes either way.
+
+### 21d. The extent table, and one bug it exposed
+
+Which rasters, which background pool, which boundary, which output file: all of
+it now comes off one `Extent` record rather than being decided in nine places.
+The point is not tidiness. **A national run cannot land on `model_results.md`**,
+because the extent picks the filename and there is no argument combination that
+changes it. This project has now made that exact mistake three times - a
+download, a climate report and a tagged model run - and each time the
+overwritten file looked entirely normal afterwards.
+
+Writing the same guard into `run_transfer.py` found the bug still live there:
+it wrote `transferability.md` **unconditionally**, so `--tag no-vol-bounds`
+replaced the baseline with the variant being compared against it. That is the
+identical failure `run_models.py` carries a paragraph about, in the script that
+imports `run_models`. Tagged transfer runs now write only to `runs/`.
+
+### 21e. Two extents that put the held-out region on opposite sides
+
+Kristiansand is **inside** Agder. Nordland is **outside** the national training
+extent by construction. So the transfer test cannot use one rule:
+
+| | draw presences from | held out |
+|---|---|---|
+| Phase 0 | Agder | Kristiansand, a subset of it |
+| national | 14 fylker **+ Nordland** | Nordland |
+
+Using the training extent as the draw region nationally would pull zero
+Nordland presences and the test would report confidently on nothing. Using the
+union for blocked CV would put the held-out region into fitting. Those are
+different regions built by different functions, and the test that matters
+asserts both directions at once: a Nordland point is in the transfer draw
+region and is **not** in the cross-validation region.
+
+Cross-check on the new code path: `run_models.py --national` finds 2,256
+thinned *C. tubaeformis* presences in the fourteen training fylker, which is
+exactly what `check_holdout_power.py` counted independently in section 16b.
+
+### 21f. SR16 covers the held-out region - checked before the run, not after
+
+SR16 maps productive forest, Nordland is mountainous, and a held-out region
+where the forest layer is mostly absent would produce a transfer test measuring
+the missing-data indicator rather than the forest. Share of thinned presence
+points with no SR16 value:
+
+| layer | Agder | 14 training fylker | Nordland |
+|---|---|---|---|
+| TRESLAG | 15.9% | 16.8% | **18.8%** |
+| VOLMB | 15.4% | 16.7% | **19.3%** |
+| MHOYDE | 15.4% | 16.7% | **19.3%** |
+
+Three points worse than Agder, not a cliff. Recorded because the result is
+negative and would never have been looked for afterwards - a weak Nordland
+number would have been attributed to transfer distance, which is exactly the
+conclusion the national design exists to test.
+
 ## Open questions
 
 - **Should the maps still be blurred at all?** `build_maps.py` applies a 500 m
