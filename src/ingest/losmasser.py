@@ -94,6 +94,144 @@ def unmapped_codes(jordart_values) -> dict[int, int]:
     return out
 
 
+def rasterise_windowed(sources, reference: str | pathlib.Path,
+                       out_path: str | pathlib.Path, block: int = 4096,
+                       progress=None) -> dict:
+    """Burn grouped deposit codes from one or more sources, window by window.
+
+    Two things force this, both found on the national delivery.
+
+    **Size.** The national LosmasseFlate shapefile is 728 MB of geometry and the
+    target grid is 1.83 billion cells; neither end fits comfortably in 15.7 GB.
+
+    **Count.** NGU ships Agder as one polygon layer and Norway as TWO -
+    `LosmasseFlate_20240621` and `_20240622` - and they are spatially disjoint:
+    0.0% of sampled points from the second fall inside any polygon of the first.
+    It is 11,482 km2 of extra ground, 14.4% of it in Nordland, the held-out
+    region. Reading only the first would leave the transfer test scoring
+    `losmasse_missing` over ground that is in fact mapped, and the weaker result
+    would look like poor transferability rather than like missing data. Nothing
+    in the download names the second file as a supplement; the extraction date
+    in the filename is the only signal. See FINDINGS section 20.
+
+    So `sources` is a list, and every one of them is burned. A missing source is
+    an error rather than a silent skip, because a silently skipped source is
+    exactly the failure this function exists to prevent.
+
+    Burn order is largest-first WITHIN each window, across all sources together,
+    which is what the whole-array path does globally. The window reads every
+    polygon overlapping it, not only those centred in it, so the overlap
+    resolves the same at a window edge as in the middle.
+    """
+    import geopandas as gpd
+    import pandas as pd
+    import rasterio
+    from rasterio.features import rasterize
+
+    paths = [pathlib.Path(p) for p in sources]
+    for p in paths:
+        if not p.exists():
+            raise FileNotFoundError(f"losmasser source missing: {p}")
+
+    with rasterio.open(reference) as ref:
+        profile = ref.profile.copy()
+        transform, H, W = ref.transform, ref.height, ref.width
+        ref_epsg = ref.crs.to_epsg()
+
+    # CRS is checked up front, per source, before any burning happens. A
+    # mismatch discovered halfway through would leave a half-written raster.
+    from pyogrio import read_info
+    n_features = 0
+    for p in paths:
+        info = read_info(str(p))
+        # The true polygon count comes from the file header. Summing what the
+        # windows read would count every polygon crossing a window boundary
+        # more than once, which is a made-up number that looks like a real one.
+        n_features += int(info.get("features") or 0)
+        crs = info.get("crs")
+        epsg = None
+        if crs:
+            try:
+                from pyproj import CRS as _CRS
+                epsg = _CRS.from_user_input(crs).to_epsg()
+            except Exception:
+                epsg = None
+        if epsg is not None and ref_epsg is not None and epsg != ref_epsg:
+            raise ValueError(
+                f"{p.name} is EPSG:{epsg}, reference grid is EPSG:{ref_epsg}. "
+                f"Reproject on download, not here.")
+
+    profile.update(count=1, dtype="uint8", nodata=NODATA, compress="deflate",
+                   tiled=True, blockxsize=256, blockysize=256)
+    profile.pop("photometric", None)
+
+    cell = abs(transform.a)
+    nblocks = ((H + block - 1) // block) * ((W + block - 1) // block)
+    done = 0
+    covered = 0
+    nreads = 0
+    by_group = {c: 0 for c in CATEGORIES}
+    unmapped: dict[int, int] = {}
+
+    with rasterio.open(out_path, "w", **profile) as out:
+        for row0 in range(0, H, block):
+            for col0 in range(0, W, block):
+                h = min(block, H - row0)
+                w = min(block, W - col0)
+                win = rasterio.windows.Window(col0, row0, w, h)
+                wt = rasterio.windows.transform(win, transform)
+                bbox = (wt.c - cell, wt.f - h * cell - cell,
+                        wt.c + w * cell + cell, wt.f + cell)
+
+                frames = []
+                for p in paths:
+                    g = gpd.read_file(p, engine="pyogrio", columns=["jordart"],
+                                      bbox=bbox)
+                    if len(g):
+                        frames.append(g)
+                tile = np.full((h, w), NODATA, dtype="uint8")
+                if frames:
+                    gdf = (frames[0] if len(frames) == 1
+                           else pd.concat(frames, ignore_index=True))
+                    nreads += len(gdf)
+                    vals = gdf["jordart"].to_numpy()
+                    for code, n in unmapped_codes(vals).items():
+                        unmapped[code] = unmapped.get(code, 0) + n
+                    groups = group_codes(vals)
+                    order = np.argsort(-gdf.geometry.area.to_numpy())
+                    shapes = [(gdf.geometry.iloc[i], int(groups[i]))
+                              for i in order if groups[i] != NODATA]
+                    if shapes:
+                        tile = rasterize(shapes, out_shape=(h, w), transform=wt,
+                                         fill=NODATA, dtype="uint8",
+                                         all_touched=False)
+                covered += int((tile != NODATA).sum())
+                for c in CATEGORIES:
+                    by_group[c] += int((tile == c).sum())
+                out.write(tile, 1, window=win)
+                done += 1
+                if progress:
+                    progress(done, nblocks)
+        out.set_band_description(1, "losmasse_group")
+
+    total = H * W
+    return {
+        "sources": [str(p) for p in paths],
+        "polygons": n_features,
+        # Reads, not polygons: a polygon crossing a window boundary is read by
+        # each window it touches. Kept because a large ratio to `polygons`
+        # means the block size is small relative to the geometry.
+        "polygon_reads": nreads,
+        "blocks": nblocks,
+        "cells": total,
+        "cells_covered": covered,
+        "coverage_pct": 100.0 * covered / total if total else 0.0,
+        "unmapped_jordart": unmapped,
+        "cells_by_group": {LABELS[c]: by_group[c] for c in CATEGORIES},
+        "path": str(out_path),
+    }
+
+
 def rasterise(shapefile: str | pathlib.Path, reference: str | pathlib.Path,
               out_path: str | pathlib.Path) -> dict:
     """Burn grouped deposit codes onto the reference raster's exact grid.
