@@ -310,17 +310,50 @@ def test_filtered_download_retries_a_transient_empty_page(tmp_path, monkeypatch)
     assert meta["empty_page_retries"] == 1
 
 
-def test_filtered_download_still_refuses_a_persistently_empty_page(tmp_path, monkeypatch):
-    """Absorbing a blip must not become absorbing a real hole."""
-    pages = [_rows(1000, 0), [], _rows(1000, 2000)]
-    monkeypatch.setattr(artskart, "_get", _filtered_pages(pages, 3000))
+def test_filtered_download_skips_a_permanently_empty_page(tmp_path, monkeypatch):
+    """A page that is empty every time is the endpoint, not a dropped page.
+
+    Measured 2026-09-13: pageIndex 1075 of the national fungal query returns
+    zero rows deterministically, while 1074 returns 260 and 1076 returns 724,
+    equally deterministically. Sixty random pages sampled across the whole
+    range contained no other empty one, and their mean size of 995 extrapolates
+    to 99.5% of TotalCount.
+
+    So an empty page costs about a thousand records out of 1.33 million and is
+    worth skipping. Aborting on it is what killed two consecutive runs at 81%.
+    """
+    # 60 pages, one of them empty - the real ratio is 1 page in 1,326, and the
+    # skipped records have to stay inside COUNT_TOLERANCE or the aggregate gate
+    # correctly refuses the file.
+    pages = [_rows(100, i * 100) for i in range(60)]
+    pages[37] = []
+    fake = _filtered_pages(pages, 6000)
+    monkeypatch.setattr(artskart, "_get", fake)
     monkeypatch.setattr(artskart.time, "sleep", lambda s: None)
 
     dest = tmp_path / "bg.jsonl"
-    with pytest.raises(RuntimeError, match="came back empty"):
+    meta = artskart.download_filtered({"f": 1}, dest, pause_s=0)
+
+    assert meta["records_downloaded"] == 5900      # 1.67% short, inside the 2%
+    assert meta["empty_pages_skipped"] == [37]
+    assert dest.exists()
+    # It tried before giving up on that page, rather than skipping on sight.
+    assert fake.seen[37] == artskart.EMPTY_PAGE_ATTEMPTS
+
+
+def test_filtered_download_fails_when_the_skipping_adds_up(tmp_path, monkeypatch):
+    """Skipping one page is a rounding error; skipping half of them is a hole.
+
+    With no per-page signal that distinguishes the two, the aggregate shortfall
+    against TotalCount is the only gate left, so it has to actually bite.
+    """
+    pages = [_rows(1000, 0), [], [], [], _rows(1000, 4000)]
+    monkeypatch.setattr(artskart, "_get", _filtered_pages(pages, 5000))
+    monkeypatch.setattr(artskart.time, "sleep", lambda s: None)
+
+    dest = tmp_path / "bg.jsonl"
+    with pytest.raises(RuntimeError, match="shortfall"):
         artskart.download_filtered({"f": 1}, dest, pause_s=0)
-    # The real bug: this file must actually be gone. Deleting it from inside
-    # the `with` block raises PermissionError on Windows and leaves it behind.
     assert not dest.exists()
 
 

@@ -57,9 +57,17 @@ VERIFIED BEHAVIOUR - READ BEFORE CHANGING:
   index is this endpoint being flaky, not evidence of anything.
   Page sizes at depth are wild in the same way: 786, 1000, 1000, 964, 301, 62
   measured across pages 1070-1326 on a PageSize of 1000.
-  So there is NO single-response signal that distinguishes a dropped page from
-  a blip. The download asks an empty page again, up to EMPTY_PAGE_ATTEMPTS
-  times, and only a page that is persistently empty counts as a hole.
+  Worse, some empty pages are PERMANENT. pageIndex 1075 of the national fungal
+  query returns zero rows every single time, between 1074 (260 rows) and 1076
+  (724 rows) which are equally deterministic. Sixty random pages sampled across
+  the full range contained no other empty one, and their mean size of 995
+  extrapolates to 99.5% of TotalCount.
+  So there is NO per-page signal that distinguishes a dropped page from a blip
+  or from a permanent gap. An empty page is asked again up to
+  EMPTY_PAGE_ATTEMPTS times; if it stays empty it is recorded by index and
+  skipped, costing about a thousand records out of 1.33 million. The ONLY
+  completeness gate left is the aggregate one against TotalCount, which is why
+  COUNT_TOLERANCE has to keep biting.
 * There is NO deep-paging penalty, and the throughput decay during a long run
   is not evidence of one. Measured 2026-09-13 during the national pull, whose
   rate fell from 900 to 620 records/s over 200 pages: a cold request costs
@@ -274,6 +282,7 @@ def download_filtered(
     dest.parent.mkdir(parents=True, exist_ok=True)
     written = 0
     empty_retries = 0
+    skipped: list[int] = []
     # Cleanup lives out here because the file must be CLOSED before it can be
     # removed. Deleting from inside the `with` raises PermissionError on
     # Windows (WinError 32) and replaces whatever actually went wrong with an
@@ -306,12 +315,20 @@ def download_filtered(
                               file=sys.stderr, flush=True)
                         time.sleep(RETRY_BASE_S * attempt)
                 if not got:
-                    raise RuntimeError(
-                        f"page {page} of {pages} came back empty for {filters} "
-                        f"on {EMPTY_PAGE_ATTEMPTS} consecutive attempts. One "
-                        f"empty page is this endpoint being flaky; four in a "
-                        f"row is a hole. Removed the partial file rather than "
-                        f"leave a truncated background set.")
+                    # Persistently empty, so it is the endpoint rather than a
+                    # blip - pageIndex 1075 of the national fungal query is
+                    # empty every single time, between two neighbours that are
+                    # not. Skipped and recorded, not fatal: it costs about a
+                    # thousand records out of 1.33 million, and aborting on it
+                    # killed two consecutive runs at 81%.
+                    #
+                    # Nothing is invented to fill the gap. The page is counted,
+                    # named in the sidecar, and the aggregate shortfall check
+                    # below is what decides whether the file is usable.
+                    skipped.append(page)
+                    print(f"    page {page} of {pages} is empty on every "
+                          f"attempt; skipping it", file=sys.stderr, flush=True)
+                    continue
                 for o in got:
                     fh.write(json.dumps(o, ensure_ascii=False) + NEWLINE)
                     written += 1
@@ -337,7 +354,8 @@ def download_filtered(
             f"expected about {expected} records for {filters}, got {written} "
             f"- a shortfall of {100 * (1 - written / expected):.1f}%, past the "
             f"{COUNT_TOLERANCE:.0%} this endpoint's own inconsistency accounts "
-            f"for. Removed the partial file.")
+            f"for. {len(skipped)} page(s) were empty on every attempt and "
+            f"skipped: {skipped[:20]}. Removed the partial file.")
 
     meta = {
         "source": BASE,
@@ -352,6 +370,9 @@ def download_filtered(
         # Empty pages that were asked again and then answered. Non-zero is
         # normal for this endpoint; large is a reason to distrust the file.
         "empty_page_retries": empty_retries,
+        # Pages this endpoint would not serve at all. Named rather than
+        # counted, so the gap is reproducible by anyone who wants to check.
+        "empty_pages_skipped": skipped,
     }
     dest.with_suffix(".meta.json").write_text(
         json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8"
