@@ -8,6 +8,7 @@ blocked, but trained and tested inside it.
 
     python scripts/run_transfer.py              # Agder    -> Kristiansand
     python scripts/run_transfer.py --national   # 14 fylker -> Nordland
+    python scripts/run_transfer.py --national --no-climate
     python scripts/run_transfer.py --tag no-vol-bounds
 
 The two pairs sit differently and `rm.transfer_regions` handles the difference.
@@ -68,6 +69,23 @@ def main() -> int:
         rm.INCLUDE_TWI = False
     if "--tag" in sys.argv:
         tag = sys.argv[sys.argv.index("--tag") + 1]
+    if "--no-climate" in sys.argv:
+        # Run this against the blocked-CV ablation, not on its own. The two
+        # answer different halves of one question, and it is the CONTRAST that
+        # is informative:
+        #
+        #   ecology       - removing rainfall hurts the moisture-dependent
+        #                   species in BOTH, because the thing being removed is
+        #                   real habitat information wherever you stand.
+        #   accessibility - removing it hurts blocked CV, where effort bias is
+        #                   shared within a region, but does little to transfer,
+        #                   because a coast-inland proxy fitted on southern
+        #                   Norway has no reason to hold in Nordland.
+        #
+        # See FINDINGS section 6 for the registration and section 22 for what
+        # came out.
+        rm.INCLUDE_CLIMATE = False
+        tag = tag or "no-climate"
     if "--no-vol-bounds" in sys.argv:
         rm.INCLUDE_VOL_BOUNDS = False
         tag = tag or "no-vol-bounds"

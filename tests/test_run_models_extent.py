@@ -386,6 +386,33 @@ class TestTransferPool:
             (1.0, 2.0), (3.0, 4.0), (9.0, 9.0)]
 
 
+class TestTransferFlags:
+    """The transfer ablation has to match the blocked-CV one, or the contrast
+    between them - which is the whole point of running both - compares two
+    different stacks."""
+
+    def run_argv(self, monkeypatch, *args):
+        import run_transfer as rt
+        monkeypatch.setattr(rm, "EXTENT", rm.AGDER.key)
+        monkeypatch.setattr(rm, "INCLUDE_CLIMATE", True)
+        monkeypatch.setattr(rm, "INCLUDE_TWI", True)
+        monkeypatch.setattr(rm, "INCLUDE_VOL_BOUNDS", True)
+        monkeypatch.setattr(rm, "transfer_regions",
+                            lambda area: (_ for _ in ()).throw(SystemExit("stop")))
+        monkeypatch.setattr(sys, "argv", ["run_transfer.py", *args])
+        with pytest.raises(SystemExit, match="stop"):
+            rt.main()
+
+    def test_no_climate_sets_the_same_flag_run_models_uses(self, monkeypatch):
+        self.run_argv(monkeypatch, "--national", "--no-climate")
+        assert rm.INCLUDE_CLIMATE is False
+        assert rm.EXTENT == rm.NORGE.key
+
+    def test_national_alone_leaves_climate_on(self, monkeypatch):
+        self.run_argv(monkeypatch, "--national")
+        assert rm.INCLUDE_CLIMATE is True
+
+
 class TestTransferReportPaths:
     def test_the_two_extents_write_different_files(self, monkeypatch):
         import run_transfer as rt
