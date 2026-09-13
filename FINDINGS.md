@@ -2441,6 +2441,72 @@ from whichever answer is convenient.
    and nothing they produced could be compared.
 
 
+### 18f. Result - the registered prediction FAILED, and the threshold was the flaw
+
+Run 2026-09-13, full output in `data/processed/runs/model_results_no-twi.md`.
+
+**The null control is clean**: 0.492 -> 0.487 on maxent, 0.471 -> 0.467 on
+lightgbm. Nothing below is an artefact of broken background sampling.
+
+| species | model | baseline | no-TWI | delta | delta / fold sd |
+|---|---|---|---|---|---|
+| *C. tubaeformis* | lightgbm | 0.645 | 0.634 | **-0.011** | 0.25 |
+| *C. tubaeformis* | maxent | 0.705 | 0.707 | +0.002 | 0.06 |
+| *C. cibarius* | lightgbm | 0.685 | 0.676 | -0.009 | 0.20 |
+| *C. cibarius* | maxent | 0.690 | 0.693 | +0.003 | 0.08 |
+| *A. muscaria* | lightgbm | 0.664 | 0.657 | -0.007 | 0.11 |
+| *A. muscaria* | maxent | 0.658 | 0.658 | +0.000 | 0.00 |
+| *B. edulis* | lightgbm | 0.660 | 0.658 | -0.002 | 0.06 |
+| *B. edulis* | maxent | 0.695 | 0.698 | +0.003 | 0.11 |
+| *C. cornucopioides* | lightgbm | 0.757 | 0.757 | +0.000 | 0.00 |
+| *C. cornucopioides* | maxent | 0.766 | 0.769 | +0.003 | 0.08 |
+| *L. versipelle* | lightgbm | 0.598 | 0.586 | **-0.012** | 0.12 |
+| *L. versipelle* | maxent | 0.574 | 0.563 | **-0.011** | 0.16 |
+| *S. luteus* | lightgbm | 0.699 | 0.701 | +0.002 | 0.05 |
+| *S. luteus* | maxent | 0.653 | 0.654 | +0.001 | 0.02 |
+| *H. repandum* | lightgbm | 0.605 | 0.616 | **+0.011** | 0.21 |
+| *H. repandum* | maxent | 0.666 | 0.669 | +0.003 | 0.03 |
+| synthetic null | lightgbm | 0.471 | 0.467 | -0.004 | 0.11 |
+| synthetic null | maxent | 0.492 | 0.487 | -0.005 | 0.20 |
+
+**The registered prediction failed.** 18c predicted "less than 0.01 for every
+species on both models". Four of eighteen comparisons exceed 0.01 and the worst
+is 0.012. Recorded as a failure rather than rounded into a pass.
+
+**The failure is in the registration, not in TWI.** Every delta is at most
+**0.25 of one fold standard deviation** - the largest, *C. tubaeformis* on
+lightgbm, moves 0.011 against a fold spread of +/-0.040. A threshold was
+registered that is finer than the experiment can resolve. The right
+pre-registration would have been in units of fold spread, not absolute AUC, and
+that is a lesson for the next ablation rather than a result about this one.
+
+Three things say the residue is noise rather than signal:
+
+1. **The direction is mixed.** *H. repandum* gets **better** without TWI
+   (+0.011). A feature carrying real information does not improve a model by
+   being removed.
+2. **Maxent barely moves.** Seven of nine species shift by 0.003 or less on the
+   regularised linear model. Every move past 0.009 but one is lightgbm, which
+   has the wider fold spreads to begin with.
+3. **It is not where the ecology predicted.** CLAUDE.md expected TWI to "bite
+   hard" for *C. tubaeformis*, a species of damp mossy hollows. That species
+   moves 0.011 on one model and 0.002 on the other.
+
+One case deserves naming rather than averaging away: ***L. versipelle* moves
+past 0.01 on BOTH models in the same direction** (-0.012, -0.011), the only
+species where that happens. Rodskrubb is a birch associate and birch does
+occupy wet ground, so this may be a real if tiny effect. It is also the weakest
+model in the table at 0.574-0.598, so there is little signal there to divide up.
+
+**Conclusion: TWI at 32 m carries nothing this test can separate from noise.**
+Either CLAUDE.md's ecological reasoning was wrong, or - more likely - a 32 m
+wetness index cannot resolve a hollow a couple of metres across, which for this
+project amounts to the same thing.
+
+By the thresholds registered in 18d, 0.012 falls in the **0.01 to 0.03 band,
+which was reserved for the team's decision rather than mine.**
+
+
 ## 19. Does an Agder fruiting window survive being used in Finnmark? - 2026-09-13
 
 A concern raised and then tested, rather than carried as an unexamined risk.
@@ -2484,6 +2550,67 @@ climate feature, or that 73 days is the right width. It establishes only that
 the window does not need to move with latitude. The feature's weakness is
 elsewhere and already recorded: permutation importance for `autumn_rain_mm` is
 +0.002 to +0.020 across the eight species, small but consistently positive.
+
+
+## 20. A second losmasser file that Agder never had - 2026-09-13
+
+Found while preparing the national substrate layer. It belongs in FINDINGS
+because it is a silent data gap, not a modelling choice.
+
+NGU's **Agder** delivery contains one polygon layer,
+`LosmasseFlate_20240621`. The **landsdekkende** delivery contains two: that
+one, and `LosmasseFlate_20240622` - extracted a day later, same schema, same
+CRS, same `objtype`. Nothing in the download names it as a supplement, and the
+only thing distinguishing it is the date in the filename.
+
+**The two are spatially disjoint.** Of 2,593 representative points sampled from
+`_20240622`, **0.0%** fall inside any `_20240621` polygon. It is not a revision
+of the first file. It is extra ground.
+
+| | polygons | area |
+|---|---|---|
+| `_20240621`, national | 642,775 | - |
+| `_20240622`, national | 18,148 | **11,482 km2** |
+
+All of it is on the mainland, and it is not spread evenly:
+
+| fylke | share of the supplement |
+|---|---|
+| Trondelag | 85.0% |
+| **Nordland** | **14.4%** |
+| Agder | 0.4% |
+| everywhere else | 0.2% |
+
+Its dominant substrate is **peat** - 10,003 of 18,148 polygons - then bare
+bedrock, moraine, thin organic cover and marine deposits. Every one maps to a
+real group in `src/ingest/losmasser.py`; none is NODATA.
+
+### What missing it would have cost
+
+**In the held-out region, 2,944 km2.** The supplement adds 4.2% more mapped
+substrate area to Nordland than `_20240621` alone. Without it the transfer test
+would read `losmasse_missing` over ground that is in fact mapped, in the one
+region whose entire job is to be a fair test - and the resulting weaker number
+would have looked like poor transferability rather than like missing data.
+
+**In Agder, 77 polygons and 432 km2** - 2.42% of Agder's mapped substrate area,
+clipped to the actual fylke boundary rather than to its bounding box, which
+inflates it to 6.9%. **Phase 0 does not have these**, because NGU's Agder
+extract does not include the file.
+
+That is a known and now quantified gap in sections 9a to 15, and not a reason to
+rerun them. Section 9a measured losmasser as moving every species by less than
+0.02, with every substrate column at or below +0.012 permutation importance -
+indistinguishable from zero. 2.42% more of a layer that does nothing cannot move
+a published number. It is recorded so that nobody finds the discrepancy later
+and mistrusts the rest of the run.
+
+### What is done about it
+
+The national substrate layer reads **both** files. Any future NGU download must
+be checked for additional `LosmasseFlate_*` layers rather than assumed to carry
+one, because the extraction date in the filename is the only signal that a
+second one exists.
 
 
 ## Open questions
