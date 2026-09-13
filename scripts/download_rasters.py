@@ -20,9 +20,16 @@ credential and not something to work around. The verified per-point WMS route
 in `src/ingest/env.py` covers the presence and background sets meanwhile; only
 the wall-to-wall prediction map needs the raster.
 
-    python scripts/download_rasters.py             # skips what is already there
+    python scripts/download_rasters.py             # Agder; skips what it has
     python scripts/download_rasters.py --only sr16
     python scripts/download_rasters.py --refresh
+    python scripts/download_rasters.py --national  # all of Norway, ~15 GB
+
+`--national` orders the `landsdekkende` area instead of fylke 42. It is a
+different order rather than a bigger one, and two things change with it: AR50
+arrives as a geodatabase because no national GML is offered, and it arrives in
+EPSG:25833 instead of the regional 25832. Both are handled on ingest; see
+`src/ingest/ar50.py`.
 """
 from __future__ import annotations
 
@@ -51,6 +58,9 @@ DATASETS = {
         "title": "SR16 - Skogressurskart 16x16 meter - Raster",
         "format": "RASTER",
         "dest_dir": RAW / "sr16",
+        # Nationally SR16 offers only EPSG:25833, which is the project CRS
+        # anyway. Nothing to decide.
+        "national": {"format": "RASTER", "projection": "25833"},
     },
     "ar50": {
         "base": "https://kart8.nibio.no",
@@ -66,6 +76,13 @@ DATASETS = {
         # src/ingest/ar50.py, never mid-pipeline.
         "projection": "25832",
         "dest_dir": RAW / "ar50",
+        # The national form is gdb ONLY - no GML is offered for
+        # `landsdekkende` - and it is the one AR50 form published in
+        # EPSG:25833. That is a better deal than it first looks: the
+        # per-fylke alternative is fifteen orders spread across 25832,
+        # 25833 and 25835, each reprojected separately. src/ingest/ar50.py
+        # reads the gdb column name as well as the GML one.
+        "national": {"format": "gdb", "projection": "25833", "layer": "ar50"},
     },
     "losmasser": {
         "base": "https://nedlasting.ngu.no",
@@ -76,10 +93,33 @@ DATASETS = {
         # needs a driver we have not asked to add. NGU offers all three.
         "format": "SHAPE",
         "dest_dir": RAW / "losmasser",
+        "national": {"format": "SHAPE", "projection": "25833"},
     },
 }
 
 AREA_CODE, AREA_KIND, PROJECTION = "42", "fylke", "25833"
+
+# The national expansion orders `landsdekkende` rather than looping over the
+# fifteen fylker. Checked against each dataset's own area codelist before being
+# relied on: all three publish it, all three publish it in EPSG:25833, and one
+# order per dataset avoids fifteen seams to stitch and fifteen chances to get a
+# projection wrong.
+NATIONAL_CODE, NATIONAL_KIND = "0000", "landsdekkende"
+
+
+def area_spec(spec: dict, national: bool) -> tuple[str, str, str, str]:
+    """(code, kind, projection, format) for this dataset in this mode."""
+    if not national:
+        return (AREA_CODE, AREA_KIND,
+                spec.get("projection", PROJECTION), spec["format"])
+    nat = spec.get("national")
+    if not nat:
+        raise gd.DownloadError(
+            f"{spec['title']} has no national spec; add one rather than "
+            f"assuming the regional format and projection carry over - they "
+            f"do not for AR50.")
+    return (NATIONAL_CODE, NATIONAL_KIND,
+            nat.get("projection", PROJECTION), nat["format"])
 
 
 def human(n: float) -> str:
@@ -90,16 +130,16 @@ def human(n: float) -> str:
     return f"{n:,.1f} GB"
 
 
-def fetch(key: str, spec: dict, refresh: bool) -> dict:
+def fetch(key: str, spec: dict, refresh: bool, national: bool = False) -> dict:
     print(f"\n=== {key}: {spec['title']} ===", flush=True)
-    area = gd.find_area(spec["base"], spec["uuid"], AREA_CODE, AREA_KIND)
+    code, kind, projection, fmt = area_spec(spec, national)
+    area = gd.find_area(spec["base"], spec["uuid"], code, kind)
     fmts = ", ".join(str(f.get("name")) for f in area.get("formats", []))
     print(f"area {area['name']} ({area['type']} {area['code']}), formats: {fmts}",
           flush=True)
 
     files = gd.order(spec["base"], spec["uuid"], area,
-                     projection=spec.get("projection", PROJECTION),
-                     fmt=spec["format"])
+                     projection=projection, fmt=fmt)
     print(f"ordered {len(files)} file(s)", flush=True)
 
     out = []
@@ -144,6 +184,7 @@ def fetch(key: str, spec: dict, refresh: bool) -> dict:
 
 def main() -> int:
     refresh = "--refresh" in sys.argv
+    national = "--national" in sys.argv
     only = None
     if "--only" in sys.argv:
         only = sys.argv[sys.argv.index("--only") + 1]
@@ -155,7 +196,7 @@ def main() -> int:
         if only and key != only:
             continue
         try:
-            fetch(key, spec, refresh)
+            fetch(key, spec, refresh, national=national)
         except gd.DownloadError as exc:
             # One dataset failing must not silently take the other with it, and
             # must not be papered over: CLAUDE.md says stop and report.
