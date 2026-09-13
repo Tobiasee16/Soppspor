@@ -2617,10 +2617,12 @@ windows are not re-accumulated. The numbers here come from the download run of
 2026-09-13.
 
 
-## 20. A second losmasser file that Agder never had - 2026-09-13
+## 20. A second losmasser file in the national delivery - 2026-09-13
 
-Found while preparing the national substrate layer. It belongs in FINDINGS
-because it is a silent data gap, not a modelling choice.
+Found while preparing the national substrate layer. **Read 20a before acting
+on anything here**: it retracts the claim that Phase 0's Agder layer has a gap.
+What survives is that the national delivery splits its polygons across two
+files and both have to be read.
 
 NGU's **Agder** delivery contains one polygon layer,
 `LosmasseFlate_20240621`. The **landsdekkende** delivery contains two: that
@@ -2650,50 +2652,60 @@ Its dominant substrate is **peat** - 10,003 of 18,148 polygons - then bare
 bedrock, moraine, thin organic cover and marine deposits. Every one maps to a
 real group in `src/ingest/losmasser.py`; none is NODATA.
 
-### What missing it would have cost
+### What missing it would have cost, nationally
 
-**In the held-out region, 2,944 km2.** The supplement adds 4.2% more mapped
+**2,944 km2 in the held-out region.** The supplement adds 4.2% more mapped
 substrate area to Nordland than `_20240621` alone. Without it the transfer test
 would read `losmasse_missing` over ground that is in fact mapped, in the one
 region whose entire job is to be a fair test - and the resulting weaker number
 would have looked like poor transferability rather than like missing data.
 
-**In Agder, 77 polygons and 432 km2** - 2.42% of Agder's mapped substrate area,
-clipped to the actual fylke boundary rather than to its bounding box, which
-inflates it to 6.9%. **Phase 0 does not have these**, because NGU's Agder
-extract does not include the file.
+So the national substrate layer reads **both** files, and
+`build_vector_layers_national.py` prints the source list and warns loudly if it
+finds fewer than two.
 
-That is a known and now quantified gap in sections 9a to 15, and not a reason to
-rerun them. Section 9a measured losmasser as moving every species by less than
-0.02, with every substrate column at or below +0.012 permutation importance -
-indistinguishable from zero. 2.42% more of a layer that does nothing cannot move
-a published number. It is recorded so that nobody finds the discrepancy later
-and mistrusts the rest of the run.
+### 20a. CORRECTION - Phase 0 has no gap. The packaging differs, not the data.
 
-### What is done about it
+Written 2026-09-13, a few hours after the section above, and it retracts part
+of it.
 
-The national substrate layer reads **both** files. Any future NGU download must
-be checked for additional `LosmasseFlate_*` layers rather than assumed to carry
-one, because the extraction date in the filename is the only signal that a
-second one exists.
+The original version of this section claimed that Phase 0's Agder substrate
+layer was missing 77 polygons and 432 km2, 2.42% of mapped area, because NGU's
+Agder extract contains only `_20240621`. **That is wrong**, and it was found by
+checking the built raster rather than by reasoning about the filenames.
 
+Every one of the 76 supplement polygons whose representative point falls inside
+Agder is **already covered by the Agder delivery's own `_20240621`** - 76 of 76.
+The national `_20240621` covers **0 of 76** of them.
 
-### 20a. Decision - the Agder gap is recorded, not rerun
+| file | covers the 76 supplement polygons in Agder |
+|---|---|
+| Agder delivery, `_20240621` | **76 of 76** |
+| national delivery, `_20240621` | **0 of 76** |
 
-Put to the team on 2026-09-13. **Decision: keep Phase 0's numbers as published
-and carry the gap here.**
+So NGU's **per-fylke extracts are merged** and its **national extract is split
+into two batches**. It is the same product packaged differently, not a fylke
+extract missing data. `_20240622` is extra ground relative to the national
+`_20240621` file, and relative to nothing else.
 
-The reasoning it rests on is a measurement rather than an assumption. Section 9a
-found losmasser moves every species by less than 0.02 and that every one of the
-eleven substrate columns has a permutation importance at or below +0.012 -
-indistinguishable from zero on both models. 2.42% more of a layer that does
-nothing cannot move a published number.
+What survives this correction, and what does not:
 
-If that ever stops being true - if a future run finds substrate carrying real
-weight - this gap becomes a reason to rebuild the Agder layer from both files
-and refit. Recorded so that the condition is explicit rather than remembered.
+- **Still true, and the reason the check mattered:** the national delivery has
+  two polygon layers, both must be read, and reading only the first would leave
+  11,482 km2 unmapped nationally with 14.4% of it in Nordland. The fix is
+  correct and was necessary.
+- **Retracted:** Phase 0 has complete substrate coverage for Agder. There is no
+  2.42% gap, sections 9a to 15 are unaffected, and the decision not to rerun
+  them is now supported by there being nothing to rerun rather than by an
+  argument about a layer that does nothing.
+- **Retracted:** the section title. A second file is not something "Agder never
+  had"; Agder had its contents all along, inside one file.
 
-The national layer is unaffected: it reads both files from the start.
+The lesson is the one this project keeps relearning. Two files with sequential
+dates and identical schemas invited an inference about what they meant, and the
+disjointness test confirmed the inference *within the national delivery* while
+saying nothing about the fylke one. What settled it was sampling the built
+raster and asking whether the values were actually there.
 
 
 ## Open questions
