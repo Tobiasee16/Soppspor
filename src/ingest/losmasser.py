@@ -162,7 +162,13 @@ def rasterise_windowed(sources, reference: str | pathlib.Path,
                 f"Reproject on download, not here.")
 
     profile.update(count=1, dtype="uint8", nodata=NODATA, compress="deflate",
-                   tiled=True, blockxsize=256, blockysize=256)
+                   tiled=True, blockxsize=256, blockysize=256,
+                   # Classic TIFF caps at 4 GB. This layer is 1.83 GB at
+                   # 32 m, under the limit, but 7.3 GB at 16 m - and the
+                   # national terrain build already proved that the GDAL
+                   # estimate-based default guesses wrong once
+                   # compression is in play.
+                   BIGTIFF="IF_SAFER")
     profile.pop("photometric", None)
 
     cell = abs(transform.a)
@@ -173,47 +179,55 @@ def rasterise_windowed(sources, reference: str | pathlib.Path,
     by_group = {c: 0 for c in CATEGORIES}
     unmapped: dict[int, int] = {}
 
-    with rasterio.open(out_path, "w", **profile) as out:
-        for row0 in range(0, H, block):
-            for col0 in range(0, W, block):
-                h = min(block, H - row0)
-                w = min(block, W - col0)
-                win = rasterio.windows.Window(col0, row0, w, h)
-                wt = rasterio.windows.transform(win, transform)
-                bbox = (wt.c - cell, wt.f - h * cell - cell,
-                        wt.c + w * cell + cell, wt.f + cell)
+    # A partial raster opens cleanly and reads as genuine "unmapped"
+    # ground over whatever it never reached - the national terrain build
+    # left 3.1 GB of valid-looking GeoTIFF behind when it hit the 4 GB
+    # TIFF limit. Same rule as everywhere else: on any failure, remove it.
+    try:
+        with rasterio.open(out_path, "w", **profile) as out:
+            for row0 in range(0, H, block):
+                for col0 in range(0, W, block):
+                    h = min(block, H - row0)
+                    w = min(block, W - col0)
+                    win = rasterio.windows.Window(col0, row0, w, h)
+                    wt = rasterio.windows.transform(win, transform)
+                    bbox = (wt.c - cell, wt.f - h * cell - cell,
+                            wt.c + w * cell + cell, wt.f + cell)
 
-                frames = []
-                for p in paths:
-                    g = gpd.read_file(p, engine="pyogrio", columns=["jordart"],
-                                      bbox=bbox)
-                    if len(g):
-                        frames.append(g)
-                tile = np.full((h, w), NODATA, dtype="uint8")
-                if frames:
-                    gdf = (frames[0] if len(frames) == 1
-                           else pd.concat(frames, ignore_index=True))
-                    nreads += len(gdf)
-                    vals = gdf["jordart"].to_numpy()
-                    for code, n in unmapped_codes(vals).items():
-                        unmapped[code] = unmapped.get(code, 0) + n
-                    groups = group_codes(vals)
-                    order = np.argsort(-gdf.geometry.area.to_numpy())
-                    shapes = [(gdf.geometry.iloc[i], int(groups[i]))
-                              for i in order if groups[i] != NODATA]
-                    if shapes:
-                        tile = rasterize(shapes, out_shape=(h, w), transform=wt,
-                                         fill=NODATA, dtype="uint8",
-                                         all_touched=False)
-                covered += int((tile != NODATA).sum())
-                for c in CATEGORIES:
-                    by_group[c] += int((tile == c).sum())
-                out.write(tile, 1, window=win)
-                done += 1
-                if progress:
-                    progress(done, nblocks)
-        out.set_band_description(1, "losmasse_group")
+                    frames = []
+                    for p in paths:
+                        g = gpd.read_file(p, engine="pyogrio", columns=["jordart"],
+                                          bbox=bbox)
+                        if len(g):
+                            frames.append(g)
+                    tile = np.full((h, w), NODATA, dtype="uint8")
+                    if frames:
+                        gdf = (frames[0] if len(frames) == 1
+                               else pd.concat(frames, ignore_index=True))
+                        nreads += len(gdf)
+                        vals = gdf["jordart"].to_numpy()
+                        for code, n in unmapped_codes(vals).items():
+                            unmapped[code] = unmapped.get(code, 0) + n
+                        groups = group_codes(vals)
+                        order = np.argsort(-gdf.geometry.area.to_numpy())
+                        shapes = [(gdf.geometry.iloc[i], int(groups[i]))
+                                  for i in order if groups[i] != NODATA]
+                        if shapes:
+                            tile = rasterize(shapes, out_shape=(h, w), transform=wt,
+                                             fill=NODATA, dtype="uint8",
+                                             all_touched=False)
+                    covered += int((tile != NODATA).sum())
+                    for c in CATEGORIES:
+                        by_group[c] += int((tile == c).sum())
+                    out.write(tile, 1, window=win)
+                    done += 1
+                    if progress:
+                        progress(done, nblocks)
+            out.set_band_description(1, "losmasse_group")
 
+    except BaseException:
+        pathlib.Path(out_path).unlink(missing_ok=True)
+        raise
     total = H * W
     return {
         "sources": [str(p) for p in paths],

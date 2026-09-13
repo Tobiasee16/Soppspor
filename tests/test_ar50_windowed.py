@@ -113,3 +113,40 @@ def test_a_crs_mismatch_is_refused_rather_than_silently_wrong(tmp_path):
                      crs="EPSG:25832").to_file(src, layer="ar50", driver="GPKG")
     with pytest.raises(AR50Error, match="25832"):
         rasterise_windowed(src, ref, tmp_path / "w.tif", layer="ar50", block=32)
+
+
+def _is_bigtiff(path):
+    import struct
+    with open(path, "rb") as fh:
+        head = fh.read(4)
+    order = "<" if head[:2] == b"II" else ">"
+    return struct.unpack(order + "H", head[2:4])[0] == 43
+
+
+def test_a_failed_write_leaves_no_partial_raster(tmp_path, monkeypatch):
+    """A half-burned land-cover layer looks exactly like a real one.
+
+    The national terrain build left 3.1 GB of valid-looking GeoTIFF behind when
+    it hit the 4 GB TIFF limit. The same hazard applies here, and a partial
+    AR50 would read as genuine 'unmapped' ground over whatever it never reached.
+    """
+    import src.ingest.ar50 as A
+    ref = tmp_path / "ref.tif"
+    _reference(ref)
+    src = tmp_path / "a.gpkg"
+    _polygons(src)
+
+    real = A.group_codes
+    calls = {"n": 0}
+
+    def flaky(values):
+        calls["n"] += 1
+        if calls["n"] > 2:
+            raise RuntimeError("boom")
+        return real(values)
+
+    monkeypatch.setattr(A, "group_codes", flaky)
+    out = tmp_path / "o.tif"
+    with pytest.raises(RuntimeError, match="boom"):
+        A.rasterise_windowed(src, ref, out, layer="ar50", block=16)
+    assert not out.exists()

@@ -121,3 +121,27 @@ def test_stats_count_every_source(tmp_path):
     out = rasterise_windowed([a, b], ref, tmp_path / "o.tif", block=64)
     assert out["sources"] == [str(a), str(b)]
     assert out["polygons"] == len(ga) + len(gb)
+
+
+def test_a_failed_write_leaves_no_partial_raster(tmp_path, monkeypatch):
+    """A partial substrate layer reads as genuine unmapped ground."""
+    import src.ingest.losmasser as L
+    ref = tmp_path / "ref.tif"
+    _reference(ref)
+    src = tmp_path / "a.shp"
+    _shapes(src, 60, seed=7)
+
+    real = L.group_codes
+    calls = {"n": 0}
+
+    def flaky(values):
+        calls["n"] += 1
+        if calls["n"] > 2:
+            raise RuntimeError("boom")
+        return real(values)
+
+    monkeypatch.setattr(L, "group_codes", flaky)
+    out = tmp_path / "o.tif"
+    with pytest.raises(RuntimeError, match="boom"):
+        L.rasterise_windowed([src], ref, out, block=16)
+    assert not out.exists()

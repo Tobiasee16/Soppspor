@@ -116,3 +116,58 @@ def test_bands_are_named_in_the_order_the_stack_expects(tmp_path):
     got = _run(tmp_path, _dem(), 64)
     assert list(got) == ["elevation", "slope_deg", "northness", "eastness",
                          "curvature"]
+
+
+# --- the 4 GB wall -----------------------------------------------------------
+#
+# A classic TIFF cannot exceed 4 GB. The national terrain stack is five float32
+# bands over 1.83 billion cells - 36.6 GB uncompressed - and the first attempt
+# died at 54% with "TIFFAppendToStrip: Maximum TIFF file size exceeded".
+#
+# GDAL's default, BIGTIFF=IF_NEEDED, decides at creation time from an estimate,
+# and with compression in play it guessed the file would fit. It did not. These
+# writers exist specifically for rasters too large to hold in memory, so they
+# ask for BigTIFF outright rather than letting an estimate decide.
+
+def _is_bigtiff(path):
+    """TIFF version field: 42 is classic, 43 is BigTIFF."""
+    import struct
+    with open(path, "rb") as fh:
+        head = fh.read(4)
+    order = "<" if head[:2] == b"II" else ">"
+    return struct.unpack(order + "H", head[2:4])[0] == 43
+
+
+def test_output_is_a_bigtiff(tmp_path):
+    src_p, dst_p = tmp_path / "dem.tif", tmp_path / "out.tif"
+    _write(src_p, _dem())
+    with rasterio.open(src_p) as src:
+        derivatives_windowed(src, dst_p, CELL, block=64)
+    assert _is_bigtiff(dst_p), "classic TIFF caps at 4 GB; the national stack is 36.6"
+
+
+def test_a_failed_write_does_not_leave_a_partial_raster(tmp_path, monkeypatch):
+    """A half-written terrain stack opens cleanly and reads as real terrain.
+
+    The first national attempt left 3.1 GB of valid-looking GeoTIFF behind when
+    it hit the 4 GB wall. Nothing downstream would have questioned it.
+    """
+    import src.features.terrain as T
+
+    src_p, dst_p = tmp_path / "dem.tif", tmp_path / "out.tif"
+    _write(src_p, _dem())
+
+    real = T.curvature
+    calls = {"n": 0}
+
+    def flaky(dem, cell_m):
+        calls["n"] += 1
+        if calls["n"] > 2:
+            raise RuntimeError("disk full")
+        return real(dem, cell_m)
+
+    monkeypatch.setattr(T, "curvature", flaky)
+    with rasterio.open(src_p) as src:
+        with pytest.raises(RuntimeError, match="disk full"):
+            derivatives_windowed(src, dst_p, CELL, block=32)
+    assert not dst_p.exists(), "a partial terrain stack must not survive"

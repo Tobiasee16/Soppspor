@@ -191,7 +191,13 @@ def rasterise_windowed(src_path: str | pathlib.Path,
             f"use rasterise() which holds everything and can reproject.")
 
     profile.update(count=1, dtype="uint8", nodata=NODATA, compress="deflate",
-                   tiled=True, blockxsize=256, blockysize=256)
+                   tiled=True, blockxsize=256, blockysize=256,
+                   # Classic TIFF caps at 4 GB. This layer is 1.83 GB at
+                   # 32 m, under the limit, but 7.3 GB at 16 m - and the
+                   # national terrain build already proved that GDAL
+                   # estimate-based default guesses wrong once
+                   # compression is in play.
+                   BIGTIFF="IF_SAFER")
     profile.pop("photometric", None)
 
     import geopandas as gpd
@@ -199,39 +205,47 @@ def rasterise_windowed(src_path: str | pathlib.Path,
     nblocks = ((H + block - 1) // block) * ((W + block - 1) // block)
     done = 0
     burned_total = 0
-    with rasterio.open(out_path, "w", **profile) as out:
-        for row0 in range(0, H, block):
-            for col0 in range(0, W, block):
-                h = min(block, H - row0)
-                w = min(block, W - col0)
-                win = rasterio.windows.Window(col0, row0, w, h)
-                wt = rasterio.windows.transform(win, transform)
-                left, top = wt.c, wt.f
-                bbox = (left - cell, top - h * cell - cell,
-                        left + w * cell + cell, top + cell)
+    # A partial raster opens cleanly and reads as genuine "unmapped"
+    # ground over whatever it never reached - the national terrain build
+    # left 3.1 GB of valid-looking GeoTIFF behind when it hit the 4 GB
+    # TIFF limit. Same rule as everywhere else: on any failure, remove it.
+    try:
+        with rasterio.open(out_path, "w", **profile) as out:
+            for row0 in range(0, H, block):
+                for col0 in range(0, W, block):
+                    h = min(block, H - row0)
+                    w = min(block, W - col0)
+                    win = rasterio.windows.Window(col0, row0, w, h)
+                    wt = rasterio.windows.transform(win, transform)
+                    left, top = wt.c, wt.f
+                    bbox = (left - cell, top - h * cell - cell,
+                            left + w * cell + cell, top + cell)
 
-                read_kw = {"columns": [field], "engine": "pyogrio", "bbox": bbox}
-                if layer:
-                    read_kw["layer"] = layer
-                gdf = gpd.read_file(src_path, **read_kw)
+                    read_kw = {"columns": [field], "engine": "pyogrio", "bbox": bbox}
+                    if layer:
+                        read_kw["layer"] = layer
+                    gdf = gpd.read_file(src_path, **read_kw)
 
-                tile = np.full((h, w), NODATA, dtype="uint8")
-                if len(gdf):
-                    values = gdf[field].to_numpy()
-                    burn = group_codes(values)
-                    order = np.argsort(-gdf.geometry.area.to_numpy())
-                    shapes = [(gdf.geometry.iloc[i], int(burn[i]))
-                              for i in order if burn[i] != NODATA]
-                    if shapes:
-                        tile = rasterize(shapes, out_shape=(h, w), transform=wt,
-                                         fill=NODATA, dtype="uint8",
-                                         all_touched=False)
-                burned_total += int((tile != NODATA).sum())
-                out.write(tile, 1, window=win)
-                done += 1
-                if progress:
-                    progress(done, nblocks)
+                    tile = np.full((h, w), NODATA, dtype="uint8")
+                    if len(gdf):
+                        values = gdf[field].to_numpy()
+                        burn = group_codes(values)
+                        order = np.argsort(-gdf.geometry.area.to_numpy())
+                        shapes = [(gdf.geometry.iloc[i], int(burn[i]))
+                                  for i in order if burn[i] != NODATA]
+                        if shapes:
+                            tile = rasterize(shapes, out_shape=(h, w), transform=wt,
+                                             fill=NODATA, dtype="uint8",
+                                             all_touched=False)
+                    burned_total += int((tile != NODATA).sum())
+                    out.write(tile, 1, window=win)
+                    done += 1
+                    if progress:
+                        progress(done, nblocks)
 
+    except BaseException:
+        pathlib.Path(out_path).unlink(missing_ok=True)
+        raise
     return {"path": str(out_path), "source_field": field, "blocks": nblocks,
             "cells": H * W, "cells_covered": burned_total,
             "coverage_pct": 100.0 * burned_total / (H * W) if H * W else 0.0,

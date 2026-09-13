@@ -19,6 +19,8 @@ into a flat place.
 """
 from __future__ import annotations
 
+import pathlib
+
 import numpy as np
 
 # D8 neighbour offsets: (row, col) and the distance multiplier for diagonals.
@@ -147,43 +149,61 @@ def derivatives_windowed(src, dst_path, cell_m: float, block: int = 2048,
     profile = src.profile.copy()
     profile.update(count=len(names), dtype="float32", nodata=np.nan,
                    compress="deflate", predictor=2, tiled=True,
-                   blockxsize=256, blockysize=256)
+                   blockxsize=256, blockysize=256,
+                   # A classic TIFF cannot exceed 4 GB, and this stack is
+                   # five float32 bands over 1.83 billion cells - 36.6 GB
+                   # before compression. GDAL default IF_NEEDED decides
+                   # from an estimate at creation time and, with
+                   # compression in play, guessed it would fit; the first
+                   # national run died at 54% with "Maximum TIFF file
+                   # size exceeded". This function exists for rasters too
+                   # big to hold in memory, so it asks outright instead
+                   # of letting an estimate decide.
+                   BIGTIFF="YES")
     profile.pop("photometric", None)
 
     H, W = src.height, src.width
     nblocks = ((H + block - 1) // block) * ((W + block - 1) // block)
     done = 0
-    with rasterio.open(dst_path, "w", **profile) as out:
-        for row0 in range(0, H, block):
-            for col0 in range(0, W, block):
-                h = min(block, H - row0)
-                w = min(block, W - col0)
+    # A half-written terrain stack opens cleanly and reads as real terrain:
+    # the first national attempt left 3.1 GB of valid-looking GeoTIFF behind
+    # when it hit the 4 GB wall, and nothing downstream would have questioned
+    # it. Same rule as the Artskart download - on any failure, remove it.
+    try:
+        with rasterio.open(dst_path, "w", **profile) as out:
+            for row0 in range(0, H, block):
+                for col0 in range(0, W, block):
+                    h = min(block, H - row0)
+                    w = min(block, W - col0)
 
-                # Halo of one cell, clipped to the raster. `pad` records how
-                # many rows/cols of real data were actually available on each
-                # side, so the interior can be cut back out precisely.
-                r0 = max(row0 - 1, 0)
-                c0 = max(col0 - 1, 0)
-                r1 = min(row0 + h + 1, H)
-                c1 = min(col0 + w + 1, W)
-                tile = src.read(1, window=rasterio.windows.Window(
-                    c0, r0, c1 - c0, r1 - r0)).astype("float64")
+                    # Halo of one cell, clipped to the raster. `pad` records how
+                    # many rows/cols of real data were actually available on each
+                    # side, so the interior can be cut back out precisely.
+                    r0 = max(row0 - 1, 0)
+                    c0 = max(col0 - 1, 0)
+                    r1 = min(row0 + h + 1, H)
+                    c1 = min(col0 + w + 1, W)
+                    tile = src.read(1, window=rasterio.windows.Window(
+                        c0, r0, c1 - c0, r1 - r0)).astype("float64")
 
-                slope, aspect = slope_aspect(tile, cell_m)
-                vals = [tile, slope, northness(aspect, slope),
-                        eastness(aspect, slope), curvature(tile, cell_m)]
+                    slope, aspect = slope_aspect(tile, cell_m)
+                    vals = [tile, slope, northness(aspect, slope),
+                            eastness(aspect, slope), curvature(tile, cell_m)]
 
-                top, left = row0 - r0, col0 - c0
-                sl = (slice(top, top + h), slice(left, left + w))
-                win = rasterio.windows.Window(col0, row0, w, h)
-                for i, v in enumerate(vals, start=1):
-                    out.write(v[sl].astype("float32"), i, window=win)
+                    top, left = row0 - r0, col0 - c0
+                    sl = (slice(top, top + h), slice(left, left + w))
+                    win = rasterio.windows.Window(col0, row0, w, h)
+                    for i, v in enumerate(vals, start=1):
+                        out.write(v[sl].astype("float32"), i, window=win)
 
-                done += 1
-                if progress:
-                    progress(done, nblocks)
-        for i, name in enumerate(names, start=1):
-            out.set_band_description(i, name)
+                    done += 1
+                    if progress:
+                        progress(done, nblocks)
+            for i, name in enumerate(names, start=1):
+                out.set_band_description(i, name)
+    except BaseException:
+        pathlib.Path(dst_path).unlink(missing_ok=True)
+        raise
     return {"path": str(dst_path), "bands": names, "blocks": nblocks,
             "width": W, "height": H}
 
