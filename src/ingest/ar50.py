@@ -101,20 +101,65 @@ def unmapped_codes(arealtype_values) -> dict[int, int]:
     return out
 
 
-def rasterise(gml_path: str | pathlib.Path, reference: str | pathlib.Path,
-              out_path: str | pathlib.Path) -> dict:
+# AR50 spells its land-cover column differently depending on which form of the
+# dataset you order. The per-fylke GML calls it `arealtype`; the national
+# geodatabase calls it `artype`. Same codes, same polygons - verified on
+# Kristiansand by sampling 20,000 random points in both and comparing the code
+# at each, which agreed 20,000 out of 20,000. Only the spelling moved.
+#
+# Both are accepted because the national expansion has no choice about the
+# geodatabase: `landsdekkende` AR50 is offered as gdb only, and it is the one
+# national form published in EPSG:25833 rather than the per-fylke patchwork of
+# 25832, 25833 and 25835 that would otherwise need fifteen orders and fifteen
+# reprojections.
+FIELD_CANDIDATES = ("arealtype", "artype")
+
+
+def source_field(src_path: str | pathlib.Path, layer: str | None = None) -> str:
+    """Which spelling this file uses, refused by name rather than by KeyError.
+
+    Getting this wrong silently is the bad outcome: a missing column would
+    rasterise nothing and hand back a clean-looking empty land-cover layer.
+    """
+    from pyogrio import read_info
+
+    info = read_info(str(src_path), layer=layer) if layer else read_info(str(src_path))
+    # `or []` is wrong here: pyogrio returns fields as a numpy array, and the
+    # truth value of a multi-element array is ambiguous rather than falsy.
+    raw = info.get("fields")
+    fields = [] if raw is None else [str(f) for f in raw]
+    lower = {f.lower(): f for f in fields}
+    for cand in FIELD_CANDIDATES:
+        if cand in lower:
+            return lower[cand]
+    raise AR50Error(
+        f"{pathlib.Path(src_path).name} has no AR50 land-cover column: expected "
+        f"one of {', '.join(FIELD_CANDIDATES)}, found {', '.join(fields) or 'none'}")
+
+
+def rasterise(src_path: str | pathlib.Path, reference: str | pathlib.Path,
+              out_path: str | pathlib.Path, layer: str | None = None) -> dict:
     """Reproject AR50 to 25833 and burn it onto the reference raster's grid.
 
     The grid comes from `reference` rather than being computed, so the result
     is cell-for-cell aligned with the terrain stack by construction - the same
     guarantee `src/ingest/losmasser.py` relies on, and for the same reason.
+
+    Accepts GML, geodatabase or anything else GDAL reads; `layer` picks one out
+    of a multi-layer source.
     """
     import geopandas as gpd
     import rasterio
     from rasterio.features import rasterize
 
-    gml_path = pathlib.Path(gml_path)
-    gdf = gpd.read_file(gml_path, columns=["arealtype"], engine="pyogrio")
+    gml_path = pathlib.Path(src_path)
+    field = source_field(gml_path, layer)
+    read_kw = {"columns": [field], "engine": "pyogrio"}
+    if layer:
+        read_kw["layer"] = layer
+    gdf = gpd.read_file(gml_path, **read_kw)
+    if field != "arealtype":
+        gdf = gdf.rename(columns={field: "arealtype"})
 
     if gdf.crs is None:
         raise AR50Error(f"{gml_path.name} carries no CRS; refusing to guess one")
@@ -155,6 +200,9 @@ def rasterise(gml_path: str | pathlib.Path, reference: str | pathlib.Path,
     return {
         "polygons": len(gdf),
         "polygons_burned": len(shapes),
+        # Which spelling the source used. Recorded so a run can be traced back
+        # to whether it came off the GML or the geodatabase.
+        "source_field": field,
         "not_mapped_polygons": not_mapped,
         "source_crs": f"EPSG:{src_epsg}",
         "target_crs": f"EPSG:{ref_epsg}",

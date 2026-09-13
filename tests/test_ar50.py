@@ -16,8 +16,9 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
-from src.ingest.ar50 import (CATEGORIES, GROUPS, LABELS, NODATA, NORWEGIAN,
-                             NOT_MAPPED, group_codes, rasterise, unmapped_codes)
+from src.ingest.ar50 import (AR50Error, CATEGORIES, GROUPS, LABELS, NODATA,
+                             NORWEGIAN, NOT_MAPPED, group_codes, rasterise,
+                             unmapped_codes)
 
 rasterio = pytest.importorskip("rasterio")
 gpd = pytest.importorskip("geopandas")
@@ -191,3 +192,58 @@ class TestRasterise:
             arr = dst.read(1, masked=True).astype("float64").filled(np.nan)
         assert np.isnan(arr).any()
         assert np.nanmin(arr) >= 10
+
+
+class TestSourceFieldName:
+    """AR50 names its land-cover column differently in GML than in geodatabase.
+
+    The per-fylke GML order calls it `arealtype`; the national geodatabase
+    calls it `artype`. Same codes, same polygons - checked on Kristiansand by
+    sampling 20,000 random points in both sources and comparing the code at
+    each, which agreed 20,000 out of 20,000. Only the spelling moved.
+
+    This matters because the national expansion has to use the geodatabase:
+    `landsdekkende` AR50 is offered as gdb only, and it is the one national
+    form published in EPSG:25833 rather than the per-fylke patchwork of 25832,
+    25833 and 25835.
+    """
+
+    def _write(self, path, column, epsg=25833, driver=None):
+        from shapely.geometry import box
+        gdf = gpd.GeoDataFrame({column: [30]},
+                               geometry=[box(1000.0, 6904.0, 1128.0, 7000.0)],
+                               crs=f"EPSG:{epsg}")
+        gdf.to_file(path, driver=driver)
+        return gdf
+
+    def test_the_geodatabase_spelling_is_accepted(self, tmp_path):
+        ref = tmp_path / "ref.tif"
+        _reference(ref)
+        src = tmp_path / "a.gpkg"           # a stand-in for the gdb: same column
+        self._write(src, "artype")
+        out = tmp_path / "o.tif"
+
+        stats = rasterise(src, ref, out)
+
+        with rasterio.open(out) as dst:
+            assert 30 in set(np.unique(dst.read(1)))
+        assert stats["source_field"] == "artype"
+
+    def test_the_gml_spelling_still_works(self, tmp_path):
+        ref = tmp_path / "ref.tif"
+        _reference(ref)
+        src = tmp_path / "a.gml"
+        _gml(src, [(30, (1000.0, 6904.0, 1128.0, 7000.0))], 25833)
+        out = tmp_path / "o.tif"
+
+        stats = rasterise(src, ref, out)
+        assert stats["source_field"] == "arealtype"
+
+    def test_a_source_with_neither_column_is_refused_by_name(self, tmp_path):
+        """Silence here would rasterise nothing and report a clean empty map."""
+        ref = tmp_path / "ref.tif"
+        _reference(ref)
+        src = tmp_path / "a.gpkg"
+        self._write(src, "landcover")
+        with pytest.raises(AR50Error, match="arealtype"):
+            rasterise(src, ref, tmp_path / "o.tif")
