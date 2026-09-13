@@ -56,14 +56,32 @@ the 111× that the *display* window faces.
 
 ### Storage
 
-| | Agder now | Norway, scaled |
-|---|---|---|
-| SR16 raw | 1.85 GB | 13.1 GB |
-| AR50 raw | 0.25 GB | 1.8 GB |
-| Løsmasser raw | 0.05 GB | 0.4 GB |
-| Interim rasters | 2.18 GB | 15.5 GB |
-| Artskart (already national) | 0.21 GB | 0.21 GB |
-| **working set** | **4.5 GB** | **≈ 31 GB** |
+**Corrected 2026-09-13 against the actual downloads.** The estimate below was
+built by scaling Agder by land area, 7.1x. That was the wrong multiplier and
+SR16 came in at **2.6x the predicted figure**.
+
+| | Agder now | predicted (7.1x) | **measured** |
+|---|---|---|---|
+| SR16 raw, all 23 layers | 1.85 GB | 13.1 GB | **34.77 GB** |
+| SR16, the 8 layers actually fitted | 0.62 GB | - | **11.81 GB** |
+| AR50 raw | 0.25 GB | 1.8 GB | **0.83 GB** |
+| Løsmasser raw | 0.05 GB | 0.4 GB | **0.88 GB** |
+| Artskart background | 0.15 GB | 2.5 GB | in progress |
+
+Why the miss: **area is not what a raster covers, its bounding box is.** Agder
+is compact and its land fills essentially 100% of its bounding box. Norway is
+long, thin and diagonal - mainland land area is 323,808 km2 inside a bounding
+box of 1,221 x 1,537 km = 1,877,062 km2, so **land fills 17% of it**. The bbox
+ratio is 41.2x where the area ratio is 7.1x, and the measured 18.8x sits
+between them: nodata compresses well but is not free.
+
+Two things follow. Scale a raster estimate by bounding box, not by area, and
+treat the result as an upper bound. And take only the layers that are actually
+fitted - SR16's other fifteen layers are 23 GB of disk holding variants of
+columns already in the stack (see `scripts/extract_sr16.py`).
+
+Everything still fits comfortably: about 49 GB of raw downloads against 150 GB
+free when this started.
 
 Plus one genuinely new download: the target-group background. All fungal records
 in Agder is 82,129 rows and 0.15 GB; nationally it is 1,325,029 rows and about
