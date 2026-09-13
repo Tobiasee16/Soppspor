@@ -59,6 +59,55 @@ class Boundary:
         return inside
 
 
+class Boundaries:
+    """Several boundaries treated as one region: inside any part is inside.
+
+    The national training extent is fourteen fylker, because Kartverket's
+    kommuneinfo API publishes no single national outline. Merging their rings
+    into one `Boundary` would also be correct - even-odd ray casting handles
+    disjoint polygons - but it would throw away the per-fylke bounding box,
+    and the box is what makes the test cheap. A point in Agder is rejected by
+    thirteen boxes before one ray cast happens.
+
+    `parts` keeps the individual boundaries rather than a union, so callers can
+    still ask which fylke a point fell in, and so the held-out region can be
+    excluded by name rather than by trusting a geometry operation.
+    """
+
+    def __init__(self, parts, name: str = ""):
+        self.parts = list(parts)
+        if not self.parts:
+            raise ValueError("Boundaries needs at least one part")
+        self.name = name
+        xs0 = [b.bbox[0] for b in self.parts]
+        ys0 = [b.bbox[1] for b in self.parts]
+        xs1 = [b.bbox[2] for b in self.parts]
+        ys1 = [b.bbox[3] for b in self.parts]
+        self.bbox = (min(xs0), min(ys0), max(xs1), max(ys1))
+
+    def __contains__(self, pt: tuple[float, float]) -> bool:
+        x, y = pt
+        minx, miny, maxx, maxy = self.bbox
+        if not (minx <= x <= maxx and miny <= y <= maxy):
+            return False
+        return any(pt in b for b in self.parts)
+
+    def part_containing(self, pt: tuple[float, float]) -> "Boundary | None":
+        """Which part the point falls in, or None. First match wins.
+
+        Fylke boundaries do not overlap, so first-match is the only match; on
+        a shared edge it is whichever part was loaded first, which is stable
+        because the parts are loaded in sorted filename order.
+        """
+        for b in self.parts:
+            if pt in b:
+                return b
+        return None
+
+    def __len__(self) -> int:
+        return len(self.parts)
+
+
 def cells_inside(boundary: "Boundary", cell_m: float) -> list[tuple[float, float]]:
     """Centres of every cell_m square whose centre lies inside the boundary.
 

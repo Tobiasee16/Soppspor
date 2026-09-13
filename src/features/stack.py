@@ -22,6 +22,21 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import rasterio
+from rasterio.windows import Window
+
+# Above this many cells a band is sampled block by block instead of being read
+# whole. Reading the whole band is the right thing for a regional raster and
+# impossible for a national one: `terrain_norge_32m.tif` is 38,173 x 48,022,
+# which is 1.83 billion cells and 14.7 GB as float64, and SR16's national
+# mosaic is 90,016 x 100,299 - 72 GB per band. The machine has 15.7 GB.
+#
+# The limit sits above every raster Phase 0 was fitted on and below every
+# national one, with room to spare on both sides: Agder's largest is SR16 at
+# 0.18 billion cells, its national counterpart is 9.0 billion. So the published
+# numbers keep coming out of exactly the code path that produced them, and the
+# national run takes the new one. The two paths are pinned to agree, cell for
+# cell, in tests/test_stack_blockwise.py.
+WHOLE_BAND_CELL_LIMIT = 250_000_000
 
 
 @dataclass
@@ -132,6 +147,48 @@ def _nearest(ds, band: int, coords: np.ndarray) -> np.ndarray:
     return out
 
 
+def _nearest_by_block(ds, bands: list[int], coords: np.ndarray) -> list[np.ndarray]:
+    """The same values as `_nearest`, reading only the blocks points fall in.
+
+    Sampling 67,000 points out of 1.83 billion cells does not need the other
+    1.829 billion in memory. Each point is assigned to the raster's own block
+    grid, every occupied block is read once, and the points in it are served
+    from that read - so the cost is (blocks touched) x (block size) rather than
+    the whole band, and it never allocates more than one block.
+
+    Reading every requested band in one `ds.read` matters as much as the
+    windowing. The national SR16 files are stripe-organised and pixel
+    interleaved, so pulling one band still decompresses the row that holds all
+    three; asking for the three together pays that once instead of three times.
+
+    Measured on the national stack at 32 m and 16 m, 2,000 scattered points:
+    5 terrain bands 5.0 ms/point, 3 SR16 bands 2.5 ms/point, AR50 0.3. That is
+    a worst case - points scattered uniformly share almost no blocks, while
+    real occurrence records cluster and share many.
+    """
+    fc, fr = _pixel_coords(ds, coords)
+    cols = np.floor(fc).astype(int)
+    rows = np.floor(fr).astype(int)
+    out = np.full((len(bands), len(coords)), np.nan)
+    ok = (rows >= 0) & (rows < ds.height) & (cols >= 0) & (cols < ds.width)
+
+    # All bands of a GeoTIFF share a block layout; take it from the first.
+    bh, bw = ds.block_shapes[bands[0] - 1]
+    groups: dict[tuple[int, int], list[int]] = {}
+    for i in np.flatnonzero(ok):
+        groups.setdefault((int(rows[i] // bh), int(cols[i] // bw)), []).append(int(i))
+
+    for (br, bc), members in groups.items():
+        x0, y0 = bc * bw, br * bh
+        win = Window(x0, y0, min(bw, ds.width - x0), min(bh, ds.height - y0))
+        # masked=True then filled(nan), exactly as _read_float does, so nodata
+        # becomes NaN identically on both paths.
+        arr = ds.read(bands, window=win, masked=True).astype("float64").filled(np.nan)
+        for i in members:
+            out[:, i] = arr[:, rows[i] - y0, cols[i] - x0]
+    return [out[k] for k in range(len(bands))]
+
+
 def _bilinear(ds, band: int, coords: np.ndarray) -> np.ndarray:
     """Bilinear interpolation between cell centres.
 
@@ -141,6 +198,18 @@ def _bilinear(ds, band: int, coords: np.ndarray) -> np.ndarray:
     point with no finite neighbour at all stays NaN, which is the honest
     answer.
     """
+    if ds.width * ds.height > WHOLE_BAND_CELL_LIMIT:
+        # Never reached by anything in the project: the only bilinear layer is
+        # the 1 km climate raster, which is 1,195 x 1,515 nationally. Raising
+        # is better than a blockwise bilinear nobody has exercised, because
+        # interpolation needs the four neighbours and two of them can sit in
+        # the next block - the kind of edge case that returns a plausible
+        # number rather than an error.
+        raise MemoryError(
+            f"{ds.name} has {ds.width * ds.height:,} cells and would be read "
+            f"whole for bilinear sampling. Resample it to a coarser grid, or "
+            f"implement a blockwise bilinear with a one-cell halo and pin it "
+            f"against this path first.")
     arr = _read_float(ds, band)
     # Cell centres sit at (col + 0.5, row + 0.5) in pixel space, so shifting by
     # half a cell puts the interpolation lattice on the centres where the
@@ -180,8 +249,12 @@ def sample_layers(layers: list[RasterLayer],
     for layer in layers:
         bands, band_names = layer.resolve()
         with rasterio.open(layer.path) as ds:
-            take = _bilinear if layer.method == "bilinear" else _nearest
-            raw = [take(ds, band, pts) for band in bands]
+            if layer.method == "bilinear":
+                raw = [_bilinear(ds, band, pts) for band in bands]
+            elif ds.width * ds.height <= WHOLE_BAND_CELL_LIMIT:
+                raw = [_nearest(ds, band, pts) for band in bands]
+            else:
+                raw = _nearest_by_block(ds, bands, pts)
 
         if layer.categories is not None:
             # One-hot, with an explicit column for absence when asked for.
