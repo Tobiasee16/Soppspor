@@ -2441,6 +2441,51 @@ from whichever answer is convenient.
    and nothing they produced could be compared.
 
 
+## 19. Does an Agder fruiting window survive being used in Finnmark? - 2026-09-13
+
+A concern raised and then tested, rather than carried as an unexamined risk.
+
+`config/climate.yaml` registers the autumn-rain accumulation window as **day
+221-293**, and section 6 derived it from the observed phenology of the three
+species' *own records in Agder*. The national model applies that same window
+everywhere. Fungi fruit earlier in the north and at altitude, so on the face of
+it the climate feature would mean something different in Finnmark than in
+Agder - which is the sort of quiet inconsistency that makes a transferability
+result meaningless.
+
+Measured on the 31,075 dated records of all eight species, placed by fylke:
+
+| fylke | dated records | p10 | median | p90 | inside the window |
+|---|---|---|---|---|---|
+| Agder | 2,636 | 215 | **255** | 288 | 80% |
+| Vestfold | 2,168 | 208 | 252 | 294 | 74% |
+| Oslo | 1,050 | 195 | 241 | 284 | 68% |
+| Innlandet | 2,944 | 212 | 242 | 274 | 79% |
+| Trondelag | 3,942 | 219 | 247 | 274 | 86% |
+| Nordland | 1,126 | 217 | **247** | 266 | 86% |
+| Troms | 1,037 | 213 | 241 | 264 | 82% |
+| Finnmark | 745 | 217 | **236** | 262 | 88% |
+
+The season does move: the median is 8 days earlier in Nordland than in Agder
+and 19 days earlier in Finnmark. **But the window still holds it, and holds it
+better than it holds Agder's own.** The northern season is compressed as well
+as early - Finnmark's p10-p90 spans 45 days against Agder's 73 - so it sits
+comfortably inside a 73-day window, while Agder loses records off both ends.
+
+**So the registered window is kept unchanged for the national run.** Two
+reasons beyond the table. Re-deriving it per region would make the climate
+feature mean a different thing in each place, which is precisely what a
+transferability test cannot tolerate. And re-deriving it nationally would
+change a number that was registered before any model existed, for a gain the
+data says is not there.
+
+What this does *not* establish is that accumulated autumn rainfall is the right
+climate feature, or that 73 days is the right width. It establishes only that
+the window does not need to move with latitude. The feature's weakness is
+elsewhere and already recorded: permutation importance for `autumn_rain_mm` is
++0.002 to +0.020 across the eight species, small but consistently positive.
+
+
 ## Open questions
 
 - **Should the maps still be blurred at all?** `build_maps.py` applies a 500 m
