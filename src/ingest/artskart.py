@@ -60,10 +60,14 @@ VERIFIED BEHAVIOUR - READ BEFORE CHANGING:
 from __future__ import annotations
 
 import calendar
+import http.client
 import json
 import pathlib
+import random
+import sys
 from datetime import date
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -73,12 +77,69 @@ TIMEOUT = 180
 SOURCE_PROJECTION = 32633
 
 
+# A national background pull is 1,326 requests over about 25 minutes, and the
+# first attempt died at page 102 with an IncompleteRead: the server closed the
+# connection with 1.49 MB of a 1.69 MB response still outstanding. Nothing was
+# wrong with the request. At this many requests a transient failure is not an
+# exceptional event to abort on, it is an expected one to absorb.
+#
+# Five attempts with exponential backoff, so a page has about half a minute to
+# come good before the pipeline stops. Jittered because 1,326 sequential
+# requests recovering from a server hiccup in lockstep is how a retry loop
+# becomes the outage.
+RETRY_ATTEMPTS = 5
+RETRY_BASE_S = 2.0
+
+# Retried only where a retry can help. HTTPError is a subclass of URLError, so
+# it is caught first and filtered by status: 429 and 5xx are the server asking
+# for time, while a 400 means the request itself is wrong and will be wrong
+# just as much in eight seconds. That distinction matters here specifically
+# because this API silently ignores unknown parameters - a status that is not
+# 200 is one of the few honest signals it gives, and burying it under four
+# identical failures would be throwing information away.
+RETRY_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
+_TRANSIENT = (
+    http.client.IncompleteRead,   # the one actually observed
+    http.client.BadStatusLine,    # covers RemoteDisconnected
+    ConnectionError,              # reset, aborted, refused
+    TimeoutError,                 # socket.timeout is an alias of this from 3.10
+    json.JSONDecodeError,         # a short read that cut the body mid-object
+    urllib.error.URLError,        # DNS, TLS, and the rest of the transport
+)
+
+# Counted rather than swallowed. A download that finished only after two
+# hundred retries is still a suspect download, and that should be visible in
+# the sidecar afterwards instead of being absorbed into a clean-looking file.
+RETRIES = 0
+
+
 def _get(params: dict) -> dict:
+    global RETRIES
     url = f"{BASE}?{urllib.parse.urlencode(params)}"
-    with urllib.request.urlopen(url, timeout=TIMEOUT) as r:
-        if r.status != 200:
-            raise RuntimeError(f"HTTP {r.status} from {url}")
-        return json.loads(r.read().decode("utf-8"))
+    for attempt in range(1, RETRY_ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=TIMEOUT) as r:
+                if r.status != 200:
+                    raise RuntimeError(f"HTTP {r.status} from {url}")
+                return json.loads(r.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            if e.code not in RETRY_STATUS or attempt == RETRY_ATTEMPTS:
+                raise
+            why = f"HTTP {e.code}"
+        except _TRANSIENT as e:
+            if attempt == RETRY_ATTEMPTS:
+                raise
+            why = type(e).__name__
+        # +-25%, and the bound is deliberate rather than taste: any jitter wider
+        # than +-33% lets one wait overlap the next, so a "backoff" could wait
+        # less on the second failure than on the first. This keeps every step
+        # strictly longer than the one before while still de-correlating.
+        wait = RETRY_BASE_S * (2 ** (attempt - 1)) * (0.75 + random.random() * 0.5)
+        RETRIES += 1
+        print(f"    {why} on attempt {attempt}/{RETRY_ATTEMPTS}, "
+              f"retrying in {wait:.0f}s", file=sys.stderr, flush=True)
+        time.sleep(wait)
+    raise AssertionError("unreachable")   # the loop returns or raises
 
 
 def total_count(taxon_id: int) -> int:
@@ -175,6 +236,8 @@ def download_filtered(
     stays append-only. Fails loudly on a short read, like download_taxon: a
     partial background set would quietly bias every model that used it.
     """
+    global RETRIES
+    retries_before = RETRIES
     first = _get({**filters, "pageSize": PAGE_SIZE, "pageIndex": 0})
     expected = first["TotalCount"]
     pages = first["TotalPages"]
@@ -188,18 +251,37 @@ def download_filtered(
         for page in range(1, pages):
             time.sleep(pause_s)
             chunk = _get({**filters, "pageSize": PAGE_SIZE, "pageIndex": page})
-            for o in chunk["Observations"]:
+            got = chunk["Observations"]
+            if not got:
+                dest.unlink(missing_ok=True)
+                raise RuntimeError(
+                    f"page {page} of {pages} came back empty for {filters}. "
+                    f"That is a dropped page, not this endpoint's usual "
+                    f"miscount. Removed the partial file rather than leave a "
+                    f"truncated background set.")
+            for o in got:
                 fh.write(json.dumps(o, ensure_ascii=False) + "\n")
                 written += 1
             if progress:
                 progress(page + 1, pages, written)
 
-    if written < expected:
+    # Same correction as download_taxon, and it matters more here. This
+    # endpoint does not agree with itself - TotalCount, the rows paging
+    # returns, and the unique ids among them are three different numbers - so
+    # `written == expected` is not available as a completeness test, and
+    # asserting it would fail on healthy downloads. It would also fail at the
+    # *end* of a run that takes an hour, after deleting the file, which is the
+    # worst possible moment to discover a bad assertion.
+    #
+    # A dropped page is caught above, which is the failure that matters. This
+    # is the backstop for a wholesale short read.
+    if expected and written < expected * (1 - COUNT_TOLERANCE):
         dest.unlink(missing_ok=True)
         raise RuntimeError(
-            f"expected {expected} records for {filters}, got {written}. "
-            f"Removed the partial file rather than leave a truncated background set."
-        )
+            f"expected about {expected} records for {filters}, got {written} "
+            f"- a shortfall of {100 * (1 - written / expected):.1f}%, past the "
+            f"{COUNT_TOLERANCE:.0%} this endpoint's own inconsistency accounts "
+            f"for. Removed the partial file.")
 
     meta = {
         "source": BASE,
@@ -207,6 +289,10 @@ def download_filtered(
         "source_projection": SOURCE_PROJECTION,
         "total_count_reported": expected,
         "records_downloaded": written,
+        # Not decoration. A file that only completed after hundreds of retries
+        # came off a struggling endpoint, and whoever reads this later should
+        # be able to see that rather than inherit a file that looks clean.
+        "network_retries": RETRIES - retries_before,
     }
     dest.with_suffix(".meta.json").write_text(
         json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8"

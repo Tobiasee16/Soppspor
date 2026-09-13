@@ -119,3 +119,141 @@ def test_download_refuses_a_wholesale_short_read(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="shortfall"):
         artskart.download_taxon(1, tmp_path / "x.json", pause_s=0)
     assert not (tmp_path / "x.json").exists()
+
+
+# --- transient network failure ---------------------------------------------
+#
+# A national background pull is 1,326 requests over about 25 minutes. The first
+# attempt died at page 102 with an IncompleteRead - the server closed the
+# connection with 1.49 MB of a 1.69 MB response still outstanding. Nothing was
+# wrong with the request; it would have succeeded on a second try.
+#
+# That is the failure mode these cover. At this many requests a transient error
+# is not an exceptional event to abort on, it is an expected one to absorb - but
+# only for errors that a retry can actually fix. A wrong filter name returns 400
+# and will return 400 forever, so retrying it just delays the report by half a
+# minute and buries the cause.
+
+class _FakeResponse:
+    def __init__(self, body):
+        self._body = body
+        self.status = 200
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _urlopen_raising(failures, body=b'{"TotalCount": 1, "Observations": []}'):
+    """A urlopen that fails `failures` times, then succeeds. Counts its calls."""
+    calls = []
+
+    def fake(url, timeout=None):
+        calls.append(url)
+        if len(calls) <= len(failures):
+            raise failures[len(calls) - 1]
+        return _FakeResponse(body)
+
+    fake.calls = calls
+    return fake
+
+
+@pytest.fixture
+def no_sleep(monkeypatch):
+    slept = []
+    monkeypatch.setattr(artskart.time, "sleep", lambda s: slept.append(s))
+    monkeypatch.setattr(artskart, "RETRIES", 0, raising=False)
+    return slept
+
+
+def test_get_retries_a_dropped_connection(monkeypatch, no_sleep):
+    """The exact failure that killed the national download."""
+    import http.client
+    fake = _urlopen_raising([
+        http.client.IncompleteRead(b"partial", 1493426),
+        http.client.IncompleteRead(b"partial", 900000),
+    ])
+    monkeypatch.setattr(artskart.urllib.request, "urlopen", fake)
+    out = artskart._get({"Taxons": 1})
+    assert out["TotalCount"] == 1
+    assert len(fake.calls) == 3          # two failures, then the real answer
+    assert len(no_sleep) == 2            # and it waited between them
+    assert no_sleep[1] > no_sleep[0]     # backing off, not hammering
+
+
+def test_get_retries_a_reset_and_a_timeout(monkeypatch, no_sleep):
+    fake = _urlopen_raising([ConnectionResetError("reset"), TimeoutError("slow")])
+    monkeypatch.setattr(artskart.urllib.request, "urlopen", fake)
+    assert artskart._get({"Taxons": 1})["TotalCount"] == 1
+    assert len(fake.calls) == 3
+
+
+def test_get_retries_a_truncated_body_that_is_not_valid_json(monkeypatch, no_sleep):
+    """A short read does not always raise - sometimes it just cuts the JSON."""
+    calls = []
+
+    def fake(url, timeout=None):
+        calls.append(url)
+        body = b'{"TotalCount": 1, "Obser' if len(calls) == 1 else \
+               b'{"TotalCount": 1, "Observations": []}'
+        return _FakeResponse(body)
+
+    monkeypatch.setattr(artskart.urllib.request, "urlopen", fake)
+    assert artskart._get({"Taxons": 1})["TotalCount"] == 1
+    assert len(calls) == 2
+
+
+def test_get_retries_a_rate_limit_and_a_server_error(monkeypatch, no_sleep):
+    import urllib.error
+    fake = _urlopen_raising([
+        urllib.error.HTTPError("u", 429, "Too Many Requests", {}, None),
+        urllib.error.HTTPError("u", 503, "Service Unavailable", {}, None),
+    ])
+    monkeypatch.setattr(artskart.urllib.request, "urlopen", fake)
+    assert artskart._get({"Taxons": 1})["TotalCount"] == 1
+    assert len(fake.calls) == 3
+
+
+def test_get_does_not_retry_a_bad_request(monkeypatch, no_sleep):
+    """A wrong filter name returns 400 and will return 400 forever.
+
+    Retrying it wastes half a minute and buries the cause under four identical
+    failures. This endpoint silently ignores unknown parameters, so a 400 is a
+    real signal and deserves to surface immediately.
+    """
+    import urllib.error
+    fake = _urlopen_raising([urllib.error.HTTPError("u", 400, "Bad Request", {}, None)])
+    monkeypatch.setattr(artskart.urllib.request, "urlopen", fake)
+    with pytest.raises(urllib.error.HTTPError):
+        artskart._get({"Taxons": 1})
+    assert len(fake.calls) == 1
+    assert no_sleep == []
+
+
+def test_get_gives_up_rather_than_retrying_forever(monkeypatch, no_sleep):
+    """A genuinely dead endpoint must stop the pipeline, not stall it."""
+    import http.client
+    fails = [http.client.IncompleteRead(b"", 1)] * 50
+    fake = _urlopen_raising(fails)
+    monkeypatch.setattr(artskart.urllib.request, "urlopen", fake)
+    with pytest.raises(http.client.IncompleteRead):
+        artskart._get({"Taxons": 1})
+    assert len(fake.calls) == artskart.RETRY_ATTEMPTS
+
+
+def test_retries_are_counted_rather_than_hidden(monkeypatch, no_sleep):
+    """A download that needed 200 retries is still suspect even if it finished.
+
+    The count goes into the sidecar so that is visible afterwards instead of
+    being absorbed into a clean-looking file.
+    """
+    import http.client
+    fake = _urlopen_raising([http.client.IncompleteRead(b"", 1)] * 2)
+    monkeypatch.setattr(artskart.urllib.request, "urlopen", fake)
+    artskart._get({"Taxons": 1})
+    assert artskart.RETRIES == 2
