@@ -1106,11 +1106,41 @@ function ranks(sp){if(sp._s)return sp._s;var v=[];
   v.sort(function(a,b){return a-b;});sp._s=v;return v;}
 function lowerBound(v,b){var lo=0,hi=v.length;
   while(lo<hi){var m=(lo+hi)>>1;if(v[m]<b)lo=m+1;else hi=m;}return lo;}
+/* Byte to percentile.
+
+   Two encodings, because the two builds cannot share one. The Kristiansand
+   payload scales each surface linearly between its own min and max, so the
+   byte has to be ranked against the bytes actually present. The national tiles
+   already carry the rank: linear scaling over Norway puts 62.8 % of
+   C. tubaeformis's land into bytes 1-3, because the national distribution
+   spans a factor of 814, and two thirds of the country would collapse to one
+   flat value. See scripts/export_zone_tiles.py.
+
+   The national path also has to avoid sorting, not just for speed: the app
+   only ever holds the tiles near the viewport, so a rank computed from them
+   would be a rank within the current view, and "the top 5 % of habitat" would
+   change meaning every time the map moved. */
 function pctLUT(sp){
   if(sp._lut)return sp._lut;
-  var v=ranks(sp),lut=new Float32Array(256);
-  for(var b=1;b<256;b++) lut[b]=v.length?lowerBound(v,b)/v.length:0;
+  var lut=new Float32Array(256),b;
+  if(D.meta.percentile_bytes){
+    for(b=1;b<256;b++) lut[b]=(b-1)/254;
+  }else{
+    var v=ranks(sp);
+    for(b=1;b<256;b++) lut[b]=v.length?lowerBound(v,b)/v.length:0;
+  }
   sp._lut=lut;return lut;}
+
+/* Where a smoothed value sits nationally, from the 256-entry CDF shipped
+   alongside the tiles. Linear between buckets so the field stays continuous
+   and the marching squares do not step. */
+function natRank(sp,v){
+  var L=sp.smoothed_rank_lut;
+  if(!L)return v;
+  var f=v*255,k=f|0;
+  if(k<0)return L[0];
+  if(k>=255)return L[255];
+  return L[k]+(L[k+1]-L[k])*(f-k);}
 function percentile(sp,b){return b?pctLUT(sp)[b]:0;}
 
 /* The field both views draw: the percentile surface, smoothed, then ranked
@@ -1128,6 +1158,16 @@ function percentile(sp,b){return b?pctLUT(sp)[b]:0;}
 function habitatField(sp){
   if(sp._hf)return sp._hf;
   var S=smoothPct(sp),by=sp.bytes,N=GW*GH,vals=[],i;
+  /* With tiles the re-rank cannot be done here. Ranking the smoothed field
+     against the loaded window would make the zones shift as the user pans, so
+     it is precomputed over the whole country and shipped as a CDF. The local
+     sort below stays for the single-region build, which holds all of its grid
+     and has nothing to pan off. */
+  if(sp.smoothed_rank_lut){
+    var Rn=new Float32Array(N);
+    for(i=0;i<N;i++) Rn[i]=by[i]?natRank(sp,S[i]):0;
+    sp._hf=Rn;return Rn;
+  }
   for(i=0;i<N;i++) if(by[i]) vals.push(S[i]);
   vals.sort(function(a,b){return a-b;});
   var R=new Float32Array(N),n=vals.length;

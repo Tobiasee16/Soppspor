@@ -248,6 +248,10 @@ def main() -> int:
 
     meta = {"crs": "EPSG:25833", "cell_m": None, "tile_px": TILE,
             "encoding": "national percentile, 1..255; 0 means no value",
+            # An explicit flag rather than leaving the interface to parse the
+            # sentence above. The Kristiansand payload carries linearly scaled
+            # bytes and must keep sorting them; these are already ranks.
+            "percentile_bytes": True,
             "source": f"data/processed/maps_norge (32 m, {MODEL})",
             "null_transfer_auc": null_auc, "species": []}
     OUT.mkdir(parents=True, exist_ok=True)
