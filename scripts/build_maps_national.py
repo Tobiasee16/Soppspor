@@ -176,6 +176,27 @@ def country_mask(area: dict) -> pathlib.Path:
     return MASK
 
 
+def decimate(tif: pathlib.Path, cell_m: float) -> np.ndarray:
+    """The raster read down to roughly `cell_m`, averaging over nodata.
+
+    `read(band, ...)` with a scalar band index already returns a 2-D array.
+    The first version of this indexed `[0]` into it, which takes the top row
+    of the raster - a 1,192-cell sliver of Arctic sea, entirely NaN - and the
+    caller then reported the whole national surface as empty. It cost a
+    completed 36-minute prediction, because the check fired after the GeoTIFF
+    was already written.
+
+    `Resampling.average` rather than nearest, because a preview cell covers 256
+    source cells and showing one of them is a lie about the other 255. GDAL
+    skips nodata when averaging, so a coastal cell reads as the mean of its
+    land part rather than as NaN.
+    """
+    with rasterio.open(tif) as src:
+        step = max(1, int(round(cell_m / abs(src.transform.a))))
+        return src.read(1, out_shape=(src.height // step, src.width // step),
+                        resampling=rasterio.enums.Resampling.average)
+
+
 def preview_png(tif: pathlib.Path, png: pathlib.Path, title: str, subtitle: str):
     """A decimated sheet of the GeoTIFF. The raster is the artefact."""
     import matplotlib
@@ -185,10 +206,7 @@ def preview_png(tif: pathlib.Path, png: pathlib.Path, title: str, subtitle: str)
 
     import build_maps as bm
 
-    with rasterio.open(tif) as src:
-        step = max(1, int(round(PREVIEW_CELL_M / abs(src.transform.a))))
-        arr = src.read(1, out_shape=(1, src.height // step, src.width // step),
-                       resampling=rasterio.enums.Resampling.average)[0]
+    arr = decimate(tif, PREVIEW_CELL_M)
     finite = arr[np.isfinite(arr)]
     if finite.size == 0:
         raise SystemExit(f"{tif.name} has no finite cells")
@@ -281,10 +299,32 @@ def main() -> int:
     MAPS.mkdir(parents=True, exist_ok=True)
     sample_cache = SampleCache()
     rows = []
+    refresh = "--refresh" in sys.argv
     for name, coords in sets.items():
         slug = slugs[name]
         if only and slug != only:
             continue
+        tif = MAPS / f"suitability_{slug}_{model_name}_32m.tif"
+        png = MAPS / f"suitability_{slug}_{model_name}_32m.png"
+        meta = tif.with_suffix(".meta.json")
+
+        # Resume. Nine sets at 36 minutes each is a five-hour run, and the
+        # first attempt lost a completed prediction to a bug in the *preview*
+        # that fired after the GeoTIFF was written. Anything that finished
+        # stays finished.
+        if tif.exists() and meta.exists() and not refresh:
+            stats = json.loads(meta.read_text(encoding="utf-8"))
+            print(f"{name}: using cached {tif.name} "
+                  f"({stats['scored']:,} cells scored)", flush=True)
+            if not png.exists():
+                preview_png(tif, png, f"{name} — habitat plausibility",
+                            f"Norway · {cell_m:.0f} m, previewed at "
+                            f"{PREVIEW_CELL_M:.0f} m\n{model.name}\n"
+                            f"fitted on 14 fylker, {holdout.name} held out")
+            rows.append({"species": name, "tif": tif.name, "png": png.name,
+                         **stats})
+            continue
+
         t0 = time.time()
         d = build(coords, bg_set.coords, stack, cache=sample_cache)
         pts = [tuple(c) for c in d.coords]
@@ -310,7 +350,6 @@ def main() -> int:
             print(f"    rows {done:,}/{total:,}  {100*done/total:5.1f}%  "
                   f"~{el/max(done,1)*(total-done)/60:.0f} min left", flush=True)
 
-        tif = MAPS / f"suitability_{slug}_{model_name}_32m.tif"
         stats = predict_grid_to_raster(
             predict, stack, d.names, transform, height, width, tif, crs,
             inside_block=inside_block, rows_per_block=ROWS_PER_BLOCK,
@@ -328,14 +367,16 @@ def main() -> int:
                 not_an_edibility_assessment="true",
                 terrain_resolution="32 m, native")
 
-        png = MAPS / f"suitability_{slug}_{model_name}_32m.png"
+        stats = {**stats, "n_train": len(tr), "seconds": round(time.time() - t0)}
+        # Written before the preview, so a preview bug can never cost a
+        # completed prediction again.
+        meta.write_text(json.dumps(stats, indent=1), encoding="utf-8")
+
         preview_png(tif, png, f"{name} — habitat plausibility",
                     f"Norway · {cell_m:.0f} m, previewed at {PREVIEW_CELL_M:.0f} m\n"
                     f"{model.name}\nfitted on 14 fylker, {holdout.name} held out")
 
-        rows.append({"species": name, "tif": tif.name, "png": png.name,
-                     "n_train": len(tr), "seconds": round(time.time() - t0),
-                     **stats})
+        rows.append({"species": name, "tif": tif.name, "png": png.name, **stats})
         print(f"    {stats['scored']:,} cells scored, "
               f"{stats['no_features']:,} without features, "
               f"{tif.stat().st_size/1e9:.2f} GB in "
