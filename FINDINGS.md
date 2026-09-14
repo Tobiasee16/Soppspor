@@ -3846,6 +3846,113 @@ exclusion and the invisible one this entry is about.
 
     697 passed, 1 skipped.
 
+### 25i. The map read "high" almost everywhere, and a national ranking was why
+
+Reported from the phone, not from a test: *"why is the chance of finding
+mushrooms at least high everywhere? Even in urban areas the chance is high. Why
+did the map in Kristiansand change? It was better before because it was more
+specific."*
+
+All of it was right, and the measurement is worth keeping because of how
+comfortably it had hidden.
+
+**Nationally the distribution was perfect.** Over all 20.0 million scored cells
+the five bands held 21 / 24 / 24 / 18 / 12 per cent. Nothing in that number is
+wrong, and nothing in a test that checks it could have caught this. The problem
+only exists once somebody stands somewhere:
+
+| Kristiansand kommune, 100,341 cells | Svært lav | Lav | Moderat | Høy | Svært høy | median |
+|---|---|---|---|---|---|---|
+| as it shipped, ranked against Norway | 0.0% | 0.0% | 5.1% | 18.0% | **76.9%** | 97.5 |
+| the build it replaced, ranked against Kristiansand | 20% | 25% | 25% | 20% | 10% | 50.0 |
+
+Kristiansand is lowland, coastal, spruce, mild and wet. It genuinely sits in
+the national top decile nearly everywhere, so ranking it against Norway paints
+the whole kommune one colour and the local detail - the thing the map is for -
+disappears. Oslo and its marka came out at 54% top band, median 92.
+
+That encoding was a deliberate choice, argued for at length in
+`export_zone_tiles.py`: percentiles computed per view move when the user pans,
+so "top 5%" would silently become "top 5% of what is on screen". The argument
+was right and the conclusion did not follow. A *precomputed neighbourhood* rank
+keeps the stability and gives the contrast back; it simply never occurred to me
+that there was a third option between "national" and "per view".
+
+**Second, unrelated defect: nothing masked non-habitat.** Joining the zone
+tiles to AR50, cell for cell:
+
+| land cover | cells scored | median percentile | "Høy" or above |
+|---|---|---|---|
+| Skog | 8,117,895 | 78.1 | 63% |
+| **Bebygd** | **213,310 (100%)** | **68.5** | **46%** |
+| **Ferskvann** | **1,049,154 (100%)** | **62.4** | **33%** |
+| Jordbruksareal | 772,640 | 61.6 | 29% |
+| Åpen fastmark | 8,474,759 | 21.5 | 1% |
+| Snø og isbre | 145,974 | 0.9 | 0% |
+
+The model discriminates correctly where it has habitat data - forest 78th, bare
+ground 21st, glacier 1st. It was simply never told to stay off water and
+asphalt, and the prediction ran wherever the features were finite. Only 3.1% of
+sea cells carry a score, which is the blur bleeding a cell or two offshore
+rather than the open sea being rated for mushrooms.
+
+**The two are independent, and that is the part worth remembering.** Masking
+alone moves Kristiansand's top band from 76.9% to *79.4%* - slightly worse -
+because habitat is 88% of scored cells anyway, so removing the other 12% barely
+touches the distribution. Only re-ranking restores the spread. Two defects with
+one symptom, and either one "fixed" alone would have looked like a failed fix.
+
+#### What replaced it
+
+Each cell is ranked against the habitat within 25 km, precomputed, so the value
+does not move when the user pans or zooms. Exactly, that is 114 million cells
+each ranked against ~400,000 neighbours; done as histograms on an 8 km grid it
+is five seconds. National quantiles are the bin edges, so resolution sits where
+the data is; the four surrounding block CDFs are interpolated between, or the
+map carries visible 8 km seams.
+
+The radius was swept rather than guessed, on the real rasters:
+
+| radius | Kristiansand bands | median |
+|---|---|---|
+| 15 km | 14.0 / 21.2 / 24.5 / 22.9 / 17.3 | 60.2 |
+| **25 km** | **10.6 / 19.9 / 25.4 / 24.3 / 19.8** | **64.6** |
+| 45 km | 4.8 / 15.4 / 26.7 / 28.4 / 24.6 | 72.3 |
+| 80 km | 1.0 / 3.3 / 21.9 / 39.4 / 34.3 | 83.2 |
+
+45 km was the number I had proposed before measuring anything. 25 km fills all
+five bands, still says the kommune is better than its surroundings - which is
+true - and is about the distance somebody actually chooses between on a
+Saturday.
+
+One more thing had to be fixed before it worked properly. Reading a cell's
+percentile straight off its bin's CDF gives every cell in that bin the same
+answer, and in a neighbourhood whose habitat falls inside a handful of national
+bins that is a plateau: **13.5% of Kristiansand came out at exactly 1.0**, so
+the "top 5%" zone covered 13.5% of the kommune. Interpolating within the bin as
+well as between blocks removes it entirely.
+
+| Kristiansand | Svært lav | Lav | Moderat | Høy | Svært høy | median | at exactly 1.0 |
+|---|---|---|---|---|---|---|---|
+| shipped | 0.0% | 0.0% | 5.1% | 18.0% | 76.9% | 97.5 | — |
+| 25 km, bin CDF only | 10.6% | 19.9% | 25.4% | 24.3% | 19.8% | 64.6 | 13.51% |
+| **25 km, interpolated** | **11.3%** | **21.1%** | **26.8%** | **30.3%** | **10.4%** | **62.0** | **0.00%** |
+
+The mask blanks 2.3 million of 20.0 million cells (11.6%): freshwater,
+built-up, farmland, glacier, and the coastal fringe. Those cells are removed
+before anything is ranked, so they neither take a colour nor occupy room in the
+distribution their neighbours are measured against.
+
+#### The method note
+
+A summary statistic over the whole country cannot see a problem that is about
+where you are standing. The national spread was 21/24/24/18/12 and stayed that
+way through every version of this bug. What found it was grouping the same
+cells two ways that no test had: **by kommune**, and **by land cover**. Both are
+obvious in hindsight and neither existed. The general form: when a number is
+computed over everything, check it again over the subsets a user actually
+occupies.
+
 ## Open questions
 
 - **Should the maps still be blurred at all?** `build_maps.py` applies a 500 m

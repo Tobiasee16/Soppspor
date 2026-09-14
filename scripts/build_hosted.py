@@ -239,15 +239,22 @@ def national_about(f: dict, null_auc: float | None, excluded: list,
               "som har fått mer enn vanlig vektes opp, ruter som har fått "
               "mindre vektes ned. " ) if cond else "")
             + "Ruta havner så blant de øverste <b>30&nbsp;%, 15&nbsp;% og "
-            "5&nbsp;%</b> i landet, eller utenfor alle tre. Grensene er regnet "
-            "ut over hele Norge, slik at «topp 5&nbsp;%» betyr det samme "
-            "uansett hvor på kartet du står &mdash; ikke topp 5&nbsp;% av det "
-            "som tilfeldigvis er på skjermen.",
+            "5&nbsp;%</b> av terrenget <b>rundt deg</b> &mdash; omtrent "
+            "25&nbsp;km i hver retning &mdash; eller utenfor alle tre. "
+            "Sammenlikningen går mot nabolaget og ikke mot hele landet, fordi "
+            "spørsmålet du står med er om det er bedre her enn i skogen ved "
+            "siden av. Målt mot hele Norge ble store deler av Sør- og "
+            "Østlandet liggende i toppsjiktet samtidig, og da forsvant nettopp "
+            "den forskjellen. Grensene er regnet ut på forhånd, så en rute "
+            "skifter ikke farge når du panorerer eller zoomer.",
         "ab_zonewarn":
             "<b>Sonene er en rangering, ikke en sannsynlighet.</b> «Topp» "
-            "betyr at ruta er blant de 5&nbsp;% mest lovende <i>i Norge</i>. "
-            "Det sier ingenting om hvor mange sopp som står der, eller om det "
-            "står noen i det hele tatt.",
+            "betyr at ruta er blant de 5&nbsp;% mest lovende <i>innenfor "
+            "omtrent 25&nbsp;km</i>. Det sier ingenting om hvor mange sopp som "
+            "står der, eller om det står noen i det hele tatt. "
+            "<b>Vann, dyrket mark, bebyggelse og isbre får ingen sone.</b> "
+            "Skogdataene sier ingenting om slik grunn, og et anslag der ville "
+            "vært en gjetning uten noe bak seg.",
         "ab_clocks":
             "<h2>To klokker: habitat og forhold</h2>"
             "<p>Kartet kombinerer to lag som oppdateres i helt ulikt tempo.</p>"

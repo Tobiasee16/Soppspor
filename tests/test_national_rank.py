@@ -66,9 +66,27 @@ process.stdout.write(JSON.stringify(Array.from(habitatField(sp))));
     return np.array(json.loads(out.stdout), dtype="float64").reshape(h, w)
 
 
+_PCT: dict[int, np.ndarray] = {}
+
+
+def pct(grid: np.ndarray) -> np.ndarray:
+    """The pipeline's first step, which used to be folded into the byte encoder.
+
+    These fixtures are a few hundred cells across - well inside one 25 km
+    neighbourhood at 128 m - so the local rank here is the rank over the whole
+    fixture, which is what every assertion below was written against. What is
+    being checked is unchanged: that a cell's rank is decided once, up front,
+    and does not depend on which window the app happens to be looking through.
+    """
+    k = id(grid)
+    if k not in _PCT:
+        _PCT[k] = ezt.local_percentile(grid, 128.0)
+    return _PCT[k]
+
+
 def national_rank(grid: np.ndarray) -> np.ndarray:
-    """What the app should show everywhere: rank of the smoothed field, nationally."""
-    byts, _ = ezt.to_percentile_bytes(grid)
+    """What the app should show everywhere: rank of the smoothed field."""
+    byts, _ = ezt.to_percentile_bytes(pct(grid))
     ramp = np.zeros(256, dtype="float32")
     ramp[1:] = (np.arange(1, 256) - 1) / 254.0
     S = py_smooth(byts, ramp)
@@ -104,8 +122,8 @@ def country():
 class TestAWindowMatchesTheCountry:
     @pytest.mark.parametrize("r0,c0,n", [(30, 30, 48), (60, 40, 40), (90, 60, 36)])
     def test_window_ranks_match_national(self, country, r0, c0, n):
-        byts, _ = ezt.to_percentile_bytes(country)
-        lut = ezt.smoothed_rank_lut(country)
+        byts, _ = ezt.to_percentile_bytes(pct(country))
+        lut = ezt.smoothed_rank_lut(pct(country))
         got = js_habitat(byts[r0:r0 + n, c0:c0 + n], lut)
         want = national_rank(country)[r0:r0 + n, c0:c0 + n]
         # Compare the interior: the window's outermost cells are smoothed
@@ -116,15 +134,15 @@ class TestAWindowMatchesTheCountry:
 
     def test_the_same_ground_ranks_the_same_from_two_windows(self, country):
         """Panning must not move the zones. This is the user-visible property."""
-        byts, _ = ezt.to_percentile_bytes(country)
-        lut = ezt.smoothed_rank_lut(country)
+        byts, _ = ezt.to_percentile_bytes(pct(country))
+        lut = ezt.smoothed_rank_lut(pct(country))
         a = js_habitat(byts[40:100, 40:100], lut)[20:40, 20:40]
         b = js_habitat(byts[50:110, 30:90], lut)[10:30, 30:50]
         np.testing.assert_allclose(a, b, atol=1e-6)
 
     def test_unscored_cells_stay_zero(self, country):
-        byts, _ = ezt.to_percentile_bytes(country)
-        lut = ezt.smoothed_rank_lut(country)
+        byts, _ = ezt.to_percentile_bytes(pct(country))
+        lut = ezt.smoothed_rank_lut(pct(country))
         win = byts[0:40, 0:40]                      # mostly sea
         got = js_habitat(win, lut)
         assert (got[win == 0] == 0).all()
@@ -137,7 +155,7 @@ class TestTheLookupIsActuallyDoingSomething:
         If this ever passes, the lookup is a no-op and the test above is
         checking nothing.
         """
-        byts, _ = ezt.to_percentile_bytes(country)
+        byts, _ = ezt.to_percentile_bytes(pct(country))
         r0, c0, n = 60, 40, 40
         local = js_habitat(byts[r0:r0 + n, c0:c0 + n], None)
         want = national_rank(country)[r0:r0 + n, c0:c0 + n]
@@ -145,7 +163,7 @@ class TestTheLookupIsActuallyDoingSomething:
         assert drift.max() > 0.05, "local and national ranking agree; lookup is moot"
 
     def test_two_windows_disagree_with_each_other_without_the_lookup(self, country):
-        byts, _ = ezt.to_percentile_bytes(country)
+        byts, _ = ezt.to_percentile_bytes(pct(country))
         a = js_habitat(byts[40:100, 40:100], None)[20:40, 20:40]
         b = js_habitat(byts[50:110, 30:90], None)[10:30, 30:50]
         assert np.abs(a - b).max() > 0.01, "panning already stable; nothing to fix"
@@ -153,7 +171,7 @@ class TestTheLookupIsActuallyDoingSomething:
 
 class TestNatRank:
     def test_it_is_monotone_and_bounded(self, country):
-        lut = ezt.smoothed_rank_lut(country)
+        lut = ezt.smoothed_rank_lut(pct(country))
         xs = np.linspace(0.0, 1.0, 400)
         driver_vals = [
             float(np.interp(x, np.arange(256) / 255.0, lut)) for x in xs]

@@ -99,13 +99,18 @@ def pyramid(grid: np.ndarray, n_levels: int):
         if z:
             sums, counts = ezt.coarsen(sums, counts, STEP)
         level = ezt.means(sums, counts)
-        byts, n = ezt.to_percentile_bytes(level)
+        # Scores to a rank first, exactly as the exporter does. These fixtures
+        # are a few hundred cells wide - one neighbourhood - so the local rank
+        # here is the rank over the whole fixture, which is what the window
+        # assertions were written against.
+        pct = ezt.local_percentile(level, CELL * (STEP ** z))
+        byts, n = ezt.to_percentile_bytes(pct)
         out.append({
             "cell_m": CELL * (STEP ** z),
             "grid": {"w": int(level.shape[1]), "h": int(level.shape[0])},
             "tiles": {"cols": (level.shape[1] + ezt.TILE - 1) // ezt.TILE,
                       "rows": (level.shape[0] + ezt.TILE - 1) // ezt.TILE},
-            "bytes": byts, "lut": ezt.smoothed_rank_lut(level), "n": n,
+            "bytes": byts, "lut": ezt.smoothed_rank_lut(pct), "n": n,
         })
     return out
 
@@ -489,10 +494,24 @@ class TestConditionsRankNationallyToo:
                 assert abs(p["s"] - p["h"]) < 1e-5, f"{p['s']} vs {p['h']}"
 
     def test_sloped_conditions_actually_move_something(self, sloped):
-        """Otherwise the test below passes against a layer that does nothing."""
+        """Otherwise the test below passes against a layer that does nothing.
+
+        The threshold was 0.03 while the habitat rank was national, and the
+        same fixture now moves the probes by 0.011 to 0.019. That is the rank
+        becoming local rather than the weather mattering less: against the
+        country a good cell sat at the 97th percentile with no room above it,
+        so a multiplier could only push it down; ranked against its
+        neighbourhood the same cell sits mid-scale and the combined
+        distribution is denser around it, so the same nudge crosses fewer
+        percentiles. The real map behaves the same way - conditions moved a
+        tap in Nordmarka from the 99th habitat percentile to the 96th combined.
+
+        What this guards is only that the layer is not inert, which would show
+        as exactly zero.
+        """
         moved = max(abs(p["s"] - p["h"])
                     for st in sloped["steps"] for p in st["probes"])
-        assert moved > 0.03, f"conditions changed nothing (max {moved:.4f})"
+        assert moved > 0.01, f"conditions changed nothing (max {moved:.4f})"
 
     def test_the_same_ground_still_ranks_the_same_from_both_windows(self, sloped):
         a = sloped["by_name"]["west"]["probes"]

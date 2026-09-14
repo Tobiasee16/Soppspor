@@ -71,3 +71,50 @@ class TestWhereItWasNeverAsked:
     def test_it_says_nothing_rather_than_something_wrong(self, ground, name):
         got = label(ground, None)
         assert got == "—", f"over {name} the card said {got!r}"
+
+
+class TestTheCardAgreesWithTheMask:
+    """Two files decide which ground is habitat, and they must not drift.
+
+    `export_zone_tiles.HABITAT_AR50` decides which cells get a zone at all.
+    `show()` in shell.html decides what to tell somebody who taps a cell that
+    did not get one - "the map only estimates forest, open ground and bog, and
+    this is a lake". If the mask were widened to include farmland and the card
+    were not, the card would tell a reader their field is not estimated while
+    the map quietly estimated it.
+    """
+
+    @staticmethod
+    def _habitat_english():
+        import sys
+        sys.path.insert(0, str(ROOT))
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import export_zone_tiles as ezt
+        from src.ingest.ar50 import LABELS
+        return {LABELS[c].replace("_", " ") for c in ezt.HABITAT_AR50}
+
+    def test_the_card_names_exactly_the_masked_in_classes(self):
+        shell = (ROOT / "web" / "shell.html").read_text(encoding="utf-8")
+        start = shell.index("var ngHab=")
+        branch = shell[start:start + 240]
+        for name in self._habitat_english():
+            assert f'"{name}"' in branch, f"the card does not treat {name!r} as habitat"
+
+    def test_it_does_not_call_anything_else_habitat(self):
+        from src.ingest.ar50 import LABELS
+        shell = (ROOT / "web" / "shell.html").read_text(encoding="utf-8")
+        start = shell.index("var ngHab=")
+        branch = shell[start:start + 240]
+        habitat = self._habitat_english()
+        for code, lab in LABELS.items():
+            name = lab.replace("_", " ")
+            if name not in habitat:
+                assert f'"{name}"' not in branch,                     f"the card calls {name!r} habitat but the mask blanks it"
+
+    def test_the_mask_is_the_three_classes_it_claims(self):
+        import sys
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import export_zone_tiles as ezt
+        assert set(ezt.HABITAT_AR50) == {30, 50, 60}, (
+            "the habitat set changed; the zone copy in build_hosted.py "
+            "and the no-zone card both name these three by hand")

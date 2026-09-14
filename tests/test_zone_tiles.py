@@ -74,8 +74,10 @@ class TestPngEncoder:
 
 
 class TestPercentileEncoding:
+    """Byte packing only. The ranking itself moved to `local_percentile`."""
+
     def test_nodata_is_zero_and_data_never_is(self):
-        g = np.array([[np.nan, 1.0], [2.0, 3.0]], dtype="float32")
+        g = np.array([[np.nan, 0.1], [0.5, 0.9]], dtype="float32")
         out, n = ezt.to_percentile_bytes(g)
         assert out[0, 0] == 0 and n == 3
         assert (out[0, 1] > 0) and (out[1, 0] > 0) and (out[1, 1] > 0)
@@ -83,33 +85,82 @@ class TestPercentileEncoding:
     def test_order_is_preserved(self):
         g = np.array([[0.001, 0.5], [0.02, 0.9]], dtype="float32")
         out, _ = ezt.to_percentile_bytes(g)
-        flat = out.ravel()
-        assert list(np.argsort(flat)) == list(np.argsort(g.ravel()))
+        assert list(np.argsort(out.ravel())) == list(np.argsort(g.ravel()))
 
-    def test_it_spends_the_range_on_a_skewed_surface(self):
-        """The reason this encoding exists at all.
-
-        A national surface has a p98/p2 ratio in the hundreds. Linear scaling
-        puts most of the country in the first few bytes; ranking does not.
-        """
-        rng = np.random.default_rng(2)
-        g = rng.pareto(0.3, size=200_000).astype("float32")
-        ranked, _ = ezt.to_percentile_bytes(g.reshape(400, 500))
-        lo, hi = g.min(), g.max()
-        linear = np.clip(np.round((g - lo) / (hi - lo) * 254) + 1, 1, 255)
-        assert (ranked <= 3).mean() < 0.05, "ranking wasted the bottom of the range"
-        assert (linear <= 3).mean() > 0.5, "the fixture is not skewed enough to matter"
-        assert len(np.unique(ranked)) > 200
-
-    def test_ties_take_the_lower_rank(self):
-        g = np.array([[1.0, 1.0, 1.0, 9.0]], dtype="float32")
+    def test_the_ends_reach_the_ends(self):
+        g = np.array([[0.0, 0.5, 1.0]], dtype="float32")
         out, _ = ezt.to_percentile_bytes(g)
-        assert out[0, 0] == out[0, 1] == out[0, 2] == 1
-        assert out[0, 3] == 255
+        assert out[0, 0] == 1 and out[0, 2] == 255
 
     def test_an_empty_surface_gives_no_bytes(self):
         out, n = ezt.to_percentile_bytes(np.full((4, 4), np.nan, dtype="float32"))
         assert n == 0 and not out.any()
+
+
+class TestTheRankIsLocal:
+    """The bug this exists to stop coming back.
+
+    Ranked against the whole country, southern and eastern Norway came out in
+    the top band almost everywhere - 77% of Kristiansand kommune, median 97.5th
+    percentile - because that ground genuinely is near the top of the national
+    distribution. Nationally the spread looked perfect, so nothing caught it.
+    What a forager needs to see is whether this wood beats the next wood.
+    """
+
+    @staticmethod
+    def _tilted(h=400, w=400):
+        """A strong north-south gradient with local texture on top of it.
+
+        Globally, the south end is top-percentile whatever its texture. That is
+        exactly the shape of the real problem.
+        """
+        rng = np.random.default_rng(7)
+        ramp = np.linspace(0.0, 100.0, h, dtype="float32")[:, None]
+        return (ramp + rng.random((h, w), dtype="float32") * 5.0).astype("float32")
+
+    def test_a_tilted_country_still_has_good_and_bad_ground_everywhere(self):
+        g = self._tilted()
+        # 2048 m cells - the coarsest pyramid level - so 400 cells is 819 km.
+        # The fixture has to be much wider than one neighbourhood or the local
+        # rank is the global rank and the test proves nothing. At 128 m it is
+        # 51 km across, inside a single 25 km radius, and it did exactly that.
+        loc = ezt.local_percentile(g, 2048.0)
+        for name, part in (("north end", loc[:60]), ("south end", loc[-60:])):
+            # The property that matters, stated directly: neither end is all
+            # one colour, and neither end is pinned to the top or the bottom.
+            assert part.max() - part.min() > 0.6, (
+                f"{name} spans only {part.max() - part.min():.2f} of the ramp")
+            assert 0.30 < part.mean() < 0.70, (
+                f"{name} sits at {part.mean():.2f}, not in the middle")
+            assert (part > 0.8).mean() > 0.02, f"{name} has no best ground"
+            assert (part < 0.3).mean() > 0.02, f"{name} has no worst ground"
+
+    def test_a_global_rank_would_fail_that(self):
+        """The control. Without it the test above proves nothing."""
+        g = self._tilted()
+        flat = np.sort(g.ravel())
+        glob = (np.searchsorted(flat, g.ravel(), side="left")
+                / flat.size).reshape(g.shape)
+        assert (glob[-60:] > 0.8).mean() > 0.9, "fixture is not tilted enough"
+
+    def test_it_is_monotone_inside_a_neighbourhood(self):
+        rng = np.random.default_rng(3)
+        g = rng.random((120, 120), dtype="float32")
+        loc = ezt.local_percentile(g, 128.0)
+        a, b = np.unravel_index(np.argmin(g), g.shape), np.unravel_index(
+            np.argmax(g), g.shape)
+        assert loc[a] < loc[b]
+
+    def test_nodata_stays_nodata(self):
+        g = np.full((80, 80), 0.5, dtype="float32")
+        g[10:20, 10:20] = np.nan
+        loc = ezt.local_percentile(g, 128.0)
+        assert np.isnan(loc[10:20, 10:20]).all()
+        assert np.isfinite(loc[40:, 40:]).all()
+
+    def test_an_empty_surface_is_all_nodata(self):
+        loc = ezt.local_percentile(np.full((8, 8), np.nan, dtype="float32"), 128.0)
+        assert np.isnan(loc).all()
 
 
 @pytest.fixture

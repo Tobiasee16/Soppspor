@@ -2944,9 +2944,33 @@ function show(i){
   var x=i%GW,y=Math.floor(i/GW),east=OX+(x+.5)*CELL,north=OY-(y+.5)*CELL;
   selW=[east,north];
   card.classList.add("on");
-  if(!rawv){cardTitle.textContent="Ingen verdi";
-    cardBody.innerHTML='<div class="note">Utenfor kommunen, eller en variabel mangler her. '
-      +'Da gjetter modellen ikke.</div>';draw();return;}
+  /* No zone here. Two quite different reasons, and the reader deserves to be
+     told which - this is the card somebody gets for tapping the lake they are
+     standing next to, or the street they live on.
+
+     Water, farmland, built-up ground and ice carry no estimate at all: the
+     forest data the model runs on says nothing about them, and a score there
+     was a guess with nothing behind it. That is a deliberate blank covering
+     2.3 million cells, so it has to read as a decision rather than as the app
+     failing. Everything else - a missing variable, ground off the edge of the
+     map - is the older case and keeps the older wording.
+
+     `ctxAt` returns null while its tile is in flight, in which case the
+     generic sentence is the honest one. */
+  if(!rawv){
+    var NG=CTXM?ctxAt(east,north):null;
+    var ngl=NG?ctxLab("ar50",NG.ar50):null;
+    var ngHab=!!ngl&&(ngl[1]==="forest"||ngl[1]==="open ground"||ngl[1]==="mire");
+    cardTitle.textContent=(ngl&&!ngHab)?ngl[0]:"Ingen sone";
+    cardBody.innerHTML='<div class="note">'
+      +((ngl&&!ngHab)
+        ? 'Kartet anslår bare <b>skog, åpen fastmark og myr</b>. Her er det '
+          +esc(ngl[0].toLowerCase())+', og skogdataene sier ingenting om slik '
+          +'grunn &mdash; et anslag her ville vært en gjetning.'
+        : 'Ingen verdi her: en variabel mangler, eller ruta ligger utenfor '
+          +'kartet. Da gjetter modellen ikke.')
+      +'</div>'+walkTo(east,north);
+    draw();return;}
   var R=smoothField(current),H=habitatField(current);
   var p=R[i],band=bandFor(p);
   var cp=condPctAt(east,north);
