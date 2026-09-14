@@ -751,11 +751,31 @@ applyTheme();
 
 function b64(s){var t=atob(s),n=t.length,o=new Uint8Array(n);
   for(var i=0;i<n;i++)o[i]=t.charCodeAt(i);return o;}
-D.species.forEach(function(s){s.bytes=b64(s.data);s.data=null;});
+/* Two shapes of payload, one shell. Kristiansand inlines every surface as
+   base64 and its grid is the whole study area; the national build ships
+   metadata and fetches tiles for the ground on screen. The switch is read from
+   the payload rather than from a build flag, so neither build needs its own
+   copy of the interface. */
+var TILED=!!(D.meta.tiles&&D.meta.tiles.url);
+D.species.forEach(function(s){ if(s.data){s.bytes=b64(s.data);s.data=null;} });
 Object.keys(D.context).forEach(function(k){D.context[k].bytes=b64(D.context[k].data);});
 Object.keys(D.categorical).forEach(function(k){D.categorical[k].bytes=b64(D.categorical[k].data);});
-var GW=D.grid.w,GH=D.grid.h,CELL=D.meta.cell_m,OX=D.meta.origin_x,OY=D.meta.origin_y;
-var GRID=[OX,OY-GH*CELL,OX+GW*CELL,OY];
+var CELL=D.meta.cell_m;
+/* The national grid: what a tile row and column are counted from, and what
+   bounds the window. Fixed for the life of the page. */
+var NW=D.grid.w,NH=D.grid.h,NOX=D.meta.origin_x,NOY=D.meta.origin_y;
+/* The *current* grid, which is what the rest of the app reads. Without tiles
+   it is the whole payload and never changes; with them it is the window loaded
+   around the viewport, and anything cached against it has to record which
+   window it was built in. */
+var GW=TILED?0:NW,GH=TILED?0:NH,OX=NOX,OY=NOY;
+var GRID=[NOX,NOY-NH*CELL,NOX+NW*CELL,NOY];
+/* Which tiles exist for each species. One that holds no scored cell is never
+   written, so this is also the answer to "is there anything there at all". */
+if(TILED) D.species.forEach(function(s){
+  var h={},t=s.tiles||[],i;
+  for(i=0;i<t.length;i++)h[t[i]]=1;
+  s._has=h;s._win=null;});
 
 /* ---------- basemap tiles ---------- */
 /* Two sheets, each cut into tiles on a shared grid. Tiles are only turned into
@@ -946,12 +966,265 @@ function clampView(){
 function w2s(e,n){return[(e-view.cx)/view.mpp+CW/2,(view.cy-n)/view.mpp+CH/2];}
 function s2w(x,y){return[(x-CW/2)*view.mpp+view.cx,view.cy-(y-CH/2)*view.mpp];}
 
+/* ---------- the estimate, fetched as you move ---------- */
+/* Kristiansand ships its whole suitability surface inside the page: 3.78 MB of
+   base64, decoded once at boot and never thought about again. Norway is 111
+   times that area, so the national build ships metadata only and fetches
+   256-cell tiles for the ground actually on screen, the way the basemap
+   already does.
+
+   What this changes for the rest of the app is smaller than it sounds. GW, GH,
+   OX and OY stop meaning "the study area" and start meaning "the window
+   currently loaded"; the forty-odd places that read them go on working
+   untouched, because each of them only ever asked about *the current grid*.
+   Two things genuinely need care, and both are handled here: a traced zone
+   path belongs to the window it was traced in, and a cell index means nothing
+   once the window has moved.
+
+   The one thing that must never become window-relative is the ranking. "The
+   top 5 %" has to mean the top 5 % of Norway wherever the user is standing,
+   or the same wood would drift in and out of a zone as they panned and
+   nothing would look wrong. That is why the tile byte carries a national
+   percentile and why the post-smoothing re-rank is a shipped lookup instead
+   of a sort - see pctLUT, natRank and scripts/export_zone_tiles.py. */
+var ZT_HALO=2;          /* smoothPct is two 3-tap passes, so it reaches two
+                           cells. A window carrying that much extra on every
+                           side smooths its interior exactly as the national
+                           surface was smoothed; tests/test_national_rank.py
+                           holds the difference to 0.02. */
+var ZT_MARGIN=0.35;     // extra screen fetched, so a small pan costs nothing
+/* How much ground may be held at once. Every cell costs about thirty bytes
+   across the smoothing and ranking buffers, and the contour tracer walks all
+   of them three times, so this is a phone's budget rather than a disk limit.
+   600k cells is roughly 9,800 square kilometres - a good deal more than Agder.
+   Past that the zones are hidden and the map says why: at that scale a 128 m
+   cell is a fraction of a pixel and the shading would be a smear with no
+   information in it. Coarser overview levels are the proper answer to seeing
+   the whole country at once, and are not built yet. */
+var ZT_MAX_CELLS=600000;
+
+var ZT={tile:D.meta.tile_px||256,cache:{},order:[],MAX:180,
+        win:null,key:"",waiting:null,note:null,blank:false};
+
+function ztURL(key,row,col){
+  var t=(D.meta.tiles&&D.meta.tiles.url)||"";
+  if(t.indexOf("{")<0)t=t+"{sp}/{row}_{col}.png";
+  return t.split("{sp}").join(key).split("{row}").join(row)
+          .split("{col}").join(col);
+}
+
+/* A tile is read as data, not drawn as a picture.
+
+   The obvious route - an Image element and getImageData - hands the bytes to a
+   canvas, and a canvas is entitled to colour-manage what it is given. For a
+   value that is a national percentile, a browser nudging 176 to 175 somewhere
+   inside a colour transform would be invisible and would move zone
+   boundaries. So the PNG is parsed here instead: the encoder in
+   scripts/export_zone_tiles.py writes 8-bit greyscale with filter 0 on every
+   scanline, which makes the inflated payload the samples themselves.
+   DecompressionStream is the platform's own zlib, so this costs no dependency
+   and no hand-written inflate. */
+var ZT_SIG=[137,80,78,71,13,10,26,10];
+function ztDecode(buf){
+  var u=new Uint8Array(buf),v=new DataView(buf),i;
+  for(i=0;i<8;i++)if(u[i]!==ZT_SIG[i])throw new Error("not a PNG");
+  var p=8,w=0,h=0,parts=[],total=0;
+  while(p+8<=u.length){
+    var len=v.getUint32(p),d=p+8;
+    var tag=String.fromCharCode(u[p+4],u[p+5],u[p+6],u[p+7]);
+    if(tag==="IHDR"){
+      w=v.getUint32(d);h=v.getUint32(d+4);
+      if(u[d+8]!==8||u[d+9]!==0)throw new Error("tile is not 8-bit grey");
+      if(u[d+12]!==0)throw new Error("tile is interlaced");
+    }else if(tag==="IDAT"){parts.push(u.subarray(d,d+len));total+=len;}
+    else if(tag==="IEND")break;
+    p=d+len+4;
+  }
+  if(!(w>0&&h>0))throw new Error("tile has no header");
+  var z=new Uint8Array(total),off=0;
+  for(i=0;i<parts.length;i++){z.set(parts[i],off);off+=parts[i].length;}
+  var ds=new DecompressionStream("deflate"),wr=ds.writable.getWriter();
+  wr.write(z);wr.close();
+  return new Response(ds.readable).arrayBuffer().then(function(raw){
+    var r=new Uint8Array(raw),out=new Uint8Array(w*h),y,s;
+    if(r.length<h*(w+1))throw new Error("tile is short");
+    for(y=0;y<h;y++){
+      s=y*(w+1);
+      /* Filter 0 is a property of our own encoder, and the reason the bytes
+         survive the round trip unchanged. Anything else means the tile was
+         written by something we do not control, and guessing at it would
+         corrupt the values silently. */
+      if(r[s]!==0)throw new Error("tile scanline is filtered");
+      out.set(r.subarray(s+1,s+1+w),y*w);
+    }
+    return {w:w,h:h,bytes:out};
+  });
+}
+
+function ztTrim(){
+  while(ZT.order.length>ZT.MAX){
+    var id=ZT.order.shift(),e=ZT.cache[id];
+    if(e&&e.pending){ZT.order.push(id);return;}   // never evict one in flight
+    delete ZT.cache[id];
+  }
+}
+function ztTile(key,row,col){
+  var id=key+"/"+row+"_"+col,e=ZT.cache[id];
+  if(e&&(e.bytes||e.pending))return e;
+  /* A failure is remembered briefly rather than for good: the usual cause is
+     no signal, and the usual cure is walking back into some. */
+  if(e&&e.err&&Date.now()-e.at<20000)return e;
+  e={bytes:null,pending:true,err:false,at:0};
+  ZT.cache[id]=e;ZT.order.push(id);ztTrim();
+  function failed(){e.pending=false;e.err=true;e.at=Date.now();ztSettled();}
+  try{
+    fetch(ztURL(key,row,col)).then(function(r){
+      if(!r.ok)throw new Error("HTTP "+r.status);
+      return r.arrayBuffer();
+    }).then(ztDecode).then(function(t){
+      if(t.w!==ZT.tile||t.h!==ZT.tile)throw new Error("tile is "+t.w+"x"+t.h);
+      e.bytes=t.bytes;e.pending=false;ztSettled();
+    }).catch(failed);
+  }catch(err){failed();}
+  return e;
+}
+
+/* The cells the screen needs. The halo is included because a window's
+   outermost two cells are smoothed without their true neighbours; keeping
+   those off screen is what makes the visible field identical to the national
+   one. At the country's edge there is nothing beyond to include, which is
+   correct - the national surface had no neighbours there either. */
+function ztNeed(m){
+  var hw=CW*view.mpp/2*(1+m),hh=CH*view.mpp/2*(1+m);
+  return {x0:Math.max(0,Math.floor((view.cx-hw-NOX)/CELL)-ZT_HALO),
+          x1:Math.min(NW,Math.ceil((view.cx+hw-NOX)/CELL)+ZT_HALO),
+          y0:Math.max(0,Math.floor((NOY-view.cy-hh)/CELL)-ZT_HALO),
+          y1:Math.min(NH,Math.ceil((NOY-view.cy+hh)/CELL)+ZT_HALO)};
+}
+function ztWindow(){
+  var n=ztNeed(ZT_MARGIN);
+  if(n.x1<=n.x0||n.y1<=n.y0)return null;              // off the country
+  if((n.x1-n.x0)*(n.y1-n.y0)>ZT_MAX_CELLS){
+    n=ztNeed(0);                                      // give up the margin first
+    if((n.x1-n.x0)*(n.y1-n.y0)>ZT_MAX_CELLS)return null;
+  }
+  return {x0:n.x0,y0:n.y0,w:n.x1-n.x0,h:n.y1-n.y0};
+}
+function ztCovers(win){
+  var n=ztNeed(0);
+  return win.x0<=n.x0&&win.y0<=n.y0&&
+         win.x0+win.w>=n.x1&&win.y0+win.h>=n.y1;
+}
+function ztRange(win){
+  var T=ZT.tile;
+  return {r0:(win.y0/T)|0,r1:((win.y0+win.h-1)/T)|0,
+          c0:(win.x0/T)|0,c1:((win.x0+win.w-1)/T)|0};
+}
+function ztRequest(sp,win){
+  var g=ztRange(win),pending=0,r,c;
+  for(r=g.r0;r<=g.r1;r++)for(c=g.c0;c<=g.c1;c++){
+    /* A tile holding no scored cell was never written, so asking for it would
+       be a 404 per empty tile per species - most of the Norwegian Sea, every
+       time somebody looks at the coast. */
+    if(sp._has&&!sp._has[r+"_"+c])continue;
+    if(ztTile(sp.key,r,c).pending)pending++;
+  }
+  return pending;
+}
+function ztAssemble(sp,win){
+  var T=ZT.tile,g=ztRange(win),out=new Uint8Array(win.w*win.h),r,c,y;
+  for(r=g.r0;r<=g.r1;r++)for(c=g.c0;c<=g.c1;c++){
+    var e=ZT.cache[sp.key+"/"+r+"_"+c];
+    if(!e||!e.bytes)continue;        // never written, or never arrived: nodata
+    var ax=Math.max(win.x0,c*T),bx=Math.min(win.x0+win.w,(c+1)*T);
+    var ay=Math.max(win.y0,r*T),bz=Math.min(win.y0+win.h,(r+1)*T);
+    for(y=ay;y<bz;y++){
+      var s=(y-r*T)*T+(ax-c*T);
+      out.set(e.bytes.subarray(s,s+(bx-ax)),(y-win.y0)*win.w+(ax-win.x0));
+    }
+  }
+  return out;
+}
+
+/* Called at the top of every draw. Cheap when nothing has moved: it works out
+   what the screen needs and returns, which is why panning inside the margin
+   costs one drawImage and no arithmetic worth measuring. */
+function ztEnsure(){
+  if(!TILED||!SEL.length)return;
+  var win=(ZT.win&&ztCovers(ZT.win))?ZT.win:ztWindow();
+  if(!win){ztBlank();return;}
+  var key=win.x0+","+win.y0+","+win.w+","+win.h,pending=0,i;
+  for(i=0;i<SEL.length;i++)
+    if(SEL[i]._win!==key)pending+=ztRequest(SEL[i],win);
+  if(pending){ZT.waiting=key;return;}
+  ztCommit(win,key);
+}
+/* The swap is one step and happens only when every tile is in hand. A window
+   half replaced would draw one species against another species' ground. */
+function ztCommit(win,key){
+  ZT.waiting=null;ZT.blank=false;ZT.note=null;ZT.win=win;ZT.key=key;
+  GW=win.w;GH=win.h;OX=NOX+win.x0*CELL;OY=NOY-win.y0*CELL;
+  for(var i=0;i<SEL.length;i++){
+    var sp=SEL[i];
+    if(sp._win===key)continue;
+    sp.bytes=ztAssemble(sp,win);sp._win=key;
+    sp._s=null;sp._lut=null;sp._hf=null;sp._sf=null;
+  }
+  ztReselect();
+  repaint();
+}
+/* Too much ground on screen to hold. The old geometry goes rather than being
+   left to draw: it is correct for the ground it covers, which makes it worse
+   than nothing - a lone island of zones reads as "here and nowhere else". */
+function ztBlank(){
+  if(ZT.blank)return;
+  ZT.blank=true;ZT.waiting=null;ZT.note="zoom";
+  D.species.forEach(function(s){s._zones=null;});
+}
+function ztSettled(){
+  if(ZT.waiting===null)return;
+  ztEnsure();
+  requestDraw();
+}
+/* A cell index is an offset into the window, so it stops meaning the same
+   place the moment the window moves. The card remembers where it is in metres
+   and finds its cell again; if the new window does not reach that ground the
+   selection is dropped rather than left pointing somewhere else. */
+var selW=null;
+function ztReselect(){
+  if(selected<0)return;
+  if(!selW){selected=-1;return;}
+  var x=Math.floor((selW[0]-OX)/CELL),y=Math.floor((OY-selW[1])/CELL);
+  selected=(x<0||y<0||x>=GW||y>=GH)?-1:y*GW+x;
+}
+/* The coarsest scale whose window still fits the budget - where a national
+   build opens, because a first screen with no zones on it says nothing. */
+function ztFitMpp(){
+  return Math.sqrt(ZT_MAX_CELLS/(CW*CH*(1+ZT_MARGIN)*(1+ZT_MARGIN)))*CELL;
+}
+
 /* ---------- the modelled area: its outline, and its extent ---------- */
 /* Kristiansand's boundary runs far out into the Skagerrak, so the grid
    rectangle is mostly sea. What matters is the set of cells the model actually
    scores: it frames the opening view, and everything outside it is dimmed. */
-var maskC=document.createElement("canvas");maskC.width=GW;maskC.height=GH;
+var maskC=document.createElement("canvas");
 var DATA=null;
+if(TILED){
+  /* No veil in a national build. The veil dims what the model never scored,
+     which over Kristiansand is the Skagerrak and most of the rectangle; over
+     Norway the scored area is the whole mainland, so it would either dim
+     nothing or dim sea the basemap already draws as sea. The extent still
+     matters - it frames the opening view - and it comes from the tile index,
+     since a tile with nothing scored in it was never written. */
+  var tr0=1e9,tr1=-1,tc0=1e9,tc1=-1,TP=D.meta.tile_px||256;
+  D.species.forEach(function(sp){(sp.tiles||[]).forEach(function(id){
+    var p=id.split("_"),r=+p[0],c=+p[1];
+    if(r<tr0)tr0=r; if(r>tr1)tr1=r; if(c<tc0)tc0=c; if(c>tc1)tc1=c;});});
+  DATA = tr1<0 ? GRID.slice()
+       : [NOX+tc0*TP*CELL, NOY-Math.min(NH,(tr1+1)*TP)*CELL,
+          NOX+Math.min(NW,(tc1+1)*TP)*CELL, NOY-tr0*TP*CELL];
+}else{
+maskC.width=GW;maskC.height=GH;
 (function(){
   var inside=new Float32Array(GW*GH),minx=1e9,maxx=-1e9,miny=1e9,maxy=-1e9;
   for(var s=0;s<D.species.length;s++){var by=D.species[s].bytes;
@@ -973,6 +1246,7 @@ var DATA=null;
   for(var k=0;k<GW*GH;k++) im.data[k*4+3]=Math.round(Math.min(1,inside[k])*255);
   mc.putImageData(im,0,0);
 })();
+}
 function fitMpp(){return Math.max((DATA[2]-DATA[0])/CW,(DATA[3]-DATA[1])/CH)*1.06;}
 /* How high above yourself the map opens. The map is flat, so an altitude has
    to be turned into a scale: a camera with a 70 degree field of view at height
@@ -1060,6 +1334,51 @@ function condValAt(arr,e,n){
    the median. The range is deliberately narrow: this term is a judgement, not
    a measurement, and it should not be able to overturn the habitat ranking. */
 function condFactor(p){return p===null?1:0.72+0.56*p;}
+/* The conditions-adjusted field is ranked too, and that rank has to be
+   national for the same reason the habitat one does: ranked against the loaded
+   window, "the top 5 %" would quietly mean "the top 5 % of this screen".
+
+   It cannot be precomputed at build time, because the weather is not known
+   then. So it is derived here from the conditions grid itself, which covers
+   the whole country. The habitat rank H is uniform on 0..1 by construction and
+   the multiplier m is read off that grid, so
+
+       P(H*m <= s) = mean over the grid of min(1, s/m)
+
+   which is one sort and a running sum. The assumption is that H and m are
+   independent nationally. They are not quite - wetter regions hold somewhat
+   better habitat - so this is an approximation where the shipped habitat
+   lookup is exact, and it is worth saying which is which. It is the right size
+   of approximation for the term: the conditions weight is a stated judgement
+   rather than a fitted estimate, and the error it leaves is a smooth national
+   bias of a few percent, not something that moves when the user pans. */
+function condRankLUT(){
+  if(COND._rl)return COND._rl;
+  var ms=[],i,v;
+  for(i=0;i<COND.pct.length;i++){
+    v=COND.pct[i];
+    if(v===null||v===undefined)continue;
+    ms.push(1-COND_W+COND_W*condFactor(v));
+  }
+  var L={max:1,v:new Float32Array(256)};
+  if(!ms.length){for(i=0;i<256;i++)L.v[i]=i/255;COND._rl=L;return L;}
+  ms.sort(function(a,b){return a-b;});
+  var n=ms.length,inv=new Float64Array(n+1);
+  for(i=n-1;i>=0;i--)inv[i]=inv[i+1]+1/ms[i];
+  L.max=ms[n-1];
+  for(var k=0;k<256;k++){
+    var s=k/255*L.max,lo=0,hi=n;
+    while(lo<hi){var mid=(lo+hi)>>1;if(ms[mid]<=s)lo=mid+1;else hi=mid;}
+    L.v[k]=(lo+s*inv[lo])/n;
+  }
+  COND._rl=L;return L;
+}
+function condRank(L,s){
+  var f=s/L.max*255,k=f|0;
+  if(k<0)return L.v[0];
+  if(k>=255)return L.v[255];
+  return L.v[k]+(L.v[k+1]-L.v[k])*(f-k);
+}
 /* How old the weather is, in words. A silent number invites the reader to
    assume it is live; seNorge publishes a day or two behind and the map should
    say so rather than imply otherwise. */
@@ -1185,14 +1504,21 @@ function smoothField(sp){
   if(sp._sf)return sp._sf;
   var H=habitatField(sp),by=sp.bytes,N=GW*GH;
   if(!COND){sp._sf=H;return H;}
-  var S=new Float32Array(N),vals=[],i;
+  var S=new Float32Array(N),i;
   for(i=0;i<N;i++){
     if(!by[i]){S[i]=0;continue;}
     var x=i%GW,y=(i/GW)|0;
     var e=OX+(x+0.5)*CELL,n2=OY-(y+0.5)*CELL;
-    var f=condFactor(condPctAt(e,n2));
-    S[i]=H[i]*(1-COND_W+COND_W*f);
-    vals.push(S[i]);}
+    S[i]=H[i]*(1-COND_W+COND_W*condFactor(condPctAt(e,n2)));}
+  /* Tiles: rank against the country rather than against the window, exactly as
+     the habitat field does one function up. See condRankLUT. */
+  if(sp.smoothed_rank_lut){
+    var L=condRankLUT(),Rn=new Float32Array(N);
+    for(i=0;i<N;i++) Rn[i]=by[i]?condRank(L,S[i]):0;
+    sp._sf=Rn;return Rn;
+  }
+  var vals=[];
+  for(i=0;i<N;i++) if(by[i]) vals.push(S[i]);
   vals.sort(function(a,b){return a-b;});
   var R=new Float32Array(N),m=vals.length;
   for(i=0;i<N;i++){
@@ -1441,17 +1767,21 @@ function simplifyRing(r){
 function drawZones(){
   var k=CELL/view.mpp;
   if(!(k>0)||!isFinite(k))return;
-  var ox=(OX+0.5*CELL-view.cx)/view.mpp+CW/2;
-  var oy=(view.cy-OY+0.5*CELL)/view.mpp+CH/2;
   ctx.save();
-  ctx.setTransform(DPR,0,0,DPR,0,0);
-  ctx.translate(ox,oy);ctx.scale(k,k);
   ctx.lineJoin="round";ctx.lineCap="round";
   /* Painted back to front in selection order, so the species the card is
      reporting on - the first one - ends up on top rather than buried. */
   for(var sIdx=SEL.length-1;sIdx>=0;sIdx--){
     var z=SEL[sIdx]._zones;
     if(!z)continue;
+    /* Each cached geometry carries the origin of the window it was traced in.
+       With tiles that window moves under the map, and drawing an old path
+       against the current origin would shift a whole landscape of zones by
+       exactly how far the window had travelled - plausible, and wrong. */
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    ctx.translate((z.ox+0.5*CELL-view.cx)/view.mpp+CW/2,
+                  (view.cy-z.oy+0.5*CELL)/view.mpp+CH/2);
+    ctx.scale(k,k);
     for(var i=0;i<z.levels.length;i++){
       var pth=z.paths[i];if(!pth)continue;
       var lv=z.levels[i];
@@ -1469,25 +1799,42 @@ function drawZones(){
    shown in a build that can roam - one carrying its own basemap cannot leave
    the area the sheets cover, so the question never arises. */
 var coverNote=null;
+var NOTE_ZOOM='<b>Zoom inn for å se soner.</b> På dette nivået '
+  +'er en rute på 128 meter mindre enn en piksel, og soneskyggingen ville '
+  +'blitt en utsmøring uten informasjon i seg.';
 (function(){
   var el=document.getElementById("coverNote");
   if(!el)return;
-  var shown=null;
-  coverNote=function(onScreen){
-    var hide=onScreen||!ENV.roaming;
-    if(hide===shown)return;
-    shown=hide;
-    el.hidden=hide;
+  /* The standing message is whatever the markup already says, so that copy
+     lives in one place and the element reads correctly before any script has
+     run. */
+  var HTML0=el.innerHTML,shown=null;
+  coverNote=function(which){
+    if(which&&!TILED&&!ENV.roaming)which=null;
+    /* Only the copy is memoised. Guarding the whole call meant the first one -
+       almost always "nothing to say" - matched the initial state and returned
+       without touching the element at all, which left the note showing or not
+       according to the markup rather than according to the code. */
+    if(which!==shown){
+      shown=which;
+      if(which)el.innerHTML=which==="zoom"?NOTE_ZOOM:HTML0;
+    }
+    el.hidden=!which;
   };
 })();
 function repaint(){
   var overlay=SEL.length>1;
   SEL.forEach(function(sp,n){
+    /* Its tiles have not arrived yet. Leaving the previous geometry alone is
+       deliberate: it is still correct for the ground it covers, and it keeps
+       the map from blinking empty on every pan. */
+    if(TILED&&sp._win!==ZT.key)return;
     var levels=overlay?levelsForOverlay(spColour(sp,n)):levelsFor(spColour(sp,n));
-    if(sp._zones&&sp._zones.overlay===overlay&&sp._zones.cond===condStamp()){
+    if(sp._zones&&sp._zones.overlay===overlay&&sp._zones.cond===condStamp()&&
+       sp._zones.ox===OX&&sp._zones.oy===OY&&sp._zones.gw===GW){
       sp._zones.levels=levels;return;}
     sp._zones={paths:buildZones(sp,levels),levels:levels,overlay:overlay,
-               cond:condStamp()};
+               cond:condStamp(),ox:OX,oy:OY,gw:GW};
   });
 }
 /* Conditions re-rank the field, so a newer weather file invalidates the
@@ -1509,6 +1856,7 @@ function drawTiles(tiles){
   }
 }
 function draw(){
+  ztEnsure();
   ctx.setTransform(DPR,0,0,DPR,0,0);
   ctx.clearRect(0,0,CW,CH);
   ctx.fillStyle="#e9eef2";
@@ -1532,7 +1880,7 @@ function draw(){
   var gw=b2[0]-t2[0],gh=b2[1]-t2[1];
   var onScreen=gw>CW*0.12&&gh>CH*0.12&&
                t2[0]<CW&&b2[0]>0&&t2[1]<CH&&b2[1]>0;
-  if(onScreen){
+  if(onScreen&&!TILED){
     if(veil.width!==Math.round(CW)||veil.height!==Math.round(CH)){
       veil.width=Math.round(CW);veil.height=Math.round(CH);}
     veilCtx.setTransform(1,0,0,1,0,0);
@@ -1545,7 +1893,7 @@ function draw(){
     veilCtx.globalCompositeOperation="source-over";
     ctx.drawImage(veil,0,0,CW,CH);
   }
-  if(coverNote) coverNote(onScreen);
+  if(coverNote) coverNote(TILED?ZT.note:(onScreen?null:"outside"));
 
   drawZones();
 
@@ -2345,8 +2693,14 @@ function tap(sx,sy){
   show(y*GW+x);
 }
 function outside(){
-  selected=-1;closeSheets();
+  selected=-1;selW=null;closeSheets();
   cardTitle.textContent="Ingen soner her";
+  if(TILED){
+    cardBody.innerHTML='<div class="note">Her har modellen ikke regnet ut noe. '
+      +'Det er enten sjø, eller utenfor fastlandet kartet dekker.</div>'
+      +'<div class="note">Resten av appen virker her: kartet, de merkede '
+      +'stiene, nedbøren, og stedene du lagrer selv.</div>';
+    card.classList.add("on");draw();return;}
   cardBody.innerHTML='<div class="note">Anslaget er foreløpig bare regnet ut for '
     +'<b>Kristiansand kommune</b>. Modellen er tilpasset på Agder, og et kart '
     +'for resten av landet må måles mot funn der før det kan vises &mdash; et '
@@ -2382,6 +2736,7 @@ function show(i){
   selected=i;closeSheets();
   var rawv=current.bytes[i];
   var x=i%GW,y=Math.floor(i/GW),east=OX+(x+.5)*CELL,north=OY-(y+.5)*CELL;
+  selW=[east,north];
   card.classList.add("on");
   if(!rawv){cardTitle.textContent="Ingen verdi";
     cardBody.innerHTML='<div class="note">Utenfor kommunen, eller en variabel mangler her. '
@@ -2985,6 +3340,17 @@ if(window.matchMedia) try{ window.matchMedia("(prefers-color-scheme:dark)")
 size();
 view.cx=(DATA[0]+DATA[2])/2; view.cy=(DATA[1]+DATA[3])/2;
 view.mpp=Math.min(fitMpp(),maxMpp());
+/* A national build would otherwise open on the whole country, where the zones
+   are not drawn at all - a first screen without the one thing the user came
+   for.
+
+   Half of the coarsest allowed scale, not the coarsest: opening at the limit
+   also asks for the most tiles the limit allows, and it does it for a view
+   centred on the middle of the country, which is almost never where anybody
+   is. Halving it quarters the ground, so a cold start pulls four tiles instead
+   of sixteen and still opens on a region about 25 km across. A position fix,
+   if one arrives, moves the map a moment later anyway. */
+if(TILED) view.mpp=Math.min(view.mpp,ztFitMpp()*0.5);
 clampView();
 renderSpecies();renderSpots();repaint();draw();keepAwake(true);
 
