@@ -228,9 +228,22 @@ class TestTheProse:
             assert "regnet" not in about["ab_lead"]
 
     def test_the_context_layers_are_declared_if_they_ship(self, built):
+        """Declared, not merely exported.
+
+        This used to skip whenever the payload had no `ctx`, which is the one
+        state it most needed to catch: 35 MB of context tiles copied into the
+        build, nothing in the page asking for them, and every card's "why"
+        panel a row of dashes. Exported tiles are now the condition for
+        asserting rather than an excuse for not.
+        """
         payload, _, _ = built
-        if "ctx" not in payload:
-            pytest.skip("no context tiles exported")
+        exported = (bh.NAT_CTX / "meta.json").exists()
+        if not exported:
+            pytest.skip("no context tiles exported; run export_context_tiles.py")
+        assert "ctx" in payload, (
+            "context tiles were exported but the payload does not declare them "
+            "- the build ships them and the app never asks")
+        assert payload["ctx"]["url"].endswith(".png")
         keys = [L["key"] for L in payload["ctx"]["layers"]]
         assert "elevation" in keys and "ar50" in keys
         # The national model has no TWI, so neither can the card.

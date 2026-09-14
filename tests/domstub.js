@@ -121,7 +121,28 @@ global.window = {
   localStorage: global.localStorage,
 };
 global.window.self = global.window.top = global.window;
-global.navigator = {};
+/* Records the request instead of answering it. When the app asks for a
+   position matters as much as whether it does: on iOS the permission dialog
+   appears the moment getCurrentPosition is called, so asking during the
+   welcome puts a system prompt over the introduction. No callback is fired,
+   so nothing here moves the map. */
+/* defineProperty, not assignment. Node 21 added a built-in `navigator` global
+   defined as a getter with no setter, so `global.navigator = {...}` silently
+   does nothing - the old stub here had been a no-op for exactly that reason,
+   invisibly, because the app only ever asked whether `navigator.geolocation`
+   existed and was content to be told no. */
+Object.defineProperty(global, "navigator", {
+  value: {
+    geolocation: {
+      calls: [],
+      getCurrentPosition(ok, err, opts) { this.calls.push({ ok, err, opts }); },
+      watchPosition() { return 1; },
+      clearWatch() {},
+    },
+  },
+  configurable: true,
+  writable: true,
+});
 
 
 module.exports = { node, nodes, el, flush, rafQueue, canvas, listeners,

@@ -2905,6 +2905,22 @@ function val(l,i){if(!l||!l.bytes)return null;var b=l.bytes[i];
 function cat(k,i){var l=D.categorical[k];if(!l)return null;var v=val(l,i);
   return v===null?null:(l.labels[String(Math.round(v))]||null);}
 function kv(k,v){return '<dl class="kv"><dt>'+k+'</dt><dd>'+v+'</dd></dl>';}
+/* SR16 maps productive forest and nothing else, so an absent tree species has
+   two quite different meanings depending on what the ground is.
+
+   On forest, it is a finding: the stand is there but is not productive forest,
+   which is worth telling a reader who is deciding whether to walk in. Anywhere
+   else - a lake, a bog, a field, a street - it is simply not a question SR16
+   was asked, and answering it anyway put "ikke produktiv skog" under
+   "Ferskvann" on the same card. Bogs and water are common taps in Norwegian
+   terrain, so this was not an edge case.
+
+   The summary line above already omits the species when it is absent; this
+   makes the table agree with it rather than contradict it. */
+function treslagLabel(ar,tre){
+  if(tre)return tre[0];
+  return (ar&&ar[1]==="forest")?"ikke produktiv skog":"—";
+}
 var COMPASS=["nord","nordøst","øst","sørøst","sør","sørvest","vest","nordvest"];
 /* A percentile tells you whether a place is worth walking to; this tells you
    whether you can be bothered. Without it the map is something to read at
@@ -3004,7 +3020,7 @@ function show(i){
         (condValAt("rain21",east,north)!==null
           ? Math.round(condValAt("rain21",east,north))+" mm" : "—"))
     +kv("Mot normalen her",(cp===null?"—":Math.round(cp*100)+". persentil"))
-    +kv("Arealtype",ar?ar[0]:"—")+kv("Treslag",tre?tre[0]:"ikke produktiv skog")
+    +kv("Arealtype",ar?ar[0]:"—")+kv("Treslag",treslagLabel(ar,tre))
     +kv("Alder",age!==null&&age>0?Math.round(age)+" år":"—")
     +kv("Kronedekning",crown!==null&&crown>0?Math.round(crown)+" %":"—")
     +kv("Løsmasse",los?los[0]:"—")+kv("Høyde",elev!==null?Math.round(elev)+" moh.":"—")
@@ -3553,6 +3569,9 @@ function obClose(){
   document.getElementById("ob").classList.remove("on");
   try{ localStorage.setItem("soppkart.welcomed","1"); }catch(e){}
   size();clampView();draw();
+  /* Now, and not before: the third slide has just explained what the map is,
+     so a prompt asking where the reader is has a reason the reader can see. */
+  startAtPosition();
 }
 function obOpen(){ obAt=0;obRender();document.getElementById("ob").classList.add("on"); }
 document.getElementById("obGo").addEventListener("click",function(){
@@ -3599,8 +3618,22 @@ renderSpecies();renderSpots();repaint();draw();keepAwake(true);
 /* The kommune is drawn first and the position moves the view when it arrives,
    rather than the map sitting blank waiting for a fix that may never come. A
    refusal here is silent: the map is already somewhere useful, and the button
-   in the corner is where an explanation belongs. */
-(function startAtPosition(){
+   in the corner is where an explanation belongs.
+
+   Held back while the welcome is up. iOS raises its permission dialog the
+   instant getCurrentPosition is called, so on a first launch this landed a
+   system prompt on top of the introduction - before the reader had been told
+   what the app is, or why it would want to know where they are. Asked cold
+   like that people say no, and on iOS a declined location permission cannot be
+   asked for again from inside the app: it takes a trip to Settings. Somebody
+   who meant "not now" would have lost the locate button for good, on the one
+   screen where they were deciding what they thought of this.
+
+   A returning user sees no welcome and is asked at once, exactly as before. */
+var askedToLocate=false;
+function startAtPosition(){
+  if(askedToLocate)return;
+  askedToLocate=true;
   if(!navigator.geolocation)return;
   navigator.geolocation.getCurrentPosition(function(pos){
     var p=toUTM33(pos.coords.latitude,pos.coords.longitude);
@@ -3611,6 +3644,8 @@ renderSpecies();renderSpots();repaint();draw();keepAwake(true);
     view.mpp=eyeMpp();clampView();draw();
     toast("Din posisjon ±"+Math.round(pos.coords.accuracy||0)+" m");
   },function(){},{enableHighAccuracy:true,timeout:12000,maximumAge:60000});
-})();
+}
+/* Shown the welcome? Then obClose asks. Otherwise ask now. */
+if(!document.getElementById("ob").classList.contains("on")) startAtPosition();
 })();
 </script>
