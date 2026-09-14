@@ -140,12 +140,23 @@ class TestItIsActuallyReachable:
         build = (ROOT / "scripts" / "build_hosted.py").read_text(encoding="utf-8")
         assert "personvern.html" in build
 
-    def test_it_is_routed_ahead_of_the_single_page_catch_all(self):
-        """A rewrite that swallows a real file turns a missing page into a 200."""
+    def test_it_survives_the_single_page_catch_all(self):
+        """It has no rule of its own, and does not need one.
+
+        Static assets are served before `_redirects` is consulted, so a real
+        file at /personvern.html wins over `/*  /index.html  200`. That is not
+        an assumption: the deployed check fetches the address and asserts the
+        policy comes back rather than the app, and the same deploy proved the
+        rule for /conditions.json, which likewise has no entry.
+
+        What this pins is the part that can rot silently - that the file is
+        still copied into the build, and that the live check still looks.
+        """
         build = (ROOT / "scripts" / "build_hosted.py").read_text(encoding="utf-8")
-        mine = build.index("/personvern.html  /personvern.html  200")
-        catch = build.index('"/*  /index.html  200"')
-        assert mine < catch, "the catch-all would swallow the policy"
+        assert "personvern.html" in build, "the build no longer ships the policy"
+        deployed = (ROOT / "scripts" / "check_deployed.py").read_text(encoding="utf-8")
+        assert "personvern.html" in deployed,             "nothing checks that the live policy is the policy"
+        assert "not the app served by the fallback" in deployed
 
     def test_it_is_readable_offline(self):
         """People often open it while deciding to delete their account, and

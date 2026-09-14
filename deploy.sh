@@ -54,13 +54,27 @@ case "${1:-}" in
     # different one:
     #   PAGES_PROJECT=whatever ./deploy.sh --cloudflare
     PROJECT="${PAGES_PROJECT:-soppspor}"
-    echo "==> Cloudflare Pages (project: $PROJECT)"
+    BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
+    echo "==> Cloudflare Pages (project: $PROJECT, branch: $BRANCH)"
     echo "    this will publish to https://$PROJECT.pages.dev"
-    npx --yes wrangler pages deploy "$OUT" --project-name "$PROJECT"
+    # The project must already exist - `pages deploy` will not create one:
+    #   npx wrangler pages project create "$PROJECT" --production-branch main --force
+    # (--force only on the create, and only once; wrangler says so itself.)
+    #
+    # And its exit code is not evidence. It has been seen to print "The Pages
+    # project does not exist", deploy nothing, and return 0 - which `set -e`
+    # cannot catch and this script would have reported as a success. That is
+    # why the site is fetched and inspected below rather than trusted.
+    npx --yes wrangler pages deploy "$OUT" --project-name "$PROJECT"         --branch "$BRANCH" --commit-dirty=true
+    echo "==> checking what is actually live"
+    python scripts/check_deployed.py "https://$PROJECT.pages.dev" "$OUT"
     ;;
   --netlify)
     echo "==> Netlify"
     npx --yes netlify-cli deploy --dir "$OUT" --prod
+    echo
+    echo "Now check it, with the address Netlify printed:"
+    echo "  python scripts/check_deployed.py <url> $OUT"
     ;;
   "")
     cat <<MSG

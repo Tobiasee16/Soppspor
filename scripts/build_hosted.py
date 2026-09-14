@@ -667,6 +667,19 @@ def main() -> int:
     # a store listing needs a link it can point at. A build without it is a
     # build that promises things in settings it does not deliver, so this is
     # loud rather than silent.
+    # Stale pages from an earlier build get uploaded along with everything
+    # else, and a file that is no longer written is not a file that goes away.
+    # Renaming 404.html to ikke-funnet.html left the old one sitting in the
+    # output, where Cloudflare Pages went on treating it as the site's
+    # automatic not-found page - so the rename appeared to change nothing.
+    # Only the top-level pages: the tile directories are the bulk of the build
+    # and clearing them would mean re-copying 154 MB every time.
+    keep = {"index.html", "personvern.html"}
+    for stale in out.glob("*.html"):
+        if stale.name not in keep:
+            stale.unlink()
+            print(f"  removed stale {stale.name} from a previous build")
+
     if (WEB / "personvern.html").exists():
         shutil.copyfile(WEB / "personvern.html", out / "personvern.html")
     else:
@@ -712,13 +725,29 @@ def main() -> int:
     # below. Without it a failed tile upload returns the page, with a 200, and
     # the map shows no zones while nothing anywhere reports a problem.
     (out / "_redirects").write_text(
-        "/zones/*  /zones/:splat  200" + chr(10)
-        + "/context/*  /context/:splat  200" + chr(10)
-        # Ahead of the catch-all for the same reason the tile rules are: a
-        # single-page rewrite that swallows a real file turns a missing page
-        # into a 200 serving the app, which looks like it worked.
-        + "/personvern.html  /personvern.html  200" + chr(10)
-        + "/*  /index.html  200" + chr(10),
+        # One rule, because Cloudflare Pages will not give us two.
+        #
+        # A missing tile ideally 404s: a rewrite that returns the whole app
+        # with a 200 makes a failed upload indistinguishable from a working
+        # site. Three deploys were spent trying to get that, and the platform
+        # does not offer it alongside a single-page fallback:
+        #
+        #   * `/zones/*  /zones/:splat  200` - a rewrite of a path to itself -
+        #     does not stop `/*` claiming the path when no file matches.
+        #   * `/zones/*  /some.html  404` is ignored. What appeared to work was
+        #     Cloudflare serving a root 404.html of its own accord.
+        #   * and that automatic 404.html overrides `/*  /index.html  200` for
+        #     every unmatched path, so shipping one broke deep links: /steder
+        #     came back 404 instead of opening the app.
+        #
+        # The fallback wins, because the app genuinely needs it and a reader
+        # who opens a shared link must land on the map. The failure it used to
+        # guard against is checked directly instead: scripts/check_deployed.py
+        # samples real tiles out of the payload's own manifest and requires a
+        # PNG back, which tests an incomplete upload rather than a proxy for
+        # one. The app only ever requests tiles the payload lists, so a missing
+        # tile is not a path it takes in normal use.
+        "/*  /index.html  200" + chr(10),
         encoding="utf-8")
 
     total = sum(f.stat().st_size for f in out.rglob("*") if f.is_file())

@@ -17,6 +17,7 @@ it is completely silent.
 from __future__ import annotations
 
 import pathlib
+import re
 import sys
 
 import pytest
@@ -133,11 +134,59 @@ class TestTheDeployedRuleMatches:
     """The host has to behave the way the local server does, or the build that
     was tested is not the build that is live."""
 
-    def test_the_build_writes_a_zone_passthrough_before_the_fallback(self):
-        import build_hosted as bh
+    def test_the_build_writes_exactly_one_rule(self):
+        """Cloudflare Pages will not give us a 404 for missing tiles *and* a
+        single-page fallback, and three deploys went into establishing that.
+
+        A missing tile ideally 404s, because a rewrite that returns the whole
+        app with a 200 makes a failed upload indistinguishable from a working
+        site. What was tried, and what each attempt actually did on the live
+        site:
+
+          * `/zones/*  /zones/:splat  200` - a rewrite of a path to itself -
+            does not stop `/*` claiming the path when no file matches. The
+            missing tile came back as 283 kB of app.
+          * `/zones/*  /some.html  404` is ignored outright. What appeared to
+            work was Cloudflare serving a root 404.html of its own accord.
+          * and that automatic 404.html overrides `/*  /index.html  200` for
+            every unmatched path, so shipping one broke deep links: /steder
+            came back 404 instead of opening the app.
+
+        The fallback wins, because a reader who opens a shared link has to land
+        on the map. The failure the 404 was guarding against is checked
+        directly instead, by scripts/check_deployed.py sampling real tiles.
+
+        This test exists to stop the first two being re-added by someone who
+        reasons about it the way I did rather than measuring it.
+        """
         src = (ROOT / "scripts" / "build_hosted.py").read_text(encoding="utf-8")
-        assert "/zones/*  /zones/:splat  200" in src
-        i = src.index("/zones/*  /zones/:splat  200")
-        j = src.index("/*  /index.html  200")
-        assert i < j, "the catch-all would swallow the zone rule"
-        assert bh is not None
+        # Quoted rule literals only. The explanation above them names the rules
+        # that were tried and rejected, and a substring search cannot tell a
+        # rule that is written from one that is merely described.
+        rules = set(re.findall(r'"(/\S*\s{2}\S+\s{2}\d{3})"', src))
+        assert rules == {"/*  /index.html  200"}, rules
+
+    def test_no_root_not_found_page_is_shipped(self):
+        """A root 404.html takes over from the single-page fallback."""
+        src = (ROOT / "scripts" / "build_hosted.py").read_text(encoding="utf-8")
+        assert not (ROOT / "web" / "404.html").exists()
+        assert 'out / "404.html"' not in src
+
+    def test_stale_pages_are_cleared_from_the_build(self):
+        """A renamed page that is no longer written does not go away on its own.
+
+        Renaming the not-found page left the old one in the output directory,
+        where it was uploaded and went on being treated as the site's automatic
+        404 - so the rename appeared to change nothing, and cost a deploy to
+        work out. Only the top-level pages: clearing the tile directories would
+        mean re-copying 154 MB every build.
+        """
+        src = (ROOT / "scripts" / "build_hosted.py").read_text(encoding="utf-8")
+        assert 'out.glob("*.html")' in src
+        assert "stale" in src
+
+    def test_the_tiles_are_checked_on_the_deployed_site_instead(self):
+        """Since the routing cannot prove an upload landed, something must."""
+        py = (ROOT / "scripts" / "check_deployed.py").read_text(encoding="utf-8")
+        assert "every sampled zone tile comes back as a PNG" in py
+        assert "the build holds every tile its payload names" in py

@@ -71,3 +71,24 @@ def test_the_checker_accepts_a_directory(script):
     """The script passes one; the checker has to take it."""
     js = (ROOT / "tests" / "test_hosted_build.js").read_text(encoding="utf-8")
     assert "process.argv[2]" in js
+
+
+def test_a_deploy_is_verified_rather_than_trusted(script):
+    """`wrangler pages deploy` has exited 0 after deploying nothing at all.
+
+    It printed "The Pages project does not exist" and returned success, which
+    `set -e` cannot catch and this script would have reported as a good deploy.
+    An exit code is not evidence that a site is live; fetching it is.
+    """
+    assert "scripts/check_deployed.py" in script
+    deploy_at = script.index("wrangler pages deploy")
+    check_at = script.index("check_deployed.py", deploy_at)
+    assert deploy_at < check_at, "the check runs before the deploy"
+
+
+def test_the_deployment_checker_exists_and_takes_an_origin():
+    py = (ROOT / "scripts" / "check_deployed.py").read_text(encoding="utf-8")
+    assert "usage: check_deployed.py <origin> <built-dir>" in py
+    # The four things it must look at, each of which has been wrong once.
+    for probe in ["area_label", "personvern.html", "404", "conditions.json"]:
+        assert probe in py, f"the deployment check no longer looks at {probe}"
