@@ -3720,23 +3720,32 @@ What it does not have, in order of how much it matters:
 Correctness was pinned; speed was not measured. A window commit rebinds the
 grid, re-smooths it, re-ranks it and re-traces three contour levels, and it
 runs every time the viewport leaves the loaded margin. Measured over the real
-national tiles:
+national tiles, with tracing and stitching timed apart and the segment count
+printed beside every timing, so a run that traced an empty field could not
+flatter the result:
 
-| view | m/px | level | cells | commit |
-|---|---|---|---|---|
-| a wood, walking zoom | 12 | 0 | 5,936 | 6 ms |
-| a valley | 40 | 0 | 59,508 | 52 ms |
-| **a county** | **120** | **0** | **520,198** | **605 ms** |
-| level 1 takes over | 170 | 1 | 66,976 | 53 ms |
-| the whole country | 3000 | 2 | 373,500 | 119 ms |
+| view | m/px | level | cells | segments | trace | stitch |
+|---|---|---|---|---|---|---|
+| a wood, walking zoom | 12 | 0 | 5,936 | 1,180 | 3 ms | 9 ms |
+| a valley | 40 | 0 | 59,508 | 18,790 | 11 ms | 27 ms |
+| **a county** | **120** | **0** | **520,198** | **158,518** | **87 ms** | **391 ms** |
+| level 1 takes over | 400 | 1 | 362,096 | 57,976 | 29 ms | 83 ms |
+| the whole country | 3000 | 2 | 373,500 | 16,826 | 12 ms | 23 ms |
 
 This desktop is three to five times faster than a mid-range phone, so the
 county row was a stall a user could count - at a zoom the pyramid was built to
 serve.
 
-**505 ms of the 605 was stitching contour segments into rings**, 3.2 us per
-segment across 158,518 of them. Not tracing, not smoothing, not ranking: the
-bookkeeping. Each segment end was keyed by a string built from two rounded
+That the segment count is worth printing is not fussiness. The first two
+attempts at this measurement pointed the probe at the wrong tiles root, loaded
+nothing, traced a field of zeros, and reported a commit of 13 ms - a result
+that looks like good news and means the harness is broken. A timing is only
+readable next to a count of the work it did.
+
+**Stitching contour segments into rings was three quarters of the contour
+rebuild**, across 158,518 segments at the county view. Not tracing, not
+smoothing, not ranking: the bookkeeping. Each segment end was keyed by a
+string built from two rounded
 coordinates, stored in a plain object that becomes a dictionary at a hundred
 thousand distinct keys, and the ring walk recomputed those keys as it went -
 including the ring's own first key on every step of every ring.
@@ -3745,7 +3754,16 @@ The key is now the two rounded coordinates packed into one float in a `Map`,
 computed once per segment end up front, with a segment end held as one integer
 rather than an object. Same algorithm, same traversal order.
 
-    605 ms -> 291 ms; stitching 505 -> 158.
+Three repeats of the county view, the old code and the new one in the same
+session, medians quoted:
+
+    stitching             391 -> 99 ms
+    whole contour rebuild 522 -> 154 ms
+
+Runs spread by roughly a third either way on a desktop with a warm JIT and
+nothing pinned, so **the ratio is the durable number and the absolutes are
+not**. The single-run pair quoted in the commit message - 605 -> 291 ms - sits
+at the high end of that spread and describes the same 3.2x.
 
 **The geometry was proven identical rather than assumed.** The committed
 version and the rewrite were each run over the real national tiles at four
@@ -3753,6 +3771,11 @@ zooms with a recording `Path2D`, and compared vertex for vertex: 135,560 path
 operations at the worst case, all matching. That was only possible because the
 DOM stub was changed to record its path vertices - it had been discarding them,
 which left the tracer and the stitcher countable but not checkable.
+
+The repeat runs above carry a second, independent check on the same claim,
+free: both versions emitted the same segment count and the same path-operation
+count at every zoom tested. A rewrite that had merged or dropped a vertex
+would have had to do it without changing either total.
 
 A method note worth keeping: the first measurement said "repaint is 87% of the
 commit", which is true and not actionable. Splitting repaint into tracing and

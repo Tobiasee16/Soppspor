@@ -1796,9 +1796,11 @@ function buildZones(sp,levels){
 
    Contour endpoints land on cell edges, so rounding to 1/512 of a cell makes
    the two ends of a shared edge compare equal. Packing the pair into a single
-   float is exact far beyond any window this app loads - the largest is about
-   1.6e12 against a double's 9e15 - and it replaces two number-to-string
-   conversions and a concatenation per lookup.
+   float is exact far beyond any window this app loads. The largest key any
+   window under the 600,000-cell cap can produce is 4.7e11, against the 9.0e15
+   ceiling below which a double holds every integer exactly - about 19,000x of
+   headroom - and it replaces two number-to-string conversions and a
+   concatenation per lookup.
 
    This is not a micro-optimisation. Measured over the real national tiles at a
    county-wide zoom, stitching was **505 ms of a 605 ms window commit**, or
