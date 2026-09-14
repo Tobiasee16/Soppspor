@@ -531,6 +531,31 @@ def strip_shell_title(shell: str) -> str:
     return shell[shell.index("</title>") + len("</title>"):].lstrip("\r\n")
 
 
+# The manifest is what an installed app shows in the launcher and in the
+# install prompt, so its description is product copy like any other - and it was
+# being copied into both builds unchanged, where it made two claims that are
+# false of the national one. It promised "merkede stier", which that build does
+# not ship (Turrutebasen is packed into the page, which is the right shape for
+# one kommune and tens of megabytes for the mainland), and it said the zone
+# estimate was worked out for Kristiansand, which stopped being true when the
+# pyramid went national. Both read as a product describing a different product.
+MANIFEST_DESC = {
+    False: ("Turkart for soppturer rundt Kristiansand: merkede stier, "
+            "nedb\u00f8ren de siste ukene, og dine egne steder lagret privat. "
+            "Anslaget er regnet ut fra offentlige kartdata, ikke en fasit."),
+    True: ("Turkart for soppturer i hele Norge: soneanslag for hele landet, "
+           "nedb\u00f8ren de siste ukene, og dine egne steder lagret privat. "
+           "Anslaget er regnet ut fra offentlige kartdata, ikke en fasit."),
+}
+
+
+def manifest_text(national: bool) -> str:
+    """web/manifest.webmanifest with the description this build can stand behind."""
+    m = json.loads((WEB / "manifest.webmanifest").read_text(encoding="utf-8"))
+    m["description"] = MANIFEST_DESC[bool(national)]
+    return json.dumps(m, ensure_ascii=False, indent=2) + "\n"
+
+
 def copy_flat(src_dir: pathlib.Path, dest: pathlib.Path) -> tuple[int, int]:
     """Copy one flat directory of PNGs. Returns (files, bytes)."""
     if dest.exists():
@@ -627,12 +652,15 @@ def main() -> int:
             print(f"  context: {n2:,} tiles, {size2 / 1e6:.1f} MB")
 
     # --- everything else the host serves --------------------------------
-    for name in ("manifest.webmanifest", "sw.js"):
-        src = WEB / name
-        if src.exists():
-            shutil.copyfile(src, out / name)
-        else:
-            print(f"  WARNING: {name} missing from web/")
+    if (WEB / "manifest.webmanifest").exists():
+        (out / "manifest.webmanifest").write_text(manifest_text(national),
+                                                  encoding="utf-8")
+    else:
+        print("  WARNING: manifest.webmanifest missing from web/")
+    if (WEB / "sw.js").exists():
+        shutil.copyfile(WEB / "sw.js", out / "sw.js")
+    else:
+        print("  WARNING: sw.js missing from web/")
     if (WEB / "icons").exists():
         shutil.copytree(WEB / "icons", out / "icons", dirs_exist_ok=True)
 

@@ -64,11 +64,23 @@ for (const f of ["sw.js", "manifest.webmanifest", "conditions.json",
 
 // Anything the HTML asks for by relative path must be on disk, or the first
 // user gets a 404 for it and nobody notices until they report a blank icon.
-const refs = [...html.matchAll(/(?:href|src)="(?!https?:|data:|#)([^"]+)"/g)]
+//
+// A reference that carries a scheme - https:, data:, mailto: - is not a path at
+// all, so it is excluded by having a scheme rather than by a list of the three
+// schemes the page happened to use when this was written. That list broke the
+// first time the page gained a mailto: link, and would have broken again on
+// tel: or geo:, both of which this app is a plausible home for.
+const refs = [...html.matchAll(/(?:href|src)="(?![a-zA-Z][a-zA-Z0-9+.-]*:|#)([^"]+)"/g)]
   .map(m => m[1]).filter(u => !u.startsWith("/"));
 const missing = [...new Set(refs)].filter(u => !fs.existsSync(path.join(DIST, u)));
 check("every relative reference resolves to a file in dist",
       missing.length === 0, missing.join(", ") || [...new Set(refs)].join(", "));
+
+// The address is the only route a user has for asking what is stored about
+// them, which the privacy copy right above it promises they may do. It has to
+// survive into the built page, not just live in the shell.
+check("the built page carries the service address",
+      html.includes('href="mailto:support@soppspor.no"'));
 
 // The deployed copy must behave like the one that was tested. serve_interface
 // falls back to index.html for unknown paths; without _redirects, Cloudflare

@@ -340,3 +340,47 @@ class TestItActuallyDraws:
         missing = [u for u in run["asked"]
                    if u.endswith(".png") and not (TILES / u).exists()]
         assert not missing, missing[:5]
+
+
+class TestTheManifestDescribesTheBuildItShipsWith:
+    """The manifest is what the launcher and the install prompt show, so its
+    description is product copy like any other - and it was being copied into
+    both builds unchanged.
+
+    That made it wrong for the national one in two separate ways. It promised
+    "merkede stier", which that build does not ship at all, and it said the
+    zone estimate was worked out for Kristiansand, which stopped being true
+    when the pyramid went national. A build describing a different build is
+    the same defect as a switch that governs nothing, one layer further out
+    where a test was less likely to look.
+
+    Needs no exported run: the description is a function of the build flag.
+    """
+
+    def test_the_national_build_does_not_promise_marked_routes(self):
+        desc = json.loads(bh.manifest_text(national=True))["description"].lower()
+        assert "merkede stier" not in desc, desc
+
+    def test_the_national_build_does_not_claim_one_kommune(self):
+        desc = json.loads(bh.manifest_text(national=True))["description"]
+        assert "Kristiansand" not in desc, desc
+        assert "hele Norge" in desc, desc
+
+    def test_the_agder_build_still_describes_itself(self):
+        desc = json.loads(bh.manifest_text(national=False))["description"]
+        assert "Kristiansand" in desc, desc
+        assert "merkede stier" in desc.lower(), desc
+
+    def test_both_say_it_is_an_estimate(self):
+        """The one claim neither build may drop, whatever else changes."""
+        for national in (False, True):
+            desc = json.loads(bh.manifest_text(national))["description"].lower()
+            assert "anslag" in desc and "ikke en fasit" in desc, desc
+
+    def test_the_name_survives_the_rewrite(self):
+        """It is rebuilt rather than copied now, so the rest must come through."""
+        for national in (False, True):
+            m = json.loads(bh.manifest_text(national))
+            assert m["name"] == "Soppspor"
+            assert m["start_url"] == "./" and m["display"] == "standalone"
+            assert len(m["icons"]) == 3

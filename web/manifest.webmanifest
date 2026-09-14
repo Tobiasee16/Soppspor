@@ -1,7 +1,7 @@
 {
   "name": "Soppspor",
   "short_name": "Soppspor",
-  "description": "Turkart for soppturer i hele Norge: merkede stier, nedbøren der du er, og dine egne steder lagret privat. Soneanslaget er foreløpig regnet ut for Kristiansand.",
+  "description": "Turkart for soppturer rundt Kristiansand: merkede stier, nedbøren de siste ukene, og dine egne steder lagret privat. Anslaget er regnet ut fra offentlige kartdata, ikke en fasit.",
   "lang": "no",
   "dir": "ltr",
   "start_url": "./",
