@@ -559,8 +559,15 @@ def main() -> int:
     #
     # Real files win over this rule, so conditions.json and the icons are
     # unaffected.
-    (out / "_redirects").write_text("/*  /index.html  200" + chr(10),
-                                    encoding="utf-8")
+    # The zone rule comes first and is a passthrough: a tile that exists is a
+    # static file and never reaches the rules at all, and one that does not
+    # rewrites to itself and 404s instead of being swallowed by the fallback
+    # below. Without it a failed tile upload returns the page, with a 200, and
+    # the map shows no zones while nothing anywhere reports a problem.
+    (out / "_redirects").write_text(
+        "/zones/*  /zones/:splat  200" + chr(10)
+        + "/*  /index.html  200" + chr(10),
+        encoding="utf-8")
 
     total = sum(f.stat().st_size for f in out.rglob("*") if f.is_file())
     page_mb = len(page.encode("utf-8")) / 1e6

@@ -204,7 +204,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.send_error(403)
             return True
         if not target.is_file():
-            target = self.dist / "index.html"      # single-page fallback
+            # The single-page fallback is for paths a person could arrive at -
+            # a bookmark, a shared link, a magic-link hash. It is emphatically
+            # not for a missing asset: a zone tile that failed to upload would
+            # come back as the page itself, with a 200, and the map would show
+            # no zones with nothing anywhere reporting a problem. Anything with
+            # a file extension 404s, which is also what the deployed
+            # `_redirects` does.
+            if pathlib.PurePosixPath(rel).suffix and rel != "index.html":
+                self.send_error(404)
+                return True
+            target = self.dist / "index.html"
             if not target.is_file():
                 return False
         body = target.read_bytes()
