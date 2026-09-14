@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import io
 import pathlib
+import warnings
 import sys
 
 import numpy as np
@@ -174,3 +175,75 @@ class TestTiling:
         ezt.cut_tiles(byts, tmp_path / "sp")
         got = decode((tmp_path / "sp" / "1_0.png").read_bytes())
         np.testing.assert_array_equal(got, byts[ezt.TILE:, :])
+
+
+class TestThePyramid:
+    """Coarser levels exist so that zooming out shows something rather than a
+    line of text. They are built from sums and counts rather than from means,
+    and that is the part worth testing: a mean of means is not the mean.
+    """
+
+    def test_a_level_is_the_mean_of_the_source_cells_it_covers(self):
+        """The coast is where this goes wrong. A 512 m cell built from sixteen
+        128 m cells is only right if the sixteen are weighted by how many 32 m
+        cells each actually had - and at the coast they had very different
+        numbers."""
+        rng = np.random.default_rng(5)
+        src = rng.random((32, 32)).astype("float32") * 100
+        # A coastline: the left half of the top rows is sea.
+        src[:16, :20] = np.nan
+        sums = np.where(np.isfinite(src), src, 0.0).reshape(8, 4, 8, 4).sum(axis=(1, 3))
+        counts = np.isfinite(src).reshape(8, 4, 8, 4).sum(axis=(1, 3)).astype("float32")
+
+        s2, c2 = ezt.coarsen(sums, counts, 4)
+        got = ezt.means(s2, c2)
+        with warnings.catch_warnings():
+            # The all-sea block, in the reference rather than in our code.
+            warnings.simplefilter("ignore", RuntimeWarning)
+            want = np.nanmean(src.reshape(2, 16, 2, 16), axis=(1, 3))
+        np.testing.assert_allclose(got, want, rtol=1e-5)
+
+    def test_a_mean_of_means_would_have_been_different(self):
+        """Otherwise the test above passes against either implementation."""
+        src = np.full((8, 8), np.nan, dtype="float32")
+        src[0, 0] = 1.0                       # one cell in the first block
+        src[4:, 4:] = 9.0                     # sixteen in the last
+        sums = np.where(np.isfinite(src), src, 0.0).reshape(4, 2, 4, 2).sum(axis=(1, 3))
+        counts = np.isfinite(src).reshape(4, 2, 4, 2).sum(axis=(1, 3)).astype("float32")
+        exact = ezt.means(*ezt.coarsen(sums, counts, 4))[0, 0]
+        naive = np.nanmean(ezt.means(sums, counts))
+        assert abs(exact - np.nanmean(src)) < 1e-5
+        assert abs(exact - naive) > 0.5, "the fixture cannot tell them apart"
+
+    def test_an_all_sea_block_has_no_value(self):
+        sums = np.zeros((4, 4), dtype="float32")
+        counts = np.zeros((4, 4), dtype="float32")
+        counts[0, 0] = 3.0
+        sums[0, 0] = 6.0
+        out = ezt.means(*ezt.coarsen(sums, counts, 2))
+        assert out[0, 0] == pytest.approx(2.0)
+        assert np.isnan(out[0, 1]) and np.isnan(out[1, 1])
+
+    def test_trailing_partial_blocks_are_dropped_not_padded(self):
+        """Padding would invent ground; the origin must not move either."""
+        sums = np.ones((9, 11), dtype="float32")
+        counts = np.ones((9, 11), dtype="float32")
+        s2, c2 = ezt.coarsen(sums, counts, 4)
+        assert s2.shape == (2, 2) and c2.shape == (2, 2)
+
+    def test_the_levels_get_coarser_by_the_factor(self, surface):
+        sums, counts, transform = ezt.downsample_sums(surface, factor=2)
+        got = [ezt.level_meta(sums, counts, transform, ezt.LEVELS[0])["cell_m"]]
+        for z in range(1, len(ezt.LEVELS)):
+            step = ezt.LEVELS[z] // ezt.LEVELS[z - 1]
+            sums, counts = ezt.coarsen(sums, counts, step)
+            got.append(ezt.level_meta(sums, counts, transform, ezt.LEVELS[z])["cell_m"])
+        assert got == [got[0] * ezt.LEVELS[z] / ezt.LEVELS[0]
+                       for z in range(len(ezt.LEVELS))]
+
+    def test_downsample_still_agrees_with_the_sums_it_now_uses(self, surface):
+        """`downsample` is the old entry point and several callers still use it."""
+        a, ta = ezt.downsample(surface, factor=4)
+        sums, counts, tb = ezt.downsample_sums(surface, factor=4)
+        np.testing.assert_allclose(a, ezt.means(sums, counts), equal_nan=True)
+        assert ta == tb

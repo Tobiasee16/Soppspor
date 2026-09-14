@@ -86,6 +86,8 @@ NAT_TRANSFER = ROOT / "data" / "processed" / "transferability_norge.md"
 NAT_MODELS = ROOT / "data" / "processed" / "model_results_norge.md"
 NAT_MAPS = ROOT / "data" / "processed" / "suitability_maps_norge.md"
 NAT_POOL = ROOT / "data" / "interim" / "target_group_pool_norge.json"
+NAT_CTX = ROOT / "data" / "processed" / "context_tiles"
+NAT_COND = ROOT / "data" / "processed" / "conditions_norge.json"
 
 
 def nb(n: int) -> str:
@@ -155,7 +157,8 @@ def national_facts() -> dict:
     }
 
 
-def national_about(f: dict, null_auc: float | None, excluded: list) -> dict:
+def national_about(f: dict, null_auc: float | None, excluded: list,
+                   cond: dict | None = None) -> dict:
     """The paragraphs that name a region or quote a number, rewritten.
 
     Only these. The rest of the Om page describes the method, which is the same
@@ -166,12 +169,14 @@ def national_about(f: dict, null_auc: float | None, excluded: list) -> dict:
     others = sorted(v for k, v in f["fitted"].items()
                     if k != "Craterellus tubaeformis")
     held = f["held_out"]
+    km = f"{cond['grid']['step'] / 1000:.0f}" if cond else ""
     about = {
-        # No fresh-rainfall layer in this build, so the lead cannot promise one.
         "ab_lead":
             "Kartet er et <b>anslag</b>, ikke en fasit. Det viser ikke hvor "
             "det står sopp. Det viser hvor terrenget <b>ligner på steder der "
-            "arten faktisk er funnet før</b> &mdash; og det er noe annet.",
+            "arten faktisk er funnet før</b>"
+            + (", justert for hvor mye det har regnet i det siste" if cond else "")
+            + " &mdash; og det er noe annet.",
         "ab_intro":
             "Ingen har gått over Norge og registrert hva som vokser hvor. Det "
             "finnes bare spredte funn, samlet inn av folk som gikk der de "
@@ -196,6 +201,25 @@ def national_about(f: dict, null_auc: float | None, excluded: list) -> dict:
         "ab_s3":
             f"Hver {f['cell_m']}&nbsp;m rute får <b>{f['features']} tall</b> "
             "knyttet til seg, fra offentlige kartdata:",
+        # The markup's list names a fuktighetsindeks. The national model does
+        # not have one - flow accumulation over 1.83 billion cells does not fit
+        # in memory - and a feature list that claims it would be describing the
+        # Kristiansand model on a map of Norway.
+        "ab_layers":
+            "<li><b>Terreng</b> fra Kartverkets høydemodell: høyde, helning, "
+            "himmelretning og krumning. <b>Uten fuktighetsindeks</b> &mdash; "
+            "den krever at vannet spores over hele landet i én sammenhengende "
+            "beregning, og den får ikke plass i maskinen. Kristiansand-kartet "
+            "har den; dette har den ikke.</li>"
+            "<li><b>Skog</b> fra NIBIO SR16: treslag, alder, kronedekning, "
+            "volum, grunnflate, trehøyde, bonitet</li>"
+            "<li><b>Løsmasser</b> fra NGU: morene, breelv, marin leire, torv, "
+            "bart fjell og fem til &mdash; kalkrikt eller surt underlag styrer "
+            "sopp sterkt</li>"
+            "<li><b>Arealtype</b> fra NIBIO AR50: skog, myr, dyrka mark, "
+            "bebygd, vann</li>"
+            "<li><b>Høstnedbør</b> fra MET seNorge: 9. august&ndash;20. "
+            "oktober, snitt 1991&ndash;2020</li>",
         "ab_s4":
             "En <b>MaxEnt-type modell</b> (L1-straffet logistisk regresjon "
             "med kvadratiske ledd) lærer hvilke kombinasjoner av de "
@@ -207,39 +231,56 @@ def national_about(f: dict, null_auc: float | None, excluded: list) -> dict:
             "aldri har sett.</b> Resten er terreng den er tilpasset på, og det "
             "er en reell svakhet: Kristiansand-kartet var holdt unna i hele "
             "sin utstrekning, dette er det ikke.",
-        "ab_s6h": "Flaten deles i soner",
+        "ab_s6h": ("Ferske forhold legges oppå" if cond
+                   else "Flaten deles i soner"),
         "ab_s6":
-            "Ruta havner blant de øverste <b>30&nbsp;%, 15&nbsp;% og "
+            (("Nedbøren de siste 21 døgnene hentes fra <b>MET seNorge</b> og "
+              "sammenlignes med hva som er normalt der på den datoen. Ruter "
+              "som har fått mer enn vanlig vektes opp, ruter som har fått "
+              "mindre vektes ned. " ) if cond else "")
+            + "Ruta havner så blant de øverste <b>30&nbsp;%, 15&nbsp;% og "
             "5&nbsp;%</b> i landet, eller utenfor alle tre. Grensene er regnet "
-            "ut over hele Norge én gang, slik at «topp 5&nbsp;%» betyr det "
-            "samme uansett hvor på kartet du står &mdash; ikke topp 5&nbsp;% "
-            "av det som tilfeldigvis er på skjermen.",
+            "ut over hele Norge, slik at «topp 5&nbsp;%» betyr det samme "
+            "uansett hvor på kartet du står &mdash; ikke topp 5&nbsp;% av det "
+            "som tilfeldigvis er på skjermen.",
         "ab_zonewarn":
             "<b>Sonene er en rangering, ikke en sannsynlighet.</b> «Topp» "
             "betyr at ruta er blant de 5&nbsp;% mest lovende <i>i Norge</i>. "
             "Det sier ingenting om hvor mange sopp som står der, eller om det "
             "står noen i det hele tatt.",
-        # The fresh-conditions layer is Agder-only, so this build has one clock.
         "ab_clocks":
             "<h2>To klokker: habitat og forhold</h2>"
-            "<p>Kartet bygger på to lag som endrer seg i helt ulikt tempo, og "
-            "i denne utgaven er bare det ene med.</p>"
+            "<p>Kartet kombinerer to lag som oppdateres i helt ulikt tempo.</p>"
             "<ul>"
             "<li><b>Habitat</b> endrer seg knapt. Skog, løsmasser og terreng "
             "er de samme neste år. Dette laget er modellen, og det er det som "
             "er testet.</li>"
             "<li><b>Forhold</b> endrer seg hele tiden. Sopp fruktifiserer "
             "etter fukt, og det hjelper ikke at et sted er perfekt hvis det "
-            "ikke har regnet på tre uker.</li>"
-            "</ul>"
+            "ikke har regnet på tre uker."
+            + (f" Dette laget hentes fra <b>MET seNorge</b> for hele "
+               f"fastlandet, regnet ut på deres eget kilometersrutenett og "
+               f"vist på {km} km ruter." if cond else "")
+            + "</li></ul>"
             "<p>Nedbøren inne i modellen er et <b>30-årssnitt</b> for høsten. "
             "Det er riktig for en modell: det beskriver hva et sted "
-            "<i>pleier</i> å være. Men det sier ingenting om denne uka.</p>"
-            '<div class="warn"><p><b>Det ferske nedbørslaget er ikke med i '
-            "denne utgaven.</b> Værdataene er foreløpig bare hentet for Agder, "
-            "og et tall fra Agder lagt utenpå et kart av hele landet ville "
-            "vært feil overalt ellers. Kartet du ser er derfor rent habitat.</p>"
-            "</div>",
+            "<i>pleier</i> å være. Men det sier ingenting om denne uka, og "
+            "derfor ligger det ferske laget utenpå i stedet for inni.</p>"
+            + ("<p>Værlaget <b>hentes på nytt hver gang du åpner appen</b>, så "
+               "lenge du har dekning. seNorge publiseres ett til to døgn "
+               "etterskuddsvis, og appen skriver hvor gammelt tallet er i "
+               "stedet for å la deg tro at det er sanntid.</p>"
+               '<div class="warn"><p><b>Det ferske laget er ikke testet.</b> '
+               "Ingen soppfunn er brukt til å finne ut hvor mye nedbør skal "
+               "telle. Vekten er satt etter skjønn og er bevisst liten "
+               "&mdash; forholdene kan flytte rangeringen noe, ikke snu den. "
+               "Habitatlaget er det som er validert; dette er en "
+               "tommelfingerregel oppå.</p>"
+               "<p>Trykk på en rute, så ser du begge tallene hver for seg.</p>"
+               "</div>"
+               if cond else
+               '<div class="warn"><p><b>Det ferske nedbørslaget er ikke med i '
+               "denne utgaven.</b> Kartet du ser er rent habitat.</p></div>"),
         "ab_transfer":
             f"<b>Overføringstest.</b> Modellen tilpasses på {tall(f['fylker'])} "
             f"fylker og testes én gang på <b>{held}</b>, som den aldri har "
@@ -301,11 +342,20 @@ def national_about(f: dict, null_auc: float | None, excluded: list) -> dict:
             "terreng modellen er tilpasset på. Treffsikkerheten i tabellen er "
             f"målt på {held}, og det er det tallet som sier noe om hvor mye "
             "resten er verdt.</li>"
-            "<li><b>Kartet vet ingenting om denne uka.</b> Nedbøren i "
-            "modellen er et 30-årssnitt for høsten, og det ferske "
-            "nedbørslaget er ikke med i denne utgaven.</li>"
-            f"<li><b>Rutene er 128 m på skjermen.</b> Modellen regner på "
-            f"{f['cell_m']} m, men vises grovere. En sone peker på en "
+            + (f"<li><b>Nedbøren vises på {km} km ruter.</b> Den er regnet "
+               "ut på seNorges eget kilometersrutenett og slått sammen for "
+               "visning, fordi hele landet på én kilometer er 1,85 millioner "
+               "ruter i en fil appen henter hver gang den åpnes. Et "
+               "nedbøravvik endrer seg lite over noen kilometer; "
+               "millimetertallet på en fjellside gjør det.</li>"
+               if cond else
+               "<li><b>Kartet vet ingenting om denne uka.</b> Nedbøren i "
+               "modellen er et 30-årssnitt for høsten, og det ferske "
+               "nedbørslaget er ikke med i denne utgaven.</li>")
+            + 
+            f"<li><b>Rutene er 128 m på skjermen når du er zoomet inn</b>, "
+            "og grovere når du zoomer ut. Modellen regner på "
+            f"{f['cell_m']} m, men vises grovere uansett. En sone peker på en "
             "skogteig, ikke på et tre.</li>",
         "ab_species":
             "Det store tallet er <b>treffsikkerhet</b>: AUC målt på "
@@ -338,8 +388,12 @@ def national_payload() -> tuple[str, dict, list[str]]:
             # Where the tiles live, relative to the page. The app substitutes
             # {sp}, {row} and {col}; a CDN or a levelled layout is a change to
             # this string and to nothing in the interface.
-            "tiles": {"url": "zones/{sp}/{row}_{col}.png",
+            "tiles": {"url": "zones/{sp}/{z}/{row}_{col}.png",
                       "cols": meta["tiles"]["cols"], "rows": meta["tiles"]["rows"]},
+            # One entry per pyramid level, coarsest last. Without these the app
+            # holds a single resolution and the zones stop when a screenful of
+            # them stops fitting in its cell budget.
+            "levels": meta.get("levels"),
             "area_label": "Norge · anslag",
             "tested_on": facts["held_out"],
             "fitted_on": f"{tall(facts['fylker'])} fylker",
@@ -347,20 +401,43 @@ def national_payload() -> tuple[str, dict, list[str]]:
         },
         "grid": meta["grid"],
         "species": [dict(sp) for sp in meta["species"] if not sp.get("is_null")],
-        # The card's "why" layers are Kristiansand-only so far: 39 national
-        # feature rasters at 32 m is another 100 GB of delivery, and it is a
-        # separate piece of work from putting the estimate on the map.
+        # Empty rather than absent: these are the *inlined* surfaces, which a
+        # tiled build does not have. The same seven facts arrive per tapped
+        # neighbourhood through `ctx` below.
         "context": {}, "categorical": {},
     }
+    ctx_meta = NAT_CTX / "meta.json"
+    if ctx_meta.exists():
+        cm = json.loads(ctx_meta.read_text(encoding="utf-8"))
+        # The tile index is deliberately not shipped. A card only opens on a
+        # cell that has a score, and a scored cell always has context, so
+        # there is nothing for the app to check against.
+        payload["ctx"] = {"url": "context/{row}_{col}.png",
+                          "cell_m": cm["cell_m"], "tile_px": cm["tile_px"],
+                          "origin_x": cm["origin_x"], "origin_y": cm["origin_y"],
+                          "grid": cm["grid"], "layers": cm["layers"]}
+        print(f"  context: {len(cm['layers'])} layers, {len(cm['tiles']):,} tiles")
+    else:
+        print("  context: none - run scripts/export_context_tiles.py")
     # The same pre-registered bar the Kristiansand build applies, applied to
     # the national numbers rather than re-decided for them.
     ewp.drop_species_that_failed_validation(payload, null_auc)
+    cond = None
+    if NAT_COND.exists():
+        cond = json.loads(NAT_COND.read_text(encoding="utf-8"))
     payload["about"] = national_about(facts, null_auc,
-                                      payload["meta"]["excluded_species"])
+                                      payload["meta"]["excluded_species"], cond)
 
-    n_tiles = sum(len(sp.get("tiles", [])) for sp in payload["species"])
+    def count(sp):
+        t = sp.get("tiles") or []
+        return sum(len(x) for x in t) if t and isinstance(t[0], list) else len(t)
+
+    n_tiles = sum(count(sp) for sp in payload["species"])
+    levels = payload["meta"].get("levels") or []
     print(f"  national: {len(payload['species'])} species, {n_tiles:,} tiles, "
           f"{facts['cell_m']} m model on a {meta['cell_m']:.0f} m display grid")
+    if levels:
+        print("  levels: " + ", ".join(f"{lv['cell_m']:.0f} m" for lv in levels))
     print(f"  tested on {facts['held_out']}, fitted on {facts['fylker']} fylker, "
           f"{facts['features']} features")
     js = "window.SOPP=" + json.dumps(payload, separators=(",", ":"),
@@ -385,9 +462,10 @@ def copy_tiles(out: pathlib.Path, keys: list[str]) -> tuple[int, int]:
         src_dir = NAT_TILES / key
         if not src_dir.is_dir():
             raise SystemExit(f"missing tiles for {key} in {NAT_TILES}")
-        (dest / key).mkdir(parents=True, exist_ok=True)
-        for src in sorted(src_dir.glob("*.png")):
-            shutil.copyfile(src, dest / key / src.name)
+        for src in sorted(src_dir.rglob("*.png")):
+            out_file = dest / key / src.relative_to(src_dir)
+            out_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, out_file)
             n += 1
             size += src.stat().st_size
     return n, size
@@ -453,6 +531,19 @@ def strip_shell_title(shell: str) -> str:
     return shell[shell.index("</title>") + len("</title>"):].lstrip("\r\n")
 
 
+def copy_flat(src_dir: pathlib.Path, dest: pathlib.Path) -> tuple[int, int]:
+    """Copy one flat directory of PNGs. Returns (files, bytes)."""
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.mkdir(parents=True, exist_ok=True)
+    n, size = 0, 0
+    for src in sorted(src_dir.glob("*.png")):
+        shutil.copyfile(src, dest / src.name)
+        n += 1
+        size += src.stat().st_size
+    return n, size
+
+
 def main() -> int:
     national = "--national" in sys.argv
     rest = [a for a in sys.argv[1:] if not a.startswith("--")]
@@ -490,11 +581,23 @@ def main() -> int:
     # Weather is on a daily clock and the app refetches it on launch; making it
     # a file means a weather update is a one-file upload, not a rebuild.
     cond_js = "window.SOPP_COND=null;"
-    if national:
-        # Not an oversight and not a TODO in disguise. seNorge is fetched for
-        # Agder, and Agder's rainfall laid over a map of Norway would be wrong
-        # everywhere else; the Om page says the layer is not in this edition.
-        print("  conditions: none - the weather is fetched for Agder only")
+    if national and NAT_COND.exists():
+        shutil.copyfile(NAT_COND, out / "conditions.json")
+        cond = json.loads(NAT_COND.read_text(encoding="utf-8"))
+        g = cond["grid"]
+        # Shipped as a file, not inlined. Kristiansand's weather is 70 kB and
+        # riding along inside the page buys a working conditions layer on a
+        # first launch with no signal; the national file is 1.2 MB, which would
+        # be most of the page, and a first launch with no signal has no map
+        # tiles either - so there is nothing for it to be the floor of.
+        # `refreshConditions` fetches it on every launch regardless, and the
+        # service worker keeps the last copy for the ones after that.
+        print(f"  conditions: {cond['last_day']} ({cond['lag_days']}d behind), "
+              f"{g['w']} x {g['h']} at {g['step']:.0f} m, "
+              f"{(out / 'conditions.json').stat().st_size / 1e6:.2f} MB fetched "
+              f"on launch")
+    elif national:
+        print("  conditions: none - run fetch_recent_weather.py --national")
     elif COND.exists():
         shutil.copyfile(COND, out / "conditions.json")
         cond = json.loads(COND.read_text(encoding="utf-8"))
@@ -519,6 +622,9 @@ def main() -> int:
     if national:
         n, size = copy_tiles(out, nat_keys)
         print(f"  zones: {n:,} tiles, {size / 1e6:.1f} MB")
+        if (NAT_CTX / "meta.json").exists():
+            n2, size2 = copy_flat(NAT_CTX, out / "context")
+            print(f"  context: {n2:,} tiles, {size2 / 1e6:.1f} MB")
 
     # --- everything else the host serves --------------------------------
     for name in ("manifest.webmanifest", "sw.js"):
@@ -547,6 +653,8 @@ def main() -> int:
         # A rebuild writes a new tile rather than editing one in place, so
         # these are as immutable as the icons and considerably heavier.
         "/zones/*\n"
+        "  Cache-Control: public, max-age=31536000, immutable\n"
+        "/context/*\n"
         "  Cache-Control: public, max-age=31536000, immutable\n",
         encoding="utf-8")
 
@@ -566,6 +674,7 @@ def main() -> int:
     # the map shows no zones while nothing anywhere reports a problem.
     (out / "_redirects").write_text(
         "/zones/*  /zones/:splat  200" + chr(10)
+        + "/context/*  /context/:splat  200" + chr(10)
         + "/*  /index.html  200" + chr(10),
         encoding="utf-8")
 
@@ -573,9 +682,12 @@ def main() -> int:
     page_mb = len(page.encode("utf-8")) / 1e6
     print(f"\n  index.html        {page_mb:6.2f} MB")
     for f in sorted(out.rglob("*")):
-        if f.is_file() and f.name != "index.html" and "zones/" not in \
-                f.relative_to(out).as_posix():
-            print(f"  {f.relative_to(out).as_posix():18s}{f.stat().st_size / 1e6:6.2f} MB")
+        rel = f.relative_to(out).as_posix()
+        # The tile directories are thousands of files and are already reported
+        # by count and total above; listing them buries everything else.
+        if f.is_file() and f.name != "index.html" \
+                and not rel.startswith(("zones/", "context/")):
+            print(f"  {rel:18s}{f.stat().st_size / 1e6:6.2f} MB")
     print(f"\nhosted build -> {out}  ({total / 1e6:.2f} MB total)")
     if national:
         print("compare: the Kristiansand hosted build is one page and no tiles.")

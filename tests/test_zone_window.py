@@ -81,39 +81,83 @@ def world(col: float, row: float) -> list[float]:
     return [NOX + (col + 0.5) * CELL, NOY - (row + 0.5) * CELL]
 
 
-def prepare(tmp: pathlib.Path, grid: np.ndarray) -> np.ndarray:
-    """Cut real tiles and write the payload a national build would ship."""
-    byts, n_finite = ezt.to_percentile_bytes(grid)
-    lut = ezt.smoothed_rank_lut(grid)
+STEP = 4          # between pyramid levels, as in the exporter
+
+
+def pyramid(grid: np.ndarray, n_levels: int):
+    """Levels the way `export_zone_tiles` builds them: sums and counts down.
+
+    Not a mean of means. The exporter carries counts precisely so a coarse cell
+    is the mean of the source cells under it rather than of the coarse cells
+    above it, and a fixture that took the shortcut would not be exercising what
+    ships.
+    """
+    sums = np.where(np.isfinite(grid), grid, 0.0).astype("float32")
+    counts = np.isfinite(grid).astype("float32")
+    out = []
+    for z in range(n_levels):
+        if z:
+            sums, counts = ezt.coarsen(sums, counts, STEP)
+        level = ezt.means(sums, counts)
+        byts, n = ezt.to_percentile_bytes(level)
+        out.append({
+            "cell_m": CELL * (STEP ** z),
+            "grid": {"w": int(level.shape[1]), "h": int(level.shape[0])},
+            "tiles": {"cols": (level.shape[1] + ezt.TILE - 1) // ezt.TILE,
+                      "rows": (level.shape[0] + ezt.TILE - 1) // ezt.TILE},
+            "bytes": byts, "lut": ezt.smoothed_rank_lut(level), "n": n,
+        })
+    return out
+
+
+def prepare(tmp: pathlib.Path, grid: np.ndarray, n_levels: int = 3,
+            flat: bool = False) -> np.ndarray:
+    """Cut real tiles and write the payload a national build would ship.
+
+    `flat` writes the older single-level shape - one list of tile ids, one
+    lookup - which the interface still has to read.
+    """
+    levels = pyramid(grid, n_levels)
     species = []
     for key in KEYS:
-        ids = ezt.cut_tiles(byts, tmp / "zones" / key)
+        ids = []
+        for z, lv in enumerate(levels):
+            dest = (tmp / "zones" / key) if flat else (tmp / "zones" / key / str(z))
+            ids.append(ezt.cut_tiles(lv["bytes"], dest))
         species.append({
             "key": key, "scientific": key.replace("_", " ").title(),
             "no": key.split("_")[0], "en": key.split("_")[0],
             "is_null": False, "transfer_auc": 0.71, "transfer_ci": [0.64, 0.78],
-            "held_out_n": 120, "scored_cells": n_finite,
-            "tiles": ids, "smoothed_rank_lut": lut,
+            "held_out_n": 120, "scored_cells": levels[0]["n"],
+            "tiles": ids[0] if flat else ids,
+            "smoothed_rank_lut": levels[0]["lut"] if flat
+                                 else [lv["lut"] for lv in levels],
         })
-    payload = {
-        "meta": {"crs": "EPSG:25833", "cell_m": CELL, "tile_px": ezt.TILE,
-                 "percentile_bytes": True, "origin_x": NOX, "origin_y": NOY,
-                 "null_transfer_auc": 0.49, "excluded_species": [],
-                 "tiles": {"url": "zones/",
-                           "cols": (NW + ezt.TILE - 1) // ezt.TILE,
-                           "rows": (NH + ezt.TILE - 1) // ezt.TILE}},
-        "grid": {"w": NW, "h": NH},
-        "species": species, "context": {}, "categorical": {},
-    }
+    meta = {"crs": "EPSG:25833", "cell_m": CELL, "tile_px": ezt.TILE,
+            "percentile_bytes": True, "origin_x": NOX, "origin_y": NOY,
+            "null_transfer_auc": 0.49, "excluded_species": [],
+            "tiles": {"url": "zones/{sp}/{row}_{col}.png" if flat
+                             else "zones/{sp}/{z}/{row}_{col}.png",
+                      "cols": levels[0]["tiles"]["cols"],
+                      "rows": levels[0]["tiles"]["rows"]}}
+    if not flat:
+        meta["levels"] = [{k: lv[k] for k in ("cell_m", "grid", "tiles")}
+                          for lv in levels]
+    payload = {"meta": meta, "grid": {"w": NW, "h": NH},
+               "species": species, "context": {}, "categorical": {}}
     (tmp / "payload.json").write_text(json.dumps(payload), encoding="utf-8")
-    return byts
+    return levels[0]["bytes"]
 
 
 def drive(tmp: pathlib.Path, plan: dict) -> dict:
     (tmp / "plan.json").write_text(json.dumps(dict(plan, bounds=BOUNDS)),
                                    encoding="utf-8")
+    # encoding= explicitly: node writes UTF-8 and Python on Windows would
+    # otherwise decode it with the locale's cp1252, turning every "å" the card
+    # prints into mojibake.
     out = subprocess.run([NODE, str(ROOT / "tests" / "national_boot.js"), str(tmp)],
-                         capture_output=True, text=True, timeout=900)
+                         capture_output=True, text=True, encoding="utf-8",
+                         timeout=900)
     if out.returncode != 0:
         raise AssertionError(f"node failed: {out.stderr[-1500:]}")
     got = json.loads(out.stdout)
@@ -147,7 +191,7 @@ PLAN = {"steps": [
     {"name": "west", "view": WEST + [25], "probes": PROBES, "bytes": True},
     {"name": "east", "view": EAST + [25], "probes": PROBES, "bytes": True},
     {"name": "empty", "view": EMPTY_EDGE + [25], "bytes": True},
-    {"name": "far", "view": world(512, 512) + [400], "probes": PROBES},
+    {"name": "far", "view": world(512, 512) + [400]},
     {"name": "back", "view": WEST + [25], "probes": PROBES},
     {"name": "two", "toggle": KEYS[1], "probes": PROBES},
 ]}
@@ -236,20 +280,33 @@ class TestTheWindowIsTheCountry:
         assert st["zoneOrigin"][0] == st["zoneOrigin"][1]
 
 
-class TestTooMuchGround:
-    def test_zoomed_out_there_are_no_zones(self, run):
+class TestZoomingOut:
+    """Past one level's budget the map drops to a coarser one rather than
+    stopping. Stopping is what a beginner hits first: zoom out to see where in
+    the county is worth walking, and the zones vanish."""
+
+    def test_the_close_views_are_at_the_finest_level(self, run):
+        for name in ("west", "east", "empty", "back"):
+            assert run["by_name"][name]["z"] == 0, name
+            assert run["by_name"][name]["cell"] == pytest.approx(CELL)
+
+    def test_zoomed_out_it_changes_level_rather_than_giving_up(self, run):
         st = run["by_name"]["far"]
-        assert st["blank"] is True
-        assert all(z is None for z in st["zones"]), st["zones"]
-
-    def test_and_the_map_says_why(self, run):
-        note = run["by_name"]["far"]["note"]
-        assert note["hidden"] is False
-        assert "Zoom inn" in note["html"]
-
-    def test_zooming_back_in_brings_them_back(self, run):
-        st = run["by_name"]["back"]
+        assert st["z"] > 0, "it stayed on the finest level"
+        assert st["cell"] == pytest.approx(CELL * STEP ** st["z"])
         assert st["blank"] is False
+        assert st["zones"][0] == 3, st["zones"]
+        assert st["note"]["hidden"] is True
+
+    def test_the_coarse_window_covers_much_more_ground(self, run):
+        near = run["by_name"]["west"]
+        far = run["by_name"]["far"]
+        ground = lambda st: st["win"][2] * st["win"][3] * st["cell"] ** 2
+        assert ground(far) > 20 * ground(near)
+
+    def test_zooming_back_in_returns_to_the_finest(self, run):
+        st = run["by_name"]["back"]
+        assert st["z"] == 0 and st["blank"] is False
         assert st["zones"][0] == 3, st["zones"]
         assert st["note"]["hidden"] is True
 
@@ -260,11 +317,38 @@ class TestWhatItAsksFor:
         asked = {u for u in run["asked"] if u.endswith(".png")}
         assert asked, "no tiles were requested at all"
         for key in KEYS:
-            assert f"zones/{key}/0_0.png" not in asked
+            assert f"zones/{key}/0/0_0.png" not in asked
 
     def test_it_does_not_fetch_the_same_tile_twice(self, run):
         asked = [u for u in run["asked"] if u.endswith(".png")]
         assert len(asked) == len(set(asked)), "a tile was fetched twice"
+
+
+class TestOneLevelOnly:
+    """A payload with a single level, which is both the older export shape and
+    the only way the "too much ground" path can still be reached."""
+
+    @pytest.fixture(scope="class")
+    def run(self, tmp_path_factory, grid):
+        tmp = tmp_path_factory.mktemp("zoneflat")
+        prepare(tmp, grid, n_levels=1, flat=True)
+        return drive(tmp, {"steps": [
+            {"name": "near", "view": WEST + [25], "probes": PROBES},
+            {"name": "far", "view": world(512, 512) + [400]},
+        ]})
+
+    def test_a_flat_tile_list_still_works(self, run):
+        st = run["by_name"]["near"]
+        assert st["z"] == 0 and st["blank"] is False
+        assert st["zones"][0] == 3, st["zones"]
+        assert all(p is not None and p["byte"] for p in st["probes"])
+
+    def test_with_nowhere_coarser_to_go_it_says_so(self, run):
+        st = run["by_name"]["far"]
+        assert st["blank"] is True
+        assert all(z is None for z in st["zones"]), st["zones"]
+        assert st["note"]["hidden"] is False
+        assert "Zoom inn" in st["note"]["html"]
 
 
 def filtered_png(arr: np.ndarray) -> bytes:
@@ -300,7 +384,7 @@ class TestACorruptTile:
         tmp = tmp_path_factory.mktemp("zonebad")
         nat = prepare(tmp, grid)
         r, c = self.VICTIM
-        victim = tmp / "zones" / KEYS[0] / f"{r}_{c}.png"
+        victim = tmp / "zones" / KEYS[0] / "0" / f"{r}_{c}.png"
         assert victim.exists(), "the fixture stopped covering the corrupt tile"
         victim.write_bytes(filtered_png(
             nat[r * ezt.TILE:(r + 1) * ezt.TILE, c * ezt.TILE:(c + 1) * ezt.TILE]))

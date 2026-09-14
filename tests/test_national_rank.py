@@ -60,7 +60,7 @@ const sp = {{ bytes: Uint8Array.from({json.dumps(byts.ravel().tolist())}),
 process.stdout.write(JSON.stringify(Array.from(habitatField(sp))));
 """
     out = subprocess.run([NODE, "-e", driver], capture_output=True, text=True,
-                         timeout=180)
+                         encoding="utf-8", timeout=180)
     if out.returncode != 0:
         raise AssertionError(f"node failed: {out.stderr[:900]}")
     return np.array(json.loads(out.stdout), dtype="float64").reshape(h, w)

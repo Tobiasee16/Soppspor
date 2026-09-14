@@ -64,10 +64,17 @@ const probe = js.slice(0, at) + `
   tiled: () => TILED,
   win: () => [Math.round((OX - NOX) / CELL), Math.round((NOY - OY) / CELL), GW, GH],
   blank: () => ZT.blank,
+  z: () => ZT.z,
+  cell: () => CELL,
   /* Settled means: nothing outstanding, and every selected species is holding
      bytes for the window that is currently bound. */
   ready: () => ZT.waiting === null &&
-               (ZT.blank || SEL.every(function(s){ return s._win === ZT.key; })),
+               (ZT.blank || SEL.every(function(s){ return s._win === ZT.key; })) &&
+               /* A tap fetches its own context tile, and the card fills in
+                  underneath the score when it lands. Settling has to wait for
+                  that too, or the test reads a card that is still a stub. */
+               !Object.keys(CTXT.cache).some(function(k){
+                 return CTXT.cache[k].pending; }),
   zones: () => SEL.map(function(s){ return s._zones ? s._zones.paths.length : null; }),
   zoneOrigin: () => SEL.map(function(s){ return s._zones ? [s._zones.ox, s._zones.oy] : null; }),
   bytes: () => (SEL[0].bytes ? Buffer.from(SEL[0].bytes).toString("base64") : null),
@@ -95,6 +102,15 @@ const probe = js.slice(0, at) + `
     toggleSpecies(sp); repaint(); draw();
   },
   view: () => [view.cx, view.cy, view.mpp],
+  /* Tap a world point the way a finger does, through the same path. */
+  tap: function(e, n){
+    var x = Math.floor((e - OX) / CELL), y = Math.floor((OY - n) / CELL);
+    if (x < 0 || y < 0 || x >= GW || y >= GH) return null;
+    show(y * GW + x);
+    return true;
+  },
+  card: () => String(document.getElementById("cardBody").innerHTML || ""),
+  cardTitle: () => String(document.getElementById("cardTitle").textContent || ""),
 };` + js.slice(at);
 
 let bootErr = null;
@@ -122,16 +138,27 @@ async function settle() {
   const out = { boot: true, tiled: app.tiled(), steps: [] };
   const note = stub.node("coverNote");
   out.opened = { view: app.view(), settled: await settle(), win: app.win(),
-                 zones: app.zones(), blank: app.blank(), scored: app.scored() };
+                 zones: app.zones(), blank: app.blank(), scored: app.scored(),
+                 z: app.z(), cell: app.cell() };
   for (const st of plan.steps) {
     if (st.view) app.goTo(st.view[0], st.view[1], st.view[2]);
     if (st.toggle) app.toggle(st.toggle);
-    const settled = await settle();
+    let settled = await settle();
+    let tapped = null;
+    if (st.tap) {
+      tapped = app.tap(st.tap[0], st.tap[1]);
+      // The first settle loaded the zone window; this one waits for whatever
+      // the tap went and asked for.
+      settled = (await settle()) && settled;
+    }
     out.steps.push({
       name: st.name, settled, win: app.win(), blank: app.blank(),
+      z: app.z(), cell: app.cell(),
       note: { hidden: !!note.hidden, html: String(note.innerHTML || "") },
       zones: app.zones(), zoneOrigin: app.zoneOrigin(),
       bytes: st.bytes ? app.bytes() : null,
+      tapped, card: st.tap ? app.card() : null,
+      cardTitle: st.tap ? app.cardTitle() : null,
       probes: (st.probes || []).map((p) => app.probe(p[0], p[1])),
     });
   }

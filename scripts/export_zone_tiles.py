@@ -68,6 +68,22 @@ FACTOR = 4                 # 32 m source -> 128 m display grid
 TILE = 256                 # cells per tile side; 256 * 128 m = 32.768 km
 MODEL = "maxent"
 
+# Three resolutions, each a factor of four coarser than the last. The app holds
+# a budget of cells rather than a budget of ground, so one level covers about
+# 9,800 km2 on screen and then runs out; without a coarser one the zones simply
+# stop, which is what a beginner hits the moment they zoom out to see where in
+# their county is worth walking.
+#
+# Four-fold steps rather than two-fold because the cost is in the number of
+# levels, not their coarseness: level 1 is a sixteenth of level 0's tiles and
+# level 2 a sixteenth of that, so the pyramid adds under 7% to what is shipped.
+# Three of them is enough to put the whole mainland on a phone screen.
+#
+# The switch happens where the finer level runs out of budget, which is also
+# where its extra detail is below one screen pixel - so crossing a level should
+# be close to invisible rather than a visible re-draw of every boundary.
+LEVELS = [4, 16, 64]       # 32 m source -> 128 m, 512 m, 2048 m
+
 
 # --- a minimal greyscale PNG encoder ------------------------------------
 # Stdlib rather than Pillow. Pillow is present in this environment only as a
@@ -101,7 +117,42 @@ def png_gray(arr: np.ndarray) -> bytes:
 # --- the grid -----------------------------------------------------------
 
 def downsample(path: pathlib.Path, factor: int = FACTOR):
-    """Mean the raster down by `factor`, ignoring nodata. Returns (array, transform).
+    """Mean the raster down by `factor`, ignoring nodata. Returns (array, transform)."""
+    sums, counts, transform = downsample_sums(path, factor)
+    return means(sums, counts), transform
+
+
+def means(sums: np.ndarray, counts: np.ndarray) -> np.ndarray:
+    """Sums and counts to a mean, with no count meaning no value."""
+    out = np.full(sums.shape, np.nan, dtype="float32")
+    ok = counts > 0
+    out[ok] = sums[ok] / counts[ok]
+    return out
+
+
+def coarsen(sums: np.ndarray, counts: np.ndarray, factor: int):
+    """One more level of the pyramid, from the level above it.
+
+    Sums and counts rather than means, which is the whole reason this is not a
+    mean of means. A 512 m cell drawn from sixteen 128 m cells is only the mean
+    of the 32 m cells underneath it if each of those sixteen carried the same
+    number of valid cells - and at the coast they do not. Carrying the counts
+    makes every level exactly the mean of the source cells it covers, instead
+    of a weighting that quietly favours whichever coarse cells happened to be
+    half sea.
+
+    Trailing rows and columns that do not fill a whole block are dropped, the
+    same convention `downsample_sums` uses, so the origin never moves.
+    """
+    h, w = sums.shape[0] // factor, sums.shape[1] // factor
+    cut = (slice(0, h * factor), slice(0, w * factor))
+    shape = (h, factor, w, factor)
+    return (sums[cut].reshape(shape).sum(axis=(1, 3)),
+            counts[cut].reshape(shape).sum(axis=(1, 3)))
+
+
+def downsample_sums(path: pathlib.Path, factor: int = FACTOR):
+    """Block sums and valid-cell counts. Returns (sums, counts, transform).
 
     Explicit block means rather than `read(out_shape=...)`. GDAL maps the full
     extent onto whatever shape it is given, so an out_shape that does not
@@ -113,24 +164,21 @@ def downsample(path: pathlib.Path, factor: int = FACTOR):
     with rasterio.open(path) as src:
         h = src.height // factor
         w = src.width // factor
-        out = np.empty((h, w), dtype="float32")
+        sums = np.empty((h, w), dtype="float32")
+        counts = np.empty((h, w), dtype="float32")
         for r0 in range(0, h, 256):
             r1 = min(r0 + 256, h)
             win = rasterio.windows.Window(0, r0 * factor, w * factor,
                                           (r1 - r0) * factor)
             block = src.read(1, window=win).astype("float32")
             block = block.reshape(r1 - r0, factor, w, factor)
-            # A block that is entirely nodata is the normal case out at sea,
-            # and nanmean warns about it. The NaN it returns is exactly what is
-            # wanted, so the warning is noise rather than a signal.
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", "Mean of empty slice",
-                                        RuntimeWarning)
-                out[r0:r1] = np.nanmean(block, axis=(1, 3))
+            ok = np.isfinite(block)
+            sums[r0:r1] = np.where(ok, block, 0.0).sum(axis=(1, 3))
+            counts[r0:r1] = ok.sum(axis=(1, 3))
         t = src.transform
         transform = rasterio.Affine(t.a * factor, t.b, t.c,
                                     t.d, t.e * factor, t.f)
-    return out, transform
+    return sums, counts, transform
 
 
 def to_percentile_bytes(grid: np.ndarray) -> tuple[np.ndarray, int]:
@@ -217,6 +265,14 @@ def smoothed_rank_lut(grid: np.ndarray, buckets: int = 256) -> list[float]:
             / smooth.size).round(6).tolist()
 
 
+def level_meta(sums, counts, transform, factor):
+    """What one level of the pyramid contributes to meta.json."""
+    return {"cell_m": abs(transform.a) * factor / LEVELS[0],
+            "grid": {"w": int(sums.shape[1]), "h": int(sums.shape[0])},
+            "tiles": {"cols": (sums.shape[1] + TILE - 1) // TILE,
+                      "rows": (sums.shape[0] + TILE - 1) // TILE}}
+
+
 def cut_tiles(byts: np.ndarray, dest: pathlib.Path) -> list[str]:
     """Write every non-empty tile. Returns the ids that exist, as 'row_col'."""
     dest.mkdir(parents=True, exist_ok=True)
@@ -248,6 +304,9 @@ def main() -> int:
 
     meta = {"crs": "EPSG:25833", "cell_m": None, "tile_px": TILE,
             "encoding": "national percentile, 1..255; 0 means no value",
+            # One entry per pyramid level, coarsest last. The app picks the
+            # finest whose window fits its cell budget.
+            "levels": None,
             # An explicit flag rather than leaving the interface to parse the
             # sentence above. The Kristiansand payload carries linearly scaled
             # bytes and must keep sorting them; these are already ranks.
@@ -263,19 +322,30 @@ def main() -> int:
         if not tif.exists():
             raise SystemExit(f"missing {tif} - run scripts/build_maps_national.py")
         t0 = time.time()
-        grid, transform = downsample(tif)
-        byts, n_finite = to_percentile_bytes(grid)
-        lut = smoothed_rank_lut(grid)
-        ids = cut_tiles(byts, OUT / key)
+        # Read the source once. Every coarser level is built from the sums and
+        # counts of the level above it, so the 7.3 GB GeoTIFF is walked once
+        # per species rather than once per species per level.
+        sums, counts, transform = downsample_sums(tif)
+        levels, tiles, luts, n_finite = [], [], [], None
+        for z, factor in enumerate(LEVELS):
+            if z:
+                sums, counts = coarsen(sums, counts, factor // LEVELS[z - 1])
+            grid = means(sums, counts)
+            byts, n = to_percentile_bytes(grid)
+            if z == 0:
+                n_finite = n
+            levels.append(level_meta(sums, counts, transform, factor))
+            luts.append(smoothed_rank_lut(grid))
+            tiles.append(cut_tiles(byts, OUT / key / str(z)))
 
         if meta["cell_m"] is None:
             meta.update(cell_m=abs(transform.a),
                         origin_x=transform.c, origin_y=transform.f,
-                        grid={"w": int(grid.shape[1]), "h": int(grid.shape[0])},
-                        tiles={"cols": (grid.shape[1] + TILE - 1) // TILE,
-                               "rows": (grid.shape[0] + TILE - 1) // TILE})
+                        grid=levels[0]["grid"], tiles=levels[0]["tiles"],
+                        levels=levels)
+        ids = tiles[0]
         sci = sp.get("scientific_name", sp.get("label", key))
-        kb = sum((OUT / key / f"{i}.png").stat().st_size for i in ids) / 1024
+        kb = sum(p.stat().st_size for p in (OUT / key).rglob("*.png")) / 1024
         meta["species"].append({
             "key": key, "scientific": sci,
             "no": sp.get("vernacular_no", ""), "en": sp.get("vernacular_en", ""),
@@ -283,22 +353,28 @@ def main() -> int:
             "transfer_auc": aucs.get(sci, {}).get("auc"),
             "transfer_ci": aucs.get(sci, {}).get("ci"),
             "held_out_n": held.get(sci) or held.get(sp.get("label", "")),
-            "scored_cells": n_finite, "tiles": ids,
-            # 256-entry CDF of the nationally smoothed percentile surface. The
-            # app smooths its own window and looks the result up here, so the
-            # zone thresholds mean the same thing wherever the user is.
-            "smoothed_rank_lut": lut,
+            "scored_cells": n_finite,
+            # Per level, coarsest last: which tiles exist, and a 256-entry CDF
+            # of that level's nationally smoothed percentile surface. The app
+            # smooths its own window and looks the result up, so the zone
+            # thresholds mean the same thing wherever the user is - and each
+            # level needs its own, because the same blur over a coarser grid
+            # covers different ground and would otherwise be read against a
+            # distribution that was never computed from it.
+            "tiles": tiles, "smoothed_rank_lut": luts,
         })
-        print(f"{key:30s}{len(ids):5d} tiles{kb/1024:8.1f} MB  "
+        print(f"{key:30s}{sum(len(t) for t in tiles):5d} tiles "
+              f"({'+'.join(str(len(t)) for t in tiles)}){kb/1024:8.1f} MB  "
               f"{n_finite:,} cells  ({time.time()-t0:.0f}s)", flush=True)
 
     (OUT / "meta.json").write_text(json.dumps(meta, separators=(",", ":")),
                                    encoding="utf-8")
     total = sum(p.stat().st_size for p in OUT.rglob("*.png"))
     print(f"\n{len(list(OUT.rglob('*.png'))):,} tiles, {total/1e6:.1f} MB total")
-    print(f"grid {meta['grid']['w']:,} x {meta['grid']['h']:,} at "
-          f"{meta['cell_m']:.0f} m, {meta['tiles']['cols']} x "
-          f"{meta['tiles']['rows']} tiles")
+    for z, lv in enumerate(meta["levels"]):
+        print(f"  level {z}: {lv['grid']['w']:,} x {lv['grid']['h']:,} at "
+              f"{lv['cell_m']:.0f} m, {lv['tiles']['cols']} x "
+              f"{lv['tiles']['rows']} tiles")
     print(f"-> {(OUT / 'meta.json').relative_to(ROOT)}")
     return 0
 

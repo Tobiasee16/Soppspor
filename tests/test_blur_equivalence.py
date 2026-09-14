@@ -62,7 +62,7 @@ const sp = {{ bytes: Uint8Array.from({json.dumps(byts.ravel().tolist())}) }};
 process.stdout.write(JSON.stringify(Array.from(smoothPct(sp))));
 """
     out = subprocess.run([NODE, "-e", driver], capture_output=True, text=True,
-                         timeout=120)
+                         encoding="utf-8", timeout=120)
     if out.returncode != 0:
         raise AssertionError(f"node failed: {out.stderr[:800]}")
     return np.array(json.loads(out.stdout), dtype="float64").reshape(h, w)

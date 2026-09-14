@@ -457,7 +457,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
         <div class="step"><span class="n">3</span><h3>Terrenget beskrives</h3>
           <p id="ab_s3">Hver 16&nbsp;m rute får <b>40 tall</b> knyttet til seg, fra offentlige
             kartdata:</p>
-          <ul>
+          <ul id="ab_layers">
             <li><b>Terreng</b> fra Kartverkets høydemodell: høyde, helning, himmelretning,
               krumning og <i>fuktighetsindeks</i> (hvor vann samler seg)</li>
             <li><b>Skog</b> fra NIBIO SR16: treslag, alder, kronedekning, volum,
@@ -767,21 +767,39 @@ D.species.forEach(function(s){ if(s.data){s.bytes=b64(s.data);s.data=null;} });
 Object.keys(D.context).forEach(function(k){D.context[k].bytes=b64(D.context[k].data);});
 Object.keys(D.categorical).forEach(function(k){D.categorical[k].bytes=b64(D.categorical[k].data);});
 var CELL=D.meta.cell_m;
-/* The national grid: what a tile row and column are counted from, and what
-   bounds the window. Fixed for the life of the page. */
-var NW=D.grid.w,NH=D.grid.h,NOX=D.meta.origin_x,NOY=D.meta.origin_y;
+/* Where every tile row and column is counted from. The origin is shared by
+   every pyramid level, which is what lets a level change keep the map still. */
+var NOX=D.meta.origin_x,NOY=D.meta.origin_y;
+/* The pyramid. Each level is a whole national grid at its own resolution, and
+   the app picks the finest one whose window fits its cell budget. A payload
+   with no levels has exactly one, which is the Kristiansand case and also what
+   a single-level national export looks like. */
+var LEVELS=(D.meta.levels&&D.meta.levels.length)?D.meta.levels
+  :[{cell_m:D.meta.cell_m,grid:{w:D.grid.w,h:D.grid.h}}];
+var NW=LEVELS[0].grid.w,NH=LEVELS[0].grid.h;
 /* The *current* grid, which is what the rest of the app reads. Without tiles
    it is the whole payload and never changes; with them it is the window loaded
    around the viewport, and anything cached against it has to record which
    window it was built in. */
 var GW=TILED?0:NW,GH=TILED?0:NH,OX=NOX,OY=NOY;
 var GRID=[NOX,NOY-NH*CELL,NOX+NW*CELL,NOY];
-/* Which tiles exist for each species. One that holds no scored cell is never
-   written, so this is also the answer to "is there anything there at all". */
+/* Which tiles exist for each species, per level. One that holds no scored
+   cell is never written, so this is also the answer to "is there anything
+   there at all".
+
+   The payload carries a list per level for both the tile index and the rank
+   lookup. An older single-level payload carries one flat list instead, and is
+   wrapped rather than rejected: the two shapes are distinguishable and the
+   interface should not fail on the narrower one. */
 if(TILED) D.species.forEach(function(s){
-  var h={},t=s.tiles||[],i;
-  for(i=0;i<t.length;i++)h[t[i]]=1;
-  s._has=h;s._win=null;});
+  var t=s.tiles||[],L=s.smoothed_rank_lut||[];
+  if(!Array.isArray(t[0])) t=[t];
+  if(!Array.isArray(L[0])) L=[L];
+  s.tilesAt=t; s.lutAt=L; s._win=null;
+  s._has=t.map(function(ids){
+    var h={},i; for(i=0;i<ids.length;i++)h[ids[i]]=1; return h;});
+  s.smoothed_rank_lut=L[0];
+});
 
 /* ---------- basemap tiles ---------- */
 /* Two sheets, each cut into tiles on a shared grid. Tiles are only turned into
@@ -1010,13 +1028,13 @@ var ZT_MARGIN=0.35;     // extra screen fetched, so a small pan costs nothing
 var ZT_MAX_CELLS=600000;
 
 var ZT={tile:D.meta.tile_px||256,cache:{},order:[],MAX:180,
-        win:null,key:"",waiting:null,note:null,blank:false};
+        win:null,key:"",z:0,waiting:null,note:null,blank:false};
 
-function ztURL(key,row,col){
+function ztURL(key,z,row,col){
   var t=(D.meta.tiles&&D.meta.tiles.url)||"";
-  if(t.indexOf("{")<0)t=t+"{sp}/{row}_{col}.png";
-  return t.split("{sp}").join(key).split("{row}").join(row)
-          .split("{col}").join(col);
+  if(t.indexOf("{")<0)t=t+"{sp}/{z}/{row}_{col}.png";
+  return t.split("{sp}").join(key).split("{z}").join(z)
+          .split("{row}").join(row).split("{col}").join(col);
 }
 
 /* A tile is read as data, not drawn as a picture.
@@ -1074,8 +1092,8 @@ function ztTrim(){
     delete ZT.cache[id];
   }
 }
-function ztTile(key,row,col){
-  var id=key+"/"+row+"_"+col,e=ZT.cache[id];
+function ztTile(key,z,row,col){
+  var id=key+"/"+z+"/"+row+"_"+col,e=ZT.cache[id];
   if(e&&(e.bytes||e.pending))return e;
   /* A failure is remembered briefly rather than for good: the usual cause is
      no signal, and the usual cure is walking back into some. */
@@ -1084,7 +1102,7 @@ function ztTile(key,row,col){
   ZT.cache[id]=e;ZT.order.push(id);ztTrim();
   function failed(){e.pending=false;e.err=true;e.at=Date.now();ztSettled();}
   try{
-    fetch(ztURL(key,row,col)).then(function(r){
+    fetch(ztURL(key,z,row,col)).then(function(r){
       if(!r.ok)throw new Error("HTTP "+r.status);
       return r.arrayBuffer();
     }).then(ztDecode).then(function(t){
@@ -1100,24 +1118,39 @@ function ztTile(key,row,col){
    those off screen is what makes the visible field identical to the national
    one. At the country's edge there is nothing beyond to include, which is
    correct - the national surface had no neighbours there either. */
-function ztNeed(m){
-  var hw=CW*view.mpp/2*(1+m),hh=CH*view.mpp/2*(1+m);
-  return {x0:Math.max(0,Math.floor((view.cx-hw-NOX)/CELL)-ZT_HALO),
-          x1:Math.min(NW,Math.ceil((view.cx+hw-NOX)/CELL)+ZT_HALO),
-          y0:Math.max(0,Math.floor((NOY-view.cy-hh)/CELL)-ZT_HALO),
-          y1:Math.min(NH,Math.ceil((NOY-view.cy+hh)/CELL)+ZT_HALO)};
+function ztNeed(lv,m){
+  var hw=CW*view.mpp/2*(1+m),hh=CH*view.mpp/2*(1+m),C=lv.cell_m;
+  return {x0:Math.max(0,Math.floor((view.cx-hw-NOX)/C)-ZT_HALO),
+          x1:Math.min(lv.grid.w,Math.ceil((view.cx+hw-NOX)/C)+ZT_HALO),
+          y0:Math.max(0,Math.floor((NOY-view.cy-hh)/C)-ZT_HALO),
+          y1:Math.min(lv.grid.h,Math.ceil((NOY-view.cy+hh)/C)+ZT_HALO)};
 }
-function ztWindow(){
-  var n=ztNeed(ZT_MARGIN);
+function ztFits(lv,m){
+  var n=ztNeed(lv,m);
+  return (n.x1-n.x0)*(n.y1-n.y0)<=ZT_MAX_CELLS;
+}
+/* The finest level the screen can afford.
+
+   The budget is in cells, so zooming out spends it on ground rather than on
+   detail, and a level runs out exactly where its detail drops below a screen
+   pixel. That is also where the next level up takes over, which is why
+   crossing one should be close to invisible: at the switch, 128 m and 512 m
+   cells differ by less than the pixel they are drawn into. */
+function ztLevel(){
+  for(var z=0;z<LEVELS.length-1;z++) if(ztFits(LEVELS[z],ZT_MARGIN)) return z;
+  return LEVELS.length-1;
+}
+function ztWindow(lv){
+  var n=ztNeed(lv,ZT_MARGIN);
   if(n.x1<=n.x0||n.y1<=n.y0)return null;              // off the country
   if((n.x1-n.x0)*(n.y1-n.y0)>ZT_MAX_CELLS){
-    n=ztNeed(0);                                      // give up the margin first
+    n=ztNeed(lv,0);                                   // give up the margin first
     if((n.x1-n.x0)*(n.y1-n.y0)>ZT_MAX_CELLS)return null;
   }
   return {x0:n.x0,y0:n.y0,w:n.x1-n.x0,h:n.y1-n.y0};
 }
-function ztCovers(win){
-  var n=ztNeed(0);
+function ztCovers(lv,win){
+  var n=ztNeed(lv,0);
   return win.x0<=n.x0&&win.y0<=n.y0&&
          win.x0+win.w>=n.x1&&win.y0+win.h>=n.y1;
 }
@@ -1126,21 +1159,21 @@ function ztRange(win){
   return {r0:(win.y0/T)|0,r1:((win.y0+win.h-1)/T)|0,
           c0:(win.x0/T)|0,c1:((win.x0+win.w-1)/T)|0};
 }
-function ztRequest(sp,win){
-  var g=ztRange(win),pending=0,r,c;
+function ztRequest(sp,z,win){
+  var g=ztRange(win),have=sp._has&&sp._has[z],pending=0,r,c;
   for(r=g.r0;r<=g.r1;r++)for(c=g.c0;c<=g.c1;c++){
     /* A tile holding no scored cell was never written, so asking for it would
        be a 404 per empty tile per species - most of the Norwegian Sea, every
        time somebody looks at the coast. */
-    if(sp._has&&!sp._has[r+"_"+c])continue;
-    if(ztTile(sp.key,r,c).pending)pending++;
+    if(have&&!have[r+"_"+c])continue;
+    if(ztTile(sp.key,z,r,c).pending)pending++;
   }
   return pending;
 }
-function ztAssemble(sp,win){
+function ztAssemble(sp,z,win){
   var T=ZT.tile,g=ztRange(win),out=new Uint8Array(win.w*win.h),r,c,y;
   for(r=g.r0;r<=g.r1;r++)for(c=g.c0;c<=g.c1;c++){
-    var e=ZT.cache[sp.key+"/"+r+"_"+c];
+    var e=ZT.cache[sp.key+"/"+z+"/"+r+"_"+c];
     if(!e||!e.bytes)continue;        // never written, or never arrived: nodata
     var ax=Math.max(win.x0,c*T),bx=Math.min(win.x0+win.w,(c+1)*T);
     var ay=Math.max(win.y0,r*T),bz=Math.min(win.y0+win.h,(r+1)*T);
@@ -1157,23 +1190,34 @@ function ztAssemble(sp,win){
    costs one drawImage and no arithmetic worth measuring. */
 function ztEnsure(){
   if(!TILED||!SEL.length)return;
-  var win=(ZT.win&&ztCovers(ZT.win))?ZT.win:ztWindow();
+  var z=ztLevel(),lv=LEVELS[z];
+  var win=(ZT.win&&ZT.z===z&&ztCovers(lv,ZT.win))?ZT.win:ztWindow(lv);
   if(!win){ztBlank();return;}
-  var key=win.x0+","+win.y0+","+win.w+","+win.h,pending=0,i;
+  /* The level is part of the key. Two windows with the same cell offsets at
+     different resolutions are different ground, and a key that could not tell
+     them apart would let a level change pass for a window already loaded. */
+  var key=z+":"+win.x0+","+win.y0+","+win.w+","+win.h,pending=0,i;
   for(i=0;i<SEL.length;i++)
-    if(SEL[i]._win!==key)pending+=ztRequest(SEL[i],win);
+    if(SEL[i]._win!==key)pending+=ztRequest(SEL[i],z,win);
   if(pending){ZT.waiting=key;return;}
-  ztCommit(win,key);
+  ztCommit(z,win,key);
 }
 /* The swap is one step and happens only when every tile is in hand. A window
    half replaced would draw one species against another species' ground. */
-function ztCommit(win,key){
-  ZT.waiting=null;ZT.blank=false;ZT.note=null;ZT.win=win;ZT.key=key;
+function ztCommit(z,win,key){
+  ZT.waiting=null;ZT.blank=false;ZT.note=null;
+  ZT.win=win;ZT.key=key;ZT.z=z;
+  CELL=LEVELS[z].cell_m;
   GW=win.w;GH=win.h;OX=NOX+win.x0*CELL;OY=NOY-win.y0*CELL;
   for(var i=0;i<SEL.length;i++){
     var sp=SEL[i];
     if(sp._win===key)continue;
-    sp.bytes=ztAssemble(sp,win);sp._win=key;
+    sp.bytes=ztAssemble(sp,z,win);sp._win=key;
+    /* Each level needs its own rank lookup: the same blur over a coarser grid
+       covers different ground, so reading a 512 m field against the 128 m
+       distribution would move every zone boundary by an amount nothing would
+       report. */
+    sp.smoothed_rank_lut=sp.lutAt[Math.min(z,sp.lutAt.length-1)];
     sp._s=null;sp._lut=null;sp._hf=null;sp._sf=null;
   }
   ztReselect();
@@ -1206,7 +1250,8 @@ function ztReselect(){
 /* The coarsest scale whose window still fits the budget - where a national
    build opens, because a first screen with no zones on it says nothing. */
 function ztFitMpp(){
-  return Math.sqrt(ZT_MAX_CELLS/(CW*CH*(1+ZT_MARGIN)*(1+ZT_MARGIN)))*CELL;
+  return Math.sqrt(ZT_MAX_CELLS/(CW*CH*(1+ZT_MARGIN)*(1+ZT_MARGIN)))
+         *LEVELS[0].cell_m;
 }
 
 /* ---------- the modelled area: its outline, and its extent ---------- */
@@ -1223,7 +1268,7 @@ if(TILED){
      matters - it frames the opening view - and it comes from the tile index,
      since a tile with nothing scored in it was never written. */
   var tr0=1e9,tr1=-1,tc0=1e9,tc1=-1,TP=D.meta.tile_px||256;
-  D.species.forEach(function(sp){(sp.tiles||[]).forEach(function(id){
+  D.species.forEach(function(sp){((sp.tilesAt||[[]])[0]).forEach(function(id){
     var p=id.split("_"),r=+p[0],c=+p[1];
     if(r<tr0)tr0=r; if(r>tr1)tr1=r; if(c<tc0)tc0=c; if(c>tc1)tc1=c;});});
   DATA = tr1<0 ? GRID.slice()
@@ -1240,7 +1285,7 @@ if(TILED){
      arbitrary place; it is simply an arbitrary place with ground in it, and a
      position fix replaces it a moment later. */
   var rows={},r,c;
-  D.species.forEach(function(sp){(sp.tiles||[]).forEach(function(id){
+  D.species.forEach(function(sp){((sp.tilesAt||[[]])[0]).forEach(function(id){
     var p=id.split("_");
     (rows[p[0]]||(rows[p[0]]=[])).push(+p[1]);});});
   var rk=Object.keys(rows).map(Number).sort(function(a,b){return a-b;});
@@ -1791,8 +1836,7 @@ function simplifyRing(r){
   return out;
 }
 function drawZones(){
-  var k=CELL/view.mpp;
-  if(!(k>0)||!isFinite(k))return;
+  if(!(view.mpp>0)||!isFinite(view.mpp))return;
   ctx.save();
   ctx.lineJoin="round";ctx.lineCap="round";
   /* Painted back to front in selection order, so the species the card is
@@ -1804,15 +1848,20 @@ function drawZones(){
        With tiles that window moves under the map, and drawing an old path
        against the current origin would shift a whole landscape of zones by
        exactly how far the window had travelled - plausible, and wrong. */
+    /* ...and the cell size, because the pyramid means two species can be
+       holding geometry traced at different resolutions while a level change
+       settles. Scaling both by the current one would stretch the older. */
+    var C=z.cell,k2=C/view.mpp;
+    if(!(k2>0)||!isFinite(k2))continue;
     ctx.setTransform(DPR,0,0,DPR,0,0);
-    ctx.translate((z.ox+0.5*CELL-view.cx)/view.mpp+CW/2,
-                  (view.cy-z.oy+0.5*CELL)/view.mpp+CH/2);
-    ctx.scale(k,k);
+    ctx.translate((z.ox+0.5*C-view.cx)/view.mpp+CW/2,
+                  (view.cy-z.oy+0.5*C)/view.mpp+CH/2);
+    ctx.scale(k2,k2);
     for(var i=0;i<z.levels.length;i++){
       var pth=z.paths[i];if(!pth)continue;
       var lv=z.levels[i];
       if(lv.fill!=="rgba(0,0,0,0)"){ctx.fillStyle=lv.fill;ctx.fill(pth,"evenodd");}
-      ctx.strokeStyle=lv.line;ctx.lineWidth=lv.w/k;ctx.stroke(pth);
+      ctx.strokeStyle=lv.line;ctx.lineWidth=lv.w/k2;ctx.stroke(pth);
     }
   }
   ctx.restore();
@@ -1857,10 +1906,11 @@ function repaint(){
     if(TILED&&sp._win!==ZT.key)return;
     var levels=overlay?levelsForOverlay(spColour(sp,n)):levelsFor(spColour(sp,n));
     if(sp._zones&&sp._zones.overlay===overlay&&sp._zones.cond===condStamp()&&
-       sp._zones.ox===OX&&sp._zones.oy===OY&&sp._zones.gw===GW){
+       sp._zones.ox===OX&&sp._zones.oy===OY&&sp._zones.gw===GW&&
+       sp._zones.cell===CELL){
       sp._zones.levels=levels;return;}
     sp._zones={paths:buildZones(sp,levels),levels:levels,overlay:overlay,
-               cond:condStamp(),ox:OX,oy:OY,gw:GW};
+               cond:condStamp(),ox:OX,oy:OY,gw:GW,cell:CELL};
   });
 }
 /* Conditions re-rank the field, so a newer weather file invalidates the
@@ -2737,6 +2787,72 @@ function outside(){
     +'<div class="note">Resten av appen virker her: kartet, de merkede stiene, '
     +'nedbøren, og stedene du lagrer selv.</div>';
   card.classList.add("on");draw();}
+/* ---------- why this cell ---------- */
+/* The card's reasoning, fetched only when somebody actually taps.
+
+   Kristiansand inlines seven context surfaces. Over Norway each of them is 115
+   million cells, so they are tiled on the same grid the zones use and one tile
+   carries all seven stacked vertically - a tap needs them together, and they
+   compress better together than apart. Until a tap there is no cost at all,
+   which is what progressive disclosure ought to cost.
+
+   There is no TWI in the national set, and that is not an omission to fix
+   later: the national model does not have the feature either, because flow
+   accumulation over 1.83 billion cells does not fit in memory (FINDINGS 18).
+   A card showing one would be describing a different model from the one that
+   drew the zones. */
+var CTXM=D.ctx||null,CTXBY={};
+if(CTXM&&CTXM.layers) CTXM.layers.forEach(function(L,i){L.z=i;CTXBY[L.key]=L;});
+var CTXT={cache:{},order:[],MAX:24};
+function ctxURL(row,col){
+  var t=(CTXM&&CTXM.url)||"context/{row}_{col}.png";
+  return t.split("{row}").join(row).split("{col}").join(col);
+}
+function ctxTrim(){
+  while(CTXT.order.length>CTXT.MAX){
+    var id=CTXT.order.shift(),e=CTXT.cache[id];
+    if(e&&e.pending){CTXT.order.push(id);return;}
+    delete CTXT.cache[id];
+  }
+}
+/* Values at a point, or null while the tile is on its way. Null is not an
+   error: the card draws its score immediately and this fills the reasoning in
+   underneath when it lands, rather than holding the whole card back. */
+function ctxAt(e,n){
+  if(!CTXM||!CTXM.layers)return null;
+  var T=CTXM.tile_px,C=CTXM.cell_m;
+  var cx=Math.floor((e-CTXM.origin_x)/C),cy=Math.floor((CTXM.origin_y-n)/C);
+  if(cx<0||cy<0||cx>=CTXM.grid.w||cy>=CTXM.grid.h)return null;
+  var r=(cy/T)|0,c=(cx/T)|0,id=r+"_"+c,ent=CTXT.cache[id];
+  if(!ent){
+    ent=CTXT.cache[id]={bytes:null,pending:true,err:false};
+    CTXT.order.push(id);ctxTrim();
+    function done(){ent.pending=false;if(selected>=0)show(selected);}
+    try{
+      fetch(ctxURL(r,c)).then(function(x){
+        if(!x.ok)throw new Error("HTTP "+x.status);
+        return x.arrayBuffer();
+      }).then(ztDecode).then(function(t){
+        ent.bytes=t.bytes;done();
+      }).catch(function(){ent.err=true;done();});
+    }catch(err){ent.err=true;ent.pending=false;}
+    return null;
+  }
+  if(!ent.bytes)return null;
+  var off=(cy-r*T)*T+(cx-c*T),out={},i,L,b;
+  for(i=0;i<CTXM.layers.length;i++){
+    L=CTXM.layers[i];
+    b=ent.bytes[i*T*T+off];
+    out[L.key]=b?L.min+(b-1)/254*(L.max-L.min):null;
+  }
+  return out;
+}
+function ctxLab(key,v){
+  var L=CTXBY[key];
+  if(!L||!L.labels||v===null||v===undefined)return null;
+  return L.labels[String(Math.round(v))]||null;
+}
+
 var BANDS=[[0,"Svært lav"],[.2,"Lav"],[.45,"Moderat"],[.7,"Høy"],[.9,"Svært høy"]];
 function bandFor(p){var b=BANDS[0];for(var i=0;i<BANDS.length;i++)if(p>=BANDS[i][0])b=BANDS[i];return b;}
 function val(l,i){if(!l||!l.bytes)return null;var b=l.bytes[i];
@@ -2773,10 +2889,23 @@ function show(i){
   var R=smoothField(current),H=habitatField(current);
   var p=R[i],band=bandFor(p);
   var cp=condPctAt(east,north);
-  var elev=val(D.context.elevation,i),twi=val(D.context.twi,i),
-      age=val(D.context.stand_age_yr,i),crown=val(D.context.crown_cover_pct,i),
-      rain=val(D.context.autumn_rain_mm,i);
-  var tre=cat("treslag",i),los=cat("losmasse",i),ar=cat("ar50",i);
+  /* Two sources for the same seven facts: inlined surfaces indexed by cell,
+     or a context tile fetched for this neighbourhood. `CT` is null while that
+     tile is in flight, and everything below degrades to "-" until it lands. */
+  var CT=CTXM?ctxAt(east,north):null;
+  /* `null` rather than `undefined` for a layer this build does not carry.
+     Every guard below tests `!== null`, so an undefined slipped through all of
+     them and the card printed "NaN mm". */
+  function ctxv(k,key){
+    if(!CTXM)return val(D.context[key],i);
+    var v=CT?CT[key]:null;
+    return v===undefined?null:v;}
+  function ctxc(key){return CTXM?ctxLab(key,CT?CT[key]:null):cat(key,i);}
+  var elev=ctxv(0,"elevation"),twi=CTXM?null:val(D.context.twi,i),
+      age=ctxv(0,"stand_age_yr"),crown=ctxv(0,"crown_cover_pct"),
+      rain=ctxv(0,"autumn_rain_mm");
+  var tre=ctxc("treslag"),los=ctxc("losmasse"),ar=ctxc("ar50");
+  var waiting=!!(CTXM&&!CT);
   var bits=[];
   if(ar)bits.push(ar[0].toLowerCase());
   if(tre&&age!==null&&age>0)bits.push(tre[0].toLowerCase()+", ~"+Math.round(age)+" år");
@@ -2815,6 +2944,9 @@ function show(i){
     });
     h+='</div>';
   }
+  /* A line of its own while the tile is in flight, rather than a card that
+     silently lacks a reason and then grows one. */
+  if(!lead&&waiting)lead="Henter terrenget her \u2026";
   h+=(lead?'<div class="lead2">'+lead+'</div>':'')
     +'<div class="estnote">Et anslag fra kart og terreng &mdash; ingen har sett etter her.</div>';
   h+=walkTo(east,north);
@@ -2831,7 +2963,10 @@ function show(i){
     +kv("Alder",age!==null&&age>0?Math.round(age)+" år":"—")
     +kv("Kronedekning",crown!==null&&crown>0?Math.round(crown)+" %":"—")
     +kv("Løsmasse",los?los[0]:"—")+kv("Høyde",elev!==null?Math.round(elev)+" moh.":"—")
-    +kv("TWI",(twi===null?"—":twi.toFixed(1)))
+    /* Omitted rather than shown empty where the model has no such feature.
+       A dash against a named quantity reads as "missing here"; it is missing
+       everywhere, by a decision recorded in FINDINGS 18. */
+    +(CTXM?"":kv("TWI",(twi===null?"—":twi.toFixed(1))))
     +kv("Høstnedbør",rain!==null?Math.round(rain)+" mm":"—")
     +kv("UTM33",Math.round(east)+" E "+Math.round(north)+" N")+'</div>';
   cardBody.innerHTML=h;

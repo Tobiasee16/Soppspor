@@ -98,11 +98,30 @@ class TestThePayload:
         assert meta["percentile_bytes"] is True
         assert all("data" not in sp for sp in payload["species"])
 
-    def test_every_species_carries_its_own_national_lookup(self, built):
-        payload, _, _ = built
+    def test_every_species_carries_a_lookup_for_every_level(self, built):
+        """One per level. The same blur over a coarser grid covers different
+        ground, so a level read against another level's distribution would move
+        every zone boundary with nothing reporting it."""
+        payload, meta, _ = built
+        n = len(meta["levels"])
+        assert n >= 2, "the pyramid is missing; zooming out has nothing to show"
         for sp in payload["species"]:
-            assert len(sp["smoothed_rank_lut"]) == 256, sp["key"]
-            assert sp["tiles"], sp["key"]
+            assert len(sp["smoothed_rank_lut"]) == n, sp["key"]
+            assert all(len(l) == 256 for l in sp["smoothed_rank_lut"]), sp["key"]
+            assert len(sp["tiles"]) == n and all(sp["tiles"]), sp["key"]
+
+    def test_the_levels_get_coarser_and_smaller(self, built):
+        _, meta, _ = built
+        cells = [lv["cell_m"] for lv in meta["levels"]]
+        assert cells == sorted(cells) and len(set(cells)) == len(cells)
+        area = [lv["grid"]["w"] * lv["grid"]["h"] for lv in meta["levels"]]
+        assert area == sorted(area, reverse=True)
+
+    def test_the_coarsest_level_fits_the_whole_country_on_a_screen(self, built):
+        """Otherwise zooming all the way out still shows nothing."""
+        _, meta, _ = built
+        top = meta["levels"][-1]
+        assert top["grid"]["w"] * top["grid"]["h"] < 600_000
 
     def test_the_null_control_is_not_offered_as_a_mushroom(self, built):
         payload, _, keys = built
@@ -186,13 +205,38 @@ class TestTheProse:
         assert re.search(r"\nrenderPill\(\);", shell)
         assert meta["area_label"] == "Norge · anslag"
 
-    def test_the_conditions_layer_is_declared_absent(self, built):
-        """It is fetched for Agder only; the page must not imply otherwise."""
+    def test_the_page_describes_the_weather_it_actually_ships(self, built):
+        """Whichever way round it is. A page that promises a rainfall layer it
+        does not have, or omits one it does, is wrong in the same way."""
+        import json as _json
         payload, _, _ = built
-        clocks = payload["about"]["ab_clocks"]
-        assert "ikke med i denne utgaven" in clocks
-        assert "Agder" in clocks
-        assert "regnet" not in payload["about"]["ab_lead"]
+        about = payload["about"]
+        has_cond = bh.NAT_COND.exists()
+        if has_cond:
+            cond = _json.loads(bh.NAT_COND.read_text(encoding="utf-8"))
+            km = f"{cond['grid']['step'] / 1000:.0f} km"
+            assert "seNorge" in about["ab_clocks"]
+            assert km in about["ab_clocks"], about["ab_clocks"]
+            assert km in about["ab_weak"]
+            assert "regnet" in about["ab_lead"]
+            assert "ikke med i denne utgaven" not in about["ab_clocks"]
+            # It is a judgement laid over a validated surface, and the page has
+            # to keep saying so wherever it appears.
+            assert "ikke testet" in about["ab_clocks"]
+        else:
+            assert "ikke med i denne utgaven" in about["ab_clocks"]
+            assert "regnet" not in about["ab_lead"]
+
+    def test_the_context_layers_are_declared_if_they_ship(self, built):
+        payload, _, _ = built
+        if "ctx" not in payload:
+            pytest.skip("no context tiles exported")
+        keys = [L["key"] for L in payload["ctx"]["layers"]]
+        assert "elevation" in keys and "ar50" in keys
+        # The national model has no TWI, so neither can the card.
+        assert "twi" not in keys
+        assert "fuktighetsindeks" in payload["about"]["ab_layers"]
+        assert "Uten fuktighetsindeks" in payload["about"]["ab_layers"]
 
     def test_it_says_which_ground_the_model_never_saw(self, built):
         """The national map is in-sample everywhere but Nordland, unlike Phase
@@ -226,18 +270,19 @@ class TestItActuallyDraws:
         payload = json.loads(payload_js[len("window.SOPP="):-1])
         # Point the driver's fetch at the exporter's output instead of copying
         # 140 MB of tiles per test run.
-        payload["meta"]["tiles"]["url"] = "{sp}/{row}_{col}.png"
+        payload["meta"]["tiles"]["url"] = "{sp}/{z}/{row}_{col}.png"
         tmp = tmp_path_factory.mktemp("natpage")
         (tmp / "payload.json").write_text(json.dumps(payload), encoding="utf-8")
         plan = {"tilesRoot": str(TILES), "bounds": bh.NORWAY, "steps": [
             {"name": "oslo", "view": self.OSLO + [30]},
             {"name": "panned", "view": [self.OSLO[0] + 12000, self.OSLO[1], 30]},
             {"name": "country", "view": [500000.0, 7100000.0, 900]},
+            {"name": "whole", "view": [500000.0, 7100000.0, 3000]},
         ]}
         (tmp / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
         out = subprocess.run(
             [NODE, str(ROOT / "tests" / "national_boot.js"), str(tmp)],
-            capture_output=True, text=True, timeout=900)
+            capture_output=True, text=True, encoding="utf-8", timeout=900)
         if out.returncode != 0:
             raise AssertionError(f"node failed: {out.stderr[-1500:]}")
         got = json.loads(out.stdout)
@@ -272,10 +317,18 @@ class TestItActuallyDraws:
         assert a != b
         assert run["by_name"]["panned"]["zones"][0] == 3
 
-    def test_the_whole_country_is_too_much_to_draw(self, run):
+    def test_zooming_out_drops_to_a_coarser_level(self, run):
         st = run["by_name"]["country"]
-        assert st["blank"] is True
-        assert "Zoom inn" in st["note"]["html"]
+        assert st["z"] > 0, "it stayed on the finest level and gave up"
+        assert st["blank"] is False
+        assert st["zones"][0] == 3, st["zones"]
+
+    def test_the_whole_country_still_has_zones_on_it(self, run):
+        """The thing a beginner does first: zoom out to see where to go."""
+        st = run["by_name"]["whole"]
+        assert st["blank"] is False, "the whole country draws nothing"
+        assert st["zones"][0] == 3, st["zones"]
+        assert st["note"]["hidden"] is True
 
     def test_it_only_asked_for_tiles_that_exist(self, run):
         missing = [u for u in run["asked"]

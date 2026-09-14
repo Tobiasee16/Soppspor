@@ -146,7 +146,8 @@ self.addEventListener("fetch", (event) => {
   }
   if (url.origin !== self.location.origin) return;   // Supabase and the rest
 
-  if (url.pathname.indexOf("/zones/") >= 0 && url.pathname.endsWith(".png")) {
+  if ((url.pathname.indexOf("/zones/") >= 0 ||
+       url.pathname.indexOf("/context/") >= 0) && url.pathname.endsWith(".png")) {
     event.respondWith(zoneFirst(request));
     return;
   }
