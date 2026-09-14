@@ -71,7 +71,15 @@ function flush(times = 1, t = 16) {
 let NOW = 1000;
 global.performance = { now: () => NOW };
 global.atob = (s) => Buffer.from(s, "base64").toString("binary");
-global.Path2D = class { moveTo() {} lineTo() {} closePath() {} };
+/* Records rather than discards. Zone geometry was previously only ever
+   counted - "three paths came back" - because the stub threw the vertices
+   away, which left the contour tracer and the stitcher untestable. */
+global.Path2D = class {
+  constructor() { this.ops = []; }
+  moveTo(x, y) { this.ops.push(["M", x, y]); }
+  lineTo(x, y) { this.ops.push(["L", x, y]); }
+  closePath() { this.ops.push(["Z"]); }
+};
 global.Image = class {
   constructor() { this.complete = false; this.naturalWidth = 0; }
   set src(v) { this._src = v; setTimeout(() => this.onerror && this.onerror(), 0); }
