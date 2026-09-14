@@ -2874,6 +2874,359 @@ produced files that did not compare equal. Harmless to any conclusion, and
 exactly the kind of noise that stops people diffing results at all. Now sorted;
 `run_transfer.py` already was.
 
+## 22. The national run, and what the ordering test can and cannot carry - 2026-09-14
+
+Fitted on fourteen fylker, cross-validated in 7,500 m blocks with a 4,000 m
+buffer, and evaluated once on Nordland, which no model saw. Every prediction
+below was registered in section 16e before the national feature stack existed.
+
+Run with:
+
+    python scripts/run_models.py --national
+    python scripts/run_transfer.py --national
+
+### 22a. Both gates cleared before anything else was read
+
+CLAUDE.md hard constraint 5: if the synthetic null scores meaningfully above
+0.5, the background sampling is broken and nothing else in the run means
+anything. The national background is a new artefact built by a different
+script from Agder's, so it gets checked fresh rather than inherited.
+
+| | null, lightgbm | null, maxent |
+|---|---|---|
+| national blocked CV | **0.490 +/- 0.009** | 0.492 +/- 0.007 |
+| transfer to Nordland | **0.514 [0.480-0.552]** | 0.475 [0.438-0.513] |
+| *(Agder, for reference)* | 0.471 +/- 0.033 | 0.496 |
+
+Both sit on 0.5, and the blocked-CV interval is four times tighter than
+Agder's because the background is thirteen times larger. Nothing below is
+readable without this, which is why it is first.
+
+### 22b. Blocked CV: the registered ordering passes, on both models
+
+Registered before any model existed: *C. tubaeformis* best, *C. cibarius*
+middle, *A. muscaria* worst.
+
+| species | Agder | national | gain |
+|---|---|---|---|
+| *Craterellus tubaeformis* | 0.645 | **0.786 +/- 0.009** | +0.141 |
+| *Cantharellus cibarius* | 0.685 | **0.743 +/- 0.006** | +0.058 |
+| *Amanita muscaria* | 0.664 | **0.688 +/- 0.007** | +0.024 |
+| *Craterellus cornucopioides* | 0.757 | 0.828 +/- 0.024 | +0.071 |
+| *Hydnum repandum* | 0.605 | 0.733 +/- 0.014 | +0.128 |
+| *Suillus luteus* | 0.699 | 0.722 +/- 0.025 | +0.023 |
+| *Boletus edulis* | 0.660 | 0.717 +/- 0.016 | +0.057 |
+| *Leccinum versipelle* | 0.598 | 0.684 +/- 0.018 | +0.086 |
+
+lightgbm, blocked CV. Agder's lightgbm **failed** the ordering - it put
+*tubaeformis* last. Nationally both models pass it with the same order, and
+the three separate by six or more fold-to-fold standard deviations.
+
+Prediction 16e.2 said national AUC would come out higher by roughly 0.05 to
+0.15 and that **this would not mean the model got better**, because a wider
+environmental gradient makes the same discrimination easier. Median gain
++0.07, well inside the registered band. That part of the prediction held and
+the caveat attached to it still stands.
+
+### 22c. Transfer to Nordland: it passes there too
+
+The harder test, and the one Phase 0 failed.
+
+| species | Agder to Kristiansand | national to Nordland | n held out |
+|---|---|---|---|
+| *Craterellus tubaeformis* | 0.600 [0.519-0.679] | **0.808 [0.744-0.861]** | 46 |
+| *Cantharellus cibarius* | 0.653 [0.573-0.735] | **0.714 [0.679-0.749]** | 160 |
+| *Amanita muscaria* | 0.638 [0.572-0.703] | **0.700 [0.656-0.744]** | 126 |
+| *Boletus edulis* | 0.581 [0.501-0.665] | 0.727 [0.679-0.768] | 114 |
+| *Hydnum repandum* | 0.384 [0.152-0.689] | 0.758 [0.692-0.823] | 29 |
+| *Suillus luteus* | 0.652 [0.543-0.758] | 0.743 [0.687-0.796] | 56 |
+| *Leccinum versipelle* | 0.686 [0.529-0.814] | 0.682 [0.642-0.721] | 150 |
+| *Craterellus cornucopioides* | 0.648 [0.511-0.777] | 0.767 [0.585-0.917] | **7** |
+
+| ordering on transfer | lightgbm | maxent |
+|---|---|---|
+| Agder to Kristiansand | cibarius > muscaria > tubaeformis - **FAIL** | same - **FAIL** |
+| national to Nordland | tubaeformis > cibarius > muscaria - **PASS** | same - **PASS** |
+
+*C. tubaeformis*'s two intervals **do not overlap at all**: [0.519-0.679]
+against [0.744-0.861]. Within the national run it clears *C. cibarius* with
+a 0.005 sliver of overlap. The species the whole three-species design hinges
+on went from last place to separated at the top.
+
+*H. repandum* is worth noting on its own. It was scoring **below chance** on
+Kristiansand at 0.384, which section 9c could only report as uninterpretable
+at n=45. At n=29 in Nordland it reads 0.758 [0.692-0.823].
+
+*C. cornucopioides* has 7 held-out records and an interval spanning
+[0.585-0.917]. Reported, not quoted as a measurement, exactly as registered
+in 16c.
+
+### 22d. A registered prediction that was wrong, in the helpful direction
+
+Section 16d registered that *C. tubaeformis* is the one species the national
+test would resolve **no better** than the Kristiansand test that had already
+failed to resolve it - 46 Nordland records against 53 in Kristiansand, so a
+slightly *wider* interval.
+
+The Nordland interval came out **narrower**: 0.117 wide against 0.160.
+
+The prediction reasoned from held-out presence count alone. Bootstrap AUC
+interval width also depends on the number of held-out background points -
+3,301 in Nordland against a few hundred in Kristiansand - and on how far the
+AUC sits from 0.5, since the statistic is bounded at 1. Both worked in our
+favour. Recorded as a miss rather than quietly dropped, because a
+registration that is only remembered when it comes out right is not a
+registration.
+
+### 22e. Looking for the leak: latitude, tested and rejected
+
+The gains are not uniform. *C. tubaeformis* gained +0.141 and *A. muscaria*
++0.024, and that differential is exactly what flips the ordering - so the
+whole result turns on it.
+
+The obvious worry is that the model learned **latitude**. *C. tubaeformis* is
+southern-skewed (2.0% of its records in Nordland, 0.47x recording effort);
+*A. muscaria* is evenly spread (0.93x). A model that has learned "southern
+Norway" would score well on the first and badly on the second, producing this
+pattern with no ecology in it at all.
+
+Tested against the effort-relative shares measured in 16c:
+
+| | Spearman vs the AUC gain |
+|---|---|
+| northern-ness (share vs effort) | **-0.048** |
+| Agder presence count | -0.357 |
+| national/Agder data multiplier | -0.333 |
+| starting Agder AUC | -0.595 |
+
+**The latitude hypothesis is dead.** If the national model had learned a
+latitudinal gradient, the gain would be concentrated in the southern
+specialists; it is uncorrelated with them. The -0.595 on starting AUC is
+regression to the mean and is not significant at n=8, where Spearman needs
+about 0.74.
+
+Worth recording separately: northern-ness correlates with *national* AUC at
+-0.714 and with *Agder* AUC at -0.595. Range-restricted species really are
+easier to predict - but that was already true inside Agder, so it is not
+something going national introduced.
+
+### 22f. What appeared to move: autumn rainfall
+
+**Read section 22h before acting on this one.** The correlation below is real
+and is reported as measured. The causal reading it invites - that rainfall is
+what carried the national result - is wrong, and the ablation in 22h retracts
+it. The subsection is kept rather than deleted because the sequence is the
+point: this is what the evidence looked like before the check that overturned
+it, and it looked convincing.
+
+| | Spearman vs the AUC gain |
+|---|---|
+| gain in **autumn-rainfall** importance | **+0.826** (n=8, p ~ 0.011) |
+| gain in elevation importance | +0.024 |
+
+*C. tubaeformis*'s rainfall importance went from **-0.004 in Agder to +0.069
+nationally**, from nothing at all to its single largest feature. Agder's
+autumn rainfall spans 195-783 mm; Norway's spans 105-1,238 mm. The species
+CLAUDE.md describes as "moist mossy spruce forest, damp hollows" had no
+moisture gradient to read in Agder and has one now.
+
+Elevation stayed the top feature overall and explains none of the movement
+(+0.024). The FINDINGS 15 worry that elevation carries accessibility is
+neither helped nor hurt by the national run.
+
+### 22g. This reopens a question that had been closed
+
+Section 6 registered, before the climate feature was ever fitted, that autumn
+rainfall follows the same coast-inland and orographic gradient as the
+population, and so could act as an accessibility proxy - the exact failure the
+target-group background exists to prevent. The open-questions list closed it:
+
+> ~~Does the autumn-rainfall feature carry ecology or accessibility?~~ Largely
+> moot: its permutation importance is between -0.007 and +0.039 across every
+> species and both models in every run.
+
+**That sentence is now false**, and it is false about the feature carrying the
+headline result. The national run puts it at +0.069.
+
+Neither existing check can settle it. The null cannot: null presences and
+background are drawn from the same pool, so they are environmentally identical
+by construction and no feature can separate them - the report says so already.
+Permutation importance cannot: it establishes that a feature is used, not what
+it is a proxy for. Only deleting the feature can.
+
+### 22h. The ablation: rainfall is a marker, not a cause
+
+Refit the whole national stack without the climate layer, on both harnesses.
+The contrast between them is the informative part: if rainfall carried real
+habitat information, deleting it should hurt the moisture-dependent species
+wherever you stand; if it were a coast-inland accessibility proxy, it should
+help within a region and do nothing across one.
+
+    python scripts/run_models.py   --national --no-climate
+    python scripts/run_transfer.py --national --no-climate
+
+| species | blocked CV | -rain | cost | transfer | -rain | cost |
+|---|---|---|---|---|---|---|
+| *Craterellus tubaeformis* | 0.786 | 0.773 | **-0.013** | 0.808 | 0.791 | -0.017 |
+| *Cantharellus cibarius* | 0.743 | 0.733 | -0.010 | 0.714 | 0.698 | -0.016 |
+| *Amanita muscaria* | 0.688 | 0.689 | +0.001 | 0.700 | 0.707 | +0.007 |
+| *Boletus edulis* | 0.717 | 0.719 | +0.002 | 0.727 | 0.715 | -0.012 |
+| *Craterellus cornucopioides* | 0.828 | 0.812 | -0.016 | 0.767 | 0.849 | +0.082 |
+| *Leccinum versipelle* | 0.684 | 0.677 | -0.007 | 0.682 | 0.692 | +0.010 |
+| *Suillus luteus* | 0.722 | 0.714 | -0.008 | 0.743 | 0.716 | -0.027 |
+| *Hydnum repandum* | 0.733 | 0.721 | -0.012 | 0.758 | 0.733 | -0.025 |
+| null control | 0.490 | 0.492 | | 0.514 | 0.500 | |
+
+lightgbm. Mean cost **-0.008** on blocked CV and **+0.000** on transfer.
+*C. cornucopioides*'s +0.082 is n=7 and means nothing.
+
+**Section 22f's causal reading is retracted here.** Autumn rainfall's
+permutation importance really did rise from -0.004 to +0.069 for
+*C. tubaeformis*, and that rise really does track the AUC gain at +0.826
+across the eight species. But deleting the feature costs 0.013 of a +0.141
+gain - about a tenth - and the model recovers nearly everything it was reading
+off rainfall from the rest of the stack.
+
+This is the trap `run_models.py` already carries a comment about for the volume
+bounds: *permutation importance under correlated features assigns credit
+arbitrarily*. A feature can be the one the algorithm leans on while carrying
+almost no information unavailable elsewhere. Importance measured what the model
+**used**; the ablation measured what it **needed**, and only the second is a
+claim about the data.
+
+### 22i. The ablation also sharpens what the ordering test actually established
+
+Without rainfall the registered ordering splits:
+
+| transfer to Nordland, no climate layer | |
+|---|---|
+| maxent | tubaeformis 0.825 > cibarius 0.705 > muscaria 0.695 - **PASS** |
+| lightgbm | tubaeformis 0.791 > **muscaria 0.707 > cibarius 0.698** - **FAIL** |
+
+Read the numbers rather than the verdict. What flipped is **second against
+third**, by 0.009, between two species whose bootstrap intervals overlap almost
+entirely. What did not flip, on either model or either harness, is first place:
+
+| *C. tubaeformis* | with rainfall | without |
+|---|---|---|
+| blocked CV | 0.786 | 0.773 |
+| transfer, lightgbm | 0.808 [0.744-0.861] | 0.791 [0.730-0.847] |
+| transfer, maxent | 0.827 [0.767-0.880] | 0.825 [0.764-0.877] |
+
+So the honest decomposition of the national ordering result is two claims of
+very different strength, and they should not be quoted as one:
+
+* **Strong, and robust to the ablation.** *C. tubaeformis* ranks first, on both
+  models, on both harnesses, with and without the suspect feature, separated
+  from second place by more than its own interval. Under blocked CV the three
+  separate by six or more fold-to-fold standard deviations (0.786, 0.743,
+  0.688 at +/- 0.006 to 0.009).
+* **Weak, and it was always weak.** *C. cibarius* above *A. muscaria* on the
+  transfer. Even in the full run those were 0.714 [0.679-0.749] against 0.700
+  [0.656-0.744] - overlapping across nearly their whole range. The strict
+  three-way PASS on transfer rests on that 0.014, and removing one feature is
+  enough to reverse it.
+
+Section 22c reported the transfer PASS without flagging how little separated
+second from third. That is corrected here: the PASS verdicts stand as recorded,
+and the part of them that is load-bearing is first place.
+
+### 22j. What that settles, and what it leaves open
+
+**Settled, and more cleanly than if the feature had mattered.** Section 6 asked
+whether autumn rainfall carries ecology or accessibility, and the
+open-questions list had closed it on Agder evidence that section 22g showed to
+be out of date. It is now closed on better evidence: *no load-bearing
+conclusion in the national run depends on that feature*. Delete the single
+variable this project ever flagged as a possible accessibility proxy and both
+null controls, the blocked-CV ordering, and *C. tubaeformis*'s first place all
+survive.
+
+**Still open: why the gain is so uneven.** *C. tubaeformis* gained +0.141 going
+national and *A. muscaria* +0.024. Five candidates tested, none survives:
+
+| candidate | Spearman vs the gain | verdict |
+|---|---|---|
+| latitude / range restriction | -0.048 | dead |
+| Agder presence count | -0.357 | not significant at n=8 |
+| national/Agder data multiplier | -0.333 | not significant at n=8 |
+| starting Agder AUC | -0.595 | not significant at n=8 |
+| autumn rainfall | +0.826 correlation | **cause excluded by ablation** |
+
+At n=8 Spearman needs about 0.74 for p < 0.05, so only rainfall ever cleared
+the bar, and the ablation removed it as a cause.
+
+The honest statement is that the gain is **unexplained by any single feature**,
+which is what a broad environmental-gradient effect should look like: Norway
+offers wider ranges in elevation, climate, forest type and substrate at once,
+several of them correlated, so nothing shows up as load-bearing and deleting
+any one of them changes little. That is consistent with prediction 16e.2 - the
+gain is largely an extent effect and does not mean the model got better - while
+leaving the differential across species unaccounted for.
+
+It would be easy to write "the moisture-dependent species benefited most from a
+moisture gradient". Every number in section 22f fits it. The ablation is the
+reason not to.
+
+### 22k. What this does to section 9c, and what it deliberately does not
+
+Section 9c recorded the registered ordering **failing on both models** on the
+Agder-to-Kristiansand transfer, with *C. tubaeformis* last, and offered two
+readings of it side by side:
+
+> 1. **The intervals overlap almost completely.** [...] With 45-53 held-out
+>    presences per species this test cannot resolve an ordering [...]
+> 2. **It is a genuine reversal, not a shrinkage.** [...] a reordering suggests
+>    the blocked-CV ranking was reading something local to the Agder-wide split.
+
+Those are opposite explanations - underpowered, or genuinely wrong - and
+section 9c could not choose between them. The national run is the test that
+can, because it is the same question asked with roughly ten times the training
+data and a held-out region that shares no border, no fylke administration and
+no recording community with the training extent.
+
+**The answer is (1).** With 2,256 rather than 246 training presences, the
+registered ordering reproduces on all four national runs - blocked CV and
+transfer, maxent and lightgbm - and *C. tubaeformis* moves from last to first
+with intervals that no longer overlap its own Phase 0 result
+([0.519-0.679] against [0.744-0.861]).
+
+**What does not change, and must not be presented as though it had:**
+
+- **Phase 0's published numbers stand exactly as recorded.** Section 9c's FAIL
+  is a fact about a model fitted on Agder and evaluated on Kristiansand. It is
+  not retracted, not amended, and not softened. `model_results.md` and
+  `transferability.md` are untouched by anything in section 22, which is why
+  the extent picks the output filename.
+- **The Phase 0 artefact-2 verdict stays FAIL.** The pass/fail on the predicted
+  ordering was registered against the Phase 0 design, judged there, and
+  recorded there. Re-judging it on a later, larger experiment would be exactly
+  the after-the-fact rationalisation that registering predictions exists to
+  prevent. Two experiments, two verdicts, both reported.
+- **The national result was not predicted to come out this way.** Section 16e
+  registered that national AUC would rise for extent reasons and that this
+  would not mean the model improved. It said nothing about the ordering
+  flipping, and 16d explicitly registered that *C. tubaeformis* would be the
+  species the national test could **not** resolve. It resolved it. That is a
+  registration missed in the favourable direction and it is recorded as one in
+  section 22d.
+
+What can now be said, which could not be said before: the three-species
+falsification instrument has been run twice, at two scales, and the scale that
+had enough data to resolve it returned the registered ordering. The instrument
+was built to catch the failure mode where all three species score alike because
+the model is reading recording effort. At national scale they do not score
+alike - 0.786, 0.743, 0.688, separated by six or more fold-to-fold standard
+deviations, with a null sitting on 0.490 and the one feature ever flagged as an
+effort proxy ablated away at a cost of 0.013.
+
+That is the strongest evidence this project has produced that the map is
+reading habitat rather than footfall. It is not proof, it rests on
+presence-only data with no absences anywhere in it, and CLAUDE.md's standing
+requirement holds unchanged: say plainly, wherever the model is described, that
+it is an estimate from public geodata and has never been validated against
+anybody's actual walks.
+
 ## Open questions
 
 - **Should the maps still be blurred at all?** `build_maps.py` applies a 500 m
@@ -2912,10 +3265,16 @@ exactly the kind of noise that stops people diffing results at all. Now sorted;
   9 Aug - 20 Oct, meaned over 1991-2020, derived from the record phenology.
   The raster is built, and the choice of window is demonstrably not load-
   bearing (r >= 0.997 against windows shifted a fortnight either way).
-- ~~Does the autumn-rainfall feature carry ecology or accessibility?~~ Largely
-  moot: its permutation importance is between -0.007 and +0.039 across every
-  species and both models in every run. It is neither ecology nor accessibility
-  in any quantity worth arguing about.
+- ~~Does the autumn-rainfall feature carry ecology or accessibility?~~ Closed
+  in section 22h, and **not** by the reasoning that first closed it. The claim
+  here used to be that its permutation importance stays between -0.007 and
+  +0.039 "in every run". That was true of every Agder run and false the moment
+  the national stack was fitted: importance reaches +0.069 for *C. tubaeformis*
+  and correlates with the national AUC gain at +0.826 across eight species.
+  What actually closes it is the ablation. Refitting the whole national stack
+  without the climate layer costs a mean of 0.008 AUC on blocked CV and 0.000
+  on transfer, and *C. tubaeformis* keeps first place on both models and both
+  harnesses. No load-bearing conclusion depends on the feature.
 - Can the 13 shoreline presences be recovered at a finer DTM resolution? They
   are lost to the 32 m cell size, not to the mask logic.
 - ~~Does adding SR16 forest structure raise *C. tubaeformis* more than the
