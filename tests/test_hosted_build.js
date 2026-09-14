@@ -9,7 +9,10 @@
 const fs = require("fs");
 const path = require("path");
 
-const DIST = path.join(__dirname, "..", "dist");
+// Which build to check. deploy.sh passes the directory it just made, because
+// there are two of them and they differ in what they are allowed to contain.
+const OUT = process.argv[2] || "dist";
+const DIST = path.isAbsolute(OUT) ? OUT : path.join(__dirname, "..", OUT);
 let fails = 0;
 const check = (n, ok, d) => {
   console.log((ok ? "PASS  " : "FAIL  ") + n + (d ? "   " + d : ""));
@@ -17,7 +20,7 @@ const check = (n, ok, d) => {
 };
 
 if (!fs.existsSync(path.join(DIST, "index.html"))) {
-  console.log("SKIP  no dist/ - run: python scripts/build_hosted.py");
+  console.log(`SKIP  no ${OUT}/ - run: python scripts/build_hosted.py`);
   process.exit(0);
 }
 
@@ -47,7 +50,20 @@ if (nb) {
         `${((b[2]-b[0])/1000).toFixed(0)} x ${((b[3]-b[1])/1000).toFixed(0)} km`);
 }
 check("the model payload is still inlined", /window\.SOPP=\{/.test(html));
-check("the routes are still inlined", /window\.SOPP_TRAILS=/.test(html));
+// Turrutebasen is packed into the page, which is the right shape for one
+// kommune and tens of megabytes for the mainland. The tiled build therefore
+// ships none - and must not, or the page grows by an order of magnitude - so
+// the assertion is the opposite one there rather than skipped.
+const TILED = /"tiles":\s*\{/.test(html);
+console.log("      (" + (TILED ? "tiled, national" : "inline, one kommune") + " build)");
+if (TILED) {
+  check("no routes inlined into a national page",
+        !/window\.SOPP_TRAILS=\{/.test(html));
+  check("zones are declared as tiles rather than carried",
+        /"percentile_bytes":true/.test(html) || /"tiles":\s*\{/.test(html));
+} else {
+  check("the routes are still inlined", /window\.SOPP_TRAILS=/.test(html));
+}
 check("tiles come from Kartverket's cache",
       html.includes("https://cache.kartverket.no/v1/wmts/1.0.0/"));
 
@@ -59,7 +75,7 @@ check("it registers the service worker", /serviceWorker/.test(html));
 for (const f of ["sw.js", "manifest.webmanifest", "conditions.json",
                  "icons/icon-180.png", "icons/icon-192.png",
                  "icons/icon-512.png", "_headers", "_redirects"]) {
-  check(`dist/${f} exists`, fs.existsSync(path.join(DIST, f)));
+  check(`${OUT}/${f} exists`, fs.existsSync(path.join(DIST, f)));
 }
 
 // Anything the HTML asks for by relative path must be on disk, or the first
@@ -73,7 +89,7 @@ for (const f of ["sw.js", "manifest.webmanifest", "conditions.json",
 const refs = [...html.matchAll(/(?:href|src)="(?![a-zA-Z][a-zA-Z0-9+.-]*:|#)([^"]+)"/g)]
   .map(m => m[1]).filter(u => !u.startsWith("/"));
 const missing = [...new Set(refs)].filter(u => !fs.existsSync(path.join(DIST, u)));
-check("every relative reference resolves to a file in dist",
+check("every relative reference resolves to a file in the build",
       missing.length === 0, missing.join(", ") || [...new Set(refs)].join(", "));
 
 // The address is the only route a user has for asking what is stored about
