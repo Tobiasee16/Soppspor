@@ -52,7 +52,7 @@ OUT_MD = ROOT / "data" / "processed" / "trails.md"
 MANIFEST = ROOT / "data" / "interim" / "basemap" / "manifest.json"
 
 WFS = "https://wfs.geonorge.no/skwms1/wfs.turogfriluftsruter"
-UA = {"User-Agent": "soppkart/0.1 (habitat suitability research)"}
+UA = {"User-Agent": "soppspor/0.1 (habitat suitability research; support@soppspor.no)"}
 
 # AnnenRute returns nothing over this extent; it is kept so the set is explicit
 # rather than mysteriously short.

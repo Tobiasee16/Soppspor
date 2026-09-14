@@ -152,8 +152,15 @@ to prove the magic link works end to end and not enough for anybody else.
 | Port | `465` |
 | Username | `resend` |
 | Password | your Resend API key |
-| Sender email | `onboarding@resend.dev` |
-| Sender name | `Soppkart` |
+| Sender email | `support@soppspor.no` |
+| Sender name | `Soppspor` |
+
+Sending from `soppspor.no` needs the domain verified in Resend first
+(Domains -> Add Domain, then the DKIM and SPF records it gives you). Until
+that is done `onboarding@resend.dev` still works and is the right thing to
+fall back to - a sender address that fails verification bounces the login
+link silently, which looks to the user exactly like the account not
+existing.
 
 Fill those in at
 [Authentication → SMTP Settings](https://supabase.com/dashboard/project/_/auth/smtp),

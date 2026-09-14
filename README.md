@@ -1,4 +1,4 @@
-# soppkart
+# Soppspor
 
 A map of where mushrooms **might** grow around Kristiansand, Norway, estimated
 from public geodata — and an honest account of how well that works, which is

@@ -94,11 +94,11 @@ check("full-screen panels pad for side cutouts",
 }
 // --------------------------------------------------- the storage namespace --
 // Not a safe-area concern, but the same class of problem: something that looks
-// cosmetic and is not. The app is called Soppkart in some places and the
-// repository soppkompis in others, and a rename is planned. These five keys
-// must survive it - changing them silently destroys every existing user's
-// saved spots, session and settings, and an anonymous account exists only as a
-// refresh token under one of them.
+// cosmetic and is not. The app was renamed from Soppkart to Soppspor in
+// September 2026 and these five keys deliberately did not follow it - changing
+// them silently destroys every existing user's saved spots, session and
+// settings, and an anonymous account exists only as a refresh token under one
+// of them. The namespace is history, not branding, and it stays that way.
 {
   const keys = [...shell.matchAll(/localStorage[.][gs]etItem[(]"([^"]+)"/g)]
     .map(m => m[1]);

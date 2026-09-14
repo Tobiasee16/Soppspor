@@ -40,7 +40,7 @@ import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-DEFAULT_PAGE = ROOT / "data" / "processed" / "web_preview" / "soppkart.html"
+DEFAULT_PAGE = ROOT / "data" / "processed" / "web_preview" / "soppspor.html"
 CERT_DIR = ROOT / "data" / "interim" / "devcert"
 
 for _s in (sys.stdout, sys.stderr):
@@ -78,7 +78,7 @@ def ensure_cert(host: str) -> tuple[pathlib.Path, pathlib.Path]:
         subprocess.run(
             ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
              "-keyout", str(key), "-out", str(cert), "-days", "365",
-             "-subj", "/CN=soppkart-dev", "-addext", f"subjectAltName={san}"],
+             "-subj", "/CN=soppspor-dev", "-addext", f"subjectAltName={san}"],
             check=True, capture_output=True)
         print(f"generated a self-signed certificate in {CERT_DIR.relative_to(ROOT)}")
         return cert, key
@@ -96,7 +96,7 @@ def ensure_cert(host: str) -> tuple[pathlib.Path, pathlib.Path]:
     from cryptography.x509.oid import NameOID
 
     k = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "soppkart-dev")])
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "soppspor-dev")])
     alts = [x509.DNSName("localhost"), x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]
     try:
         alts.append(x509.IPAddress(ipaddress.ip_address(host)))
@@ -133,7 +133,7 @@ HEAD = """<!doctype html>
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Soppkart">
+<meta name="apple-mobile-web-app-title" content="Soppspor">
 <link rel="apple-touch-icon" href="/icons/icon-180.png">
 <link rel="icon" href="/icons/icon-192.png">
 <style>

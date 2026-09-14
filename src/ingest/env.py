@@ -48,7 +48,7 @@ from datetime import date, datetime
 
 TIMEOUT = 90
 PAUSE_S = 0.2
-UA = {"User-Agent": "soppkart/0.1 (research; contact via repo)"}
+UA = {"User-Agent": "soppspor/0.1 (habitat suitability research; support@soppspor.no)"}
 CTX = ssl.create_default_context()
 
 HOYDE_URL = "https://ws.geonorge.no/hoydedata/v1/punkt"

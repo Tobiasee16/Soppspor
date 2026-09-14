@@ -48,7 +48,7 @@ NX, NY = 1195, 1550
 FILL = -999.99
 
 TIMEOUT = 300
-UA = {"User-Agent": "soppkart/0.1 (research; contact via repo)"}
+UA = {"User-Agent": "soppspor/0.1 (habitat suitability research; support@soppspor.no)"}
 CTX = ssl.create_default_context()
 
 

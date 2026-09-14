@@ -44,7 +44,7 @@ for r in range(r0, r1+1):
         url = (f"https://cache.kartverket.no/v1/wmts/1.0.0/{layer}"
                f"/default/utm33n/{lvl}/{r}/{c}.png")
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "soppkart-preview"})
+            req = urllib.request.Request(url, headers={"User-Agent": "soppspor-preview (support@soppspor.no)"})
             im = Image.open(io.BytesIO(urllib.request.urlopen(req, timeout=60).read()))
             canvas.paste(im.convert("RGB"), ((c-c0)*TSZ, (r-r0)*TSZ))
         except Exception as e:

@@ -1,5 +1,5 @@
 [project]
-name = "soppkart"
+name = "soppspor"
 version = "0.0.1"
 description = "Fungal habitat suitability from public Norwegian geodata — Kristiansand, Agder"
 requires-python = ">=3.11"

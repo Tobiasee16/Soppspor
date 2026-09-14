@@ -153,7 +153,7 @@ def clip_stack(bbox, margin_m=3000.0) -> pathlib.Path:
 
 def colormap():
     from matplotlib.colors import LinearSegmentedColormap
-    cmap = LinearSegmentedColormap.from_list("soppkart_blue", BLUE_RAMP)
+    cmap = LinearSegmentedColormap.from_list("soppspor_blue", BLUE_RAMP)
     cmap.set_bad("#00000000")       # transparent where there is no value
     return cmap
 

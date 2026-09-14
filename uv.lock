@@ -1578,7 +1578,7 @@ wheels = [
 ]
 
 [[package]]
-name = "soppkart"
+name = "soppspor"
 version = "0.0.1"
 source = { virtual = "." }
 dependencies = [

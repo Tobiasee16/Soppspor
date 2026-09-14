@@ -29,7 +29,7 @@ import urllib.request
 SERVICE = ("https://kart.miljodirektoratet.no/arcgis/rest/services"
            "/naturtyper_nin/MapServer/0/query")
 
-USER_AGENT = "soppkart/0.1 (habitat suitability research; contact via repo)"
+USER_AGENT = "soppspor/0.1 (habitat suitability research; support@soppspor.no)"
 PAGE = 500
 
 # Attributes the suppression rule reads. Deliberately a short list: the service

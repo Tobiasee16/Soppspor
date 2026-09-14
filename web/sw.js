@@ -1,4 +1,4 @@
-/* Service worker: makes soppkart work with no signal, which is the condition
+/* Service worker: makes Soppspor work with no signal, which is the condition
    it is actually used in. A mushroom wood is the worst coverage you will meet
    all week, and a map that needs the network there is not a map.
 
@@ -25,7 +25,12 @@
    of this work; the point of keeping them here as well is that the HTTP cache
    is evicted on its own schedule and is not available offline by contract.
 */
-const VERSION = "soppkart-v2";
+/* Bumped for the rename to Soppspor. The prefix is part of every cache
+   name and `activate` deletes anything that does not start with it, so
+   this costs every existing install one full re-download - shell, basemap
+   tiles and zone tiles alike - and then cleans the old caches up. That is
+   acceptable once, before launch; it is not something to do casually. */
+const VERSION = "soppspor-v3";
 const SHELL = `${VERSION}-shell`;
 const TILES = `${VERSION}-tiles`;
 const DATA = `${VERSION}-data`;

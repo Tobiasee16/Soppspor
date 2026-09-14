@@ -1,4 +1,4 @@
-<title>Soppkart Kristiansand</title>
+<title>Soppspor Kristiansand</title>
 <style>
 :root{
   --bg:#f2f2f7; --card:#ffffff; --card-2:#f7f7f9; --sep:#dcdce0;
@@ -272,6 +272,11 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sf);
 .about{margin:0 18px;font-size:13px;color:var(--ink-3);line-height:1.55}
 .about p{margin:0 0 9px}
 .about b{color:var(--ink-2)}
+/* The only links in the app. Browser-default blue would be the loudest colour
+   on a page whose whole palette is one muted hue, so this reads as emphasised
+   body text that happens to be tappable. */
+.about a{color:var(--ink-2);text-decoration:underline;text-underline-offset:2px;
+  text-decoration-color:var(--ink-4)}
 .sheetList{margin:6px -18px 0}
 
 /* tab bar */
@@ -664,6 +669,10 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
         <p><b>Hvor de ligger.</b> På en database i EU, og på telefonen din.
           Kartbakgrunnen hentes fra Kartverket, som da ser hvilket område du
           ser på &mdash; ikke hva du har lagret.</p>
+        <p><b>Spørsmål.</b> Skriv til
+          <a href="mailto:support@soppspor.no">support@soppspor.no</a> &mdash; om
+          hva som er lagret om deg, om noe du vil ha slettet, eller om noe i
+          kartet ser feil ut.</p>
         <p><b>Angre alt.</b> Knappen under sletter alle stedene dine og hele
           kontoen, hos oss og her. Den kan ikke angres, og vi kan ikke hente det
           tilbake etterpå. Ta en kopi først under «Mine steder» hvis du vil
@@ -733,16 +742,18 @@ var PREF={theme:"auto",species:"",sel:null,base:"plain",trails:true,sync:true};
 try{ var raw=localStorage.getItem("soppkart.prefs");
   if(raw){ var p=JSON.parse(raw); for(var k in PREF) if(k in p) PREF[k]=p[k]; }
 }catch(e){}
-/* The five "soppkart." storage keys are a namespace, not a brand. Renaming
-   them is the one part of renaming this app that costs something real: every
-   existing user would find their saved spots, their session and their settings
-   gone, silently, with no error and nothing to restore from. An anonymous
-   account lives only as a refresh token under `soppkart.session`, so losing
-   that key loses the account itself.
+/* The five "soppkart." storage keys are a namespace, not a brand. The app was
+   renamed to Soppspor in September 2026 and these did not move, which was the
+   point of writing this down beforehand: renaming them is the one part of
+   renaming an app that costs something real. Every existing user would find
+   their saved spots, their session and their settings gone, silently, with no
+   error and nothing to restore from. An anonymous account lives only as a
+   refresh token under `soppkart.session`, so losing that key loses the account
+   itself.
 
-   Whatever the app ends up being called, these stay. If they ever genuinely
-   have to move, it needs a migration that reads the old keys, writes the new
-   ones and leaves the old ones alone for a season - not a find and replace. */
+   They stay. If they ever genuinely have to move, it needs a migration that
+   reads the old keys, writes the new ones and leaves the old ones alone for a
+   season - not a find and replace. */
 function savePrefs(){ try{ localStorage.setItem("soppkart.prefs",JSON.stringify(PREF)); }catch(e){} }
 function isDark(){
   var attr=document.documentElement.getAttribute("data-theme");

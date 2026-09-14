@@ -478,7 +478,7 @@ HEAD = """<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme:light)">
 <meta name="theme-color" content="#000000" media="(prefers-color-scheme:dark)">
-<meta name="description" content="Soppkart - et anslag fra offentlige kartdata om hvor terrenget ligner på steder sopp faktisk er funnet.">
+<meta name="description" content="Soppspor - et anslag fra offentlige kartdata om hvor terrenget ligner på steder sopp faktisk er funnet.">
 <meta name="robots" content="noindex">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
@@ -494,9 +494,9 @@ HEAD = """<!doctype html>
      beats edge-to-edge on a thing people use outdoors in sunlight. -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Soppkart">
+<meta name="apple-mobile-web-app-title" content="Soppspor">
 <meta name="mobile-web-app-capable" content="yes">
-<title>Soppkart</title>
+<title>Soppspor</title>
 </head>
 <body>
 """

@@ -40,7 +40,7 @@ COVERAGE = "nhm_dtm_topo_25833"
 CRS = "EPSG:25833"
 TIMEOUT = 300
 CTX = ssl.create_default_context()
-UA = {"User-Agent": "soppkart/0.1 (research)"}
+UA = {"User-Agent": "soppspor/0.1 (habitat suitability research; support@soppspor.no)"}
 
 # 3000 works and 4000 times out; leave headroom for a loaded server.
 MAX_TILE_PX = 2500

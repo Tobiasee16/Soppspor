@@ -1,4 +1,4 @@
--- soppkart: per-user storage for personal finds.
+-- Soppspor: per-user storage for personal finds.
 --
 -- Target: Supabase (Postgres 15+ with PostGIS). Apply with
 --   psql "$SUPABASE_DB_URL" -f backend/schema.sql

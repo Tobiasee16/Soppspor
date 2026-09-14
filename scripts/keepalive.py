@@ -64,7 +64,7 @@ def main() -> int:
         headers={"apikey": anon,
                  "Authorization": f"Bearer {anon}",
                  "Accept": "application/json",
-                 "User-Agent": "soppkart-keepalive"})
+                 "User-Agent": "soppspor-keepalive"})
     started = dt.datetime.now(dt.timezone.utc)
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as r:

@@ -71,7 +71,7 @@ OUT_MD = ROOT / "data" / "processed" / "basemap.md"
 PAYLOAD = ROOT / "data" / "processed" / "web_preview" / "payload.js"
 
 WMS = "https://wms.geonorge.no/skwms1/wms.{service}"
-USER_AGENT = "soppkart/0.1 (habitat suitability research)"
+USER_AGENT = "soppspor/0.1 (habitat suitability research; support@soppspor.no)"
 
 # Two layers, because they answer different questions. `plain` is the default
 # and is for orientation - where am I, what road is that. `topo` is for reading

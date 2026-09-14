@@ -37,15 +37,15 @@ function originFor(href) {
 }
 
 check("a site at the root returns the root",
-      originFor("https://soppkart.no/") === "https://soppkart.no/",
-      originFor("https://soppkart.no/"));
+      originFor("https://soppspor.no/") === "https://soppspor.no/",
+      originFor("https://soppspor.no/"));
 check("a page filename is stripped, so the link lands on the app not the file",
-      originFor("https://soppkart.no/index.html") === "https://soppkart.no/",
-      originFor("https://soppkart.no/index.html"));
+      originFor("https://soppspor.no/index.html") === "https://soppspor.no/",
+      originFor("https://soppspor.no/index.html"));
 check("a subpath deployment keeps its subpath",
-      originFor("https://user.github.io/soppkart/index.html")
-        === "https://user.github.io/soppkart/",
-      originFor("https://user.github.io/soppkart/index.html"));
+      originFor("https://user.github.io/soppspor/index.html")
+        === "https://user.github.io/soppspor/",
+      originFor("https://user.github.io/soppspor/index.html"));
 check("localhost with a port is preserved",
       originFor("http://localhost:8765/") === "http://localhost:8765/",
       originFor("http://localhost:8765/"));
@@ -53,8 +53,8 @@ check("a LAN address over https is preserved",
       originFor("https://192.168.1.50:8765/") === "https://192.168.1.50:8765/",
       originFor("https://192.168.1.50:8765/"));
 check("a deep link back into the app still resolves to the app root",
-      originFor("https://soppkart.no/kart") === "https://soppkart.no/",
-      originFor("https://soppkart.no/kart"));
+      originFor("https://soppspor.no/kart") === "https://soppspor.no/",
+      originFor("https://soppspor.no/kart"));
 
 // It must survive a context with no location at all rather than throwing -
 // the same shell runs inside a published artifact where auth cannot work.
