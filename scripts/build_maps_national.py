@@ -176,6 +176,31 @@ def country_mask(area: dict) -> pathlib.Path:
     return MASK
 
 
+def fitting_rows(pts, holdout, buffer_m: float) -> tuple[list[int], int]:
+    """Rows to fit on: outside the held-out region, minus a buffer ring.
+
+    A function rather than three lines inline, because inline it was written as
+
+        tr = [i for i in tr if i not in _excluded_by_buffer(pts, tr, te, ...)]
+
+    which re-runs the entire exclusion for **every one of 52,000 rows**. The
+    result is identical - the call is deterministic - so nothing was wrong with
+    the maps it produced, and nothing failed. It just went quadratic:
+    *A. muscaria* sat at 100% CPU with zero disk I/O for four and a half hours
+    before anyone looked at why the log had gone quiet.
+
+    `build_maps.py` had it right and this was a transcription error, which is
+    the argument for the helper: there is now one place to get it wrong.
+    """
+    from src.validate.harness import _excluded_by_buffer
+
+    in_hold = [(e, n) in holdout for e, n in pts]
+    te = [i for i, flag in enumerate(in_hold) if flag]
+    tr = [i for i, flag in enumerate(in_hold) if not flag]
+    dropped = _excluded_by_buffer(pts, tr, te, buffer_m)
+    return [i for i in tr if i not in dropped], len(te)
+
+
 def decimate(tif: pathlib.Path, cell_m: float) -> np.ndarray:
     """The raster read down to roughly `cell_m`, averaging over nodata.
 
@@ -330,11 +355,7 @@ def main() -> int:
         pts = [tuple(c) for c in d.coords]
         y, X = list(d.y), [list(r) for r in d.X]
 
-        from src.validate.harness import _excluded_by_buffer
-        in_hold = [(e, n) in holdout for e, n in pts]
-        te = [i for i, f in enumerate(in_hold) if f]
-        tr = [i for i, f in enumerate(in_hold) if not f]
-        tr = [i for i in tr if i not in _excluded_by_buffer(pts, tr, te, buffer_m)]
+        tr, n_held = fitting_rows(pts, holdout, buffer_m)
         predict = model.fit([X[i] for i in tr], [y[i] for i in tr])
         print(f"{name}: fitted on {len(tr):,} rows "
               f"({sum(y[i] for i in tr):,} presences), predicting ...", flush=True)
@@ -367,7 +388,8 @@ def main() -> int:
                 not_an_edibility_assessment="true",
                 terrain_resolution="32 m, native")
 
-        stats = {**stats, "n_train": len(tr), "seconds": round(time.time() - t0)}
+        stats = {**stats, "n_train": len(tr), "n_held_out": n_held,
+                 "seconds": round(time.time() - t0)}
         # Written before the preview, so a preview bug can never cost a
         # completed prediction again.
         meta.write_text(json.dumps(stats, indent=1), encoding="utf-8")

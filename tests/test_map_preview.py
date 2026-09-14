@@ -83,3 +83,64 @@ class TestDecimate:
     def test_a_cell_size_at_or_below_native_does_not_divide_by_zero(self, surface):
         got = bmn.decimate(surface, 1.0)
         assert got.shape == (H, W)
+
+
+class TestFittingRows:
+    """One exclusion pass, not one per row.
+
+    The inline version re-ran the whole buffer exclusion for every training
+    row. It returned the right answer and cost hours, which is the worst
+    combination: nothing fails, nothing is wrong, and the run simply does not
+    finish. The call count is therefore the thing worth asserting.
+    """
+
+    class Box:
+        """A square held-out region, standing in for Nordland."""
+
+        name = "Box"
+
+        def __init__(self, x0, y0, side):
+            self.b = (x0, y0, x0 + side, y0 + side)
+
+        def __contains__(self, pt):
+            x, y = pt
+            return self.b[0] <= x <= self.b[2] and self.b[1] <= y <= self.b[3]
+
+    def grid(self, n=40, step=1000.0):
+        return [(i * step, j * step) for i in range(n) for j in range(n)]
+
+    def test_the_exclusion_runs_exactly_once(self, monkeypatch):
+        import src.validate.harness as harness
+        calls = []
+        real = harness._excluded_by_buffer
+        monkeypatch.setattr(harness, "_excluded_by_buffer",
+                            lambda *a, **k: (calls.append(1), real(*a, **k))[1])
+        pts = self.grid()
+        bmn.fitting_rows(pts, self.Box(20_000.0, 20_000.0, 8_000.0), 4000.0)
+        assert calls == [1], f"exclusion ran {len(calls)} times, not once"
+
+    def test_held_out_points_are_not_in_the_training_set(self):
+        pts = self.grid()
+        hold = self.Box(20_000.0, 20_000.0, 8_000.0)
+        tr, n_held = bmn.fitting_rows(pts, hold, 4000.0)
+        assert n_held > 0
+        assert not any(pts[i] in hold for i in tr)
+
+    def test_the_buffer_removes_more_than_the_region_alone(self):
+        pts = self.grid()
+        hold = self.Box(20_000.0, 20_000.0, 8_000.0)
+        wide, _ = bmn.fitting_rows(pts, hold, 4000.0)
+        none, _ = bmn.fitting_rows(pts, hold, 0.0)
+        assert len(wide) < len(none)
+
+    def test_it_matches_what_build_maps_does_line_for_line(self):
+        """The Agder script is the reference; the national one must agree."""
+        from src.validate.harness import _excluded_by_buffer
+        pts = self.grid()
+        hold = self.Box(20_000.0, 20_000.0, 8_000.0)
+        in_pred = [p in hold for p in pts]
+        te = [i for i, f in enumerate(in_pred) if f]
+        tr = [i for i, f in enumerate(in_pred) if not f]
+        dropped = _excluded_by_buffer(pts, tr, te, 4000.0)
+        expected = [i for i in tr if i not in dropped]
+        assert bmn.fitting_rows(pts, hold, 4000.0)[0] == expected
