@@ -37,6 +37,35 @@ path exists as of step 2; the other two do not.
 
 ---
 
+## 2b. Drop PostGIS — PENDING
+
+Supabase's linter reports **RLS Disabled in Public** for
+`public.spatial_ref_sys`. That is PostGIS's own EPSG table — about 8,500 rows
+of coordinate-system definitions, nothing about anybody — so it is not a leak
+of user data. `public.spots` is the table that would be, and the linter does
+not flag it, because it has RLS enabled with own-row policies.
+
+It cannot be secured in place: `alter table public.spatial_ref_sys enable row
+level security` fails with *must be owner of table spatial_ref_sys*, since the
+table belongs to the extension and this project's `postgres` role is not a
+superuser. So the fix is to remove a dependency nothing uses — which migration
+001 already anticipated when it dropped `spots.geom`:
+
+> If this is the only thing that ever used it, `drop extension postgis;` is
+> safe to run separately once you have checked.
+
+Checked on 2026-09-14: no geometry or geography column, no `st_*` call and no
+`postgis.*` reference survives anywhere in `schema.sql` or the migrations.
+
+Run `backend/migrations/003_drop_postgis.sql`. It is one statement, it is safe
+to run twice, and it deliberately does **not** use `cascade` — a plain `drop
+extension` refuses if something still depends on PostGIS, which is a failure
+worth reading rather than working around.
+
+Saved spots are untouched: `spots` has had no PostGIS column since 001.
+
+---
+
 ## 2. Run the migrations — DONE and verified
 
 Verified live on 2026-09-12 by `python scripts/check_backend.py`, against the
