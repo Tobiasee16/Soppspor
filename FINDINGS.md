@@ -3227,6 +3227,155 @@ requirement holds unchanged: say plainly, wherever the model is described, that
 it is an estimate from public geodata and has never been validated against
 anybody's actual walks.
 
+## 23. The national suitability surfaces - 2026-09-14
+
+Nine GeoTIFFs at 32 m covering mainland Norway, eight species plus the null,
+from the model `transferability_norge.md` reports on. Built with
+`scripts/build_maps_national.py`; the table of files is in
+[suitability_maps_norge.md](data/processed/suitability_maps_norge.md).
+
+| | |
+|---|---|
+| grid | 38,173 x 48,022 at 32 m, EPSG:25833, taken from `terrain_norge_32m.tif` |
+| cells scored | **316,426,557** per species - 99.7% of mapped land |
+| unscored inside Norway | 912,020 (0.3%), a layer with no value at that cell |
+| size | about 1.13 GB each, 10.2 GB in total |
+| fitted on | fourteen fylker, minus a 4 km buffer around Nordland |
+
+Two choices were put to the team and taken: **32 m rather than 16**, because
+the national stack is 32 m natively and the app quantises to 128 m for display,
+so 32 m is already four times finer than anything reaches a screen; and **one
+model fitted on fourteen fylker, drawn over fifteen**, so the AUC quoted in
+section 22 describes the surface actually shipped rather than a sibling of it.
+
+### 23a. 145,152 km2 of sea nearly got scored as mushroom habitat
+
+Kartverket publishes fylke areas out to the territorial baseline rather than to
+the coastline. A fylke polygon therefore contains open water - 20 km south of
+Kristiansand is "inside Agder" by that test - and the first national mask,
+built from the fylke outlines alone, held **145,152 km2** of it.
+
+Phase 0 never met this problem. Its Agder DTM was sea-masked, so every sea cell
+carried a non-finite feature and was dropped for free.
+`build_terrain_national.py` deliberately dropped that mask when TWI was
+dropped, and stated in its own docstring that *prediction is masked to land
+regardless* - a specification for a step that had not been written yet.
+
+Sea is now cut using AR50's explicit sea class, which keeps an inland lake at
+sea level as land, exactly as the Agder flood fill did. The result is a useful
+check on the whole chain:
+
+| | |
+|---|---|
+| mask area | **324,955 km2** |
+| Norway's mainland land area | 323,808 km2 |
+| difference | **0.35%** |
+
+Nothing in the pipeline was tuned to produce that. It comes out of fifteen
+Kartverket polygons, an NGU-derived land cover class and a 32 m grid agreeing
+with a published figure none of them knew about.
+
+### 23b. The maps reproduce ecology nobody encoded
+
+The feature stack contains no latitude, no longitude and no "forest region"
+variable. It has terrain, climate, SR16 forest structure, substrate and land
+cover. What comes out:
+
+* ***C. tubaeformis*** is dark through Ostlandet, the inner fjord valleys and
+  the Trondelag lowlands, and pale across Hardangervidda, Jotunheimen and
+  Finnmarksvidda. That is Norway's productive spruce forest against everything
+  above the forest line.
+* ***C. cornucopioides*** concentrates hard in the far south - Oslofjord,
+  Vestfold, Telemark, southern Agder - and goes pale across the entire north.
+  Svart trompetsopp is a southern calcareous-deciduous species that barely
+  reaches Nordland, at 0.24x recording effort (section 16c).
+
+The two maps differ in the direction the ecology says they should, from the
+same stack and the same pipeline.
+
+### 23c. The null map is a third, independent check - and it is the one a beginner can see
+
+Sections 22a and 22c report the null's AUC: it cannot rank its own presences
+above background, blocked or on transfer. That is the statistical form of the
+check. The map is the visible form, and it asks a slightly different question:
+not "can the model rank" but "does the surface have structure in it".
+
+Measured as the ratio of the 98th to the 2nd percentile of each surface, over
+land, from the same rasters the app will read:
+
+| species | p2 | p98 | dynamic range | CV |
+|---|---|---|---|---|
+| *Craterellus cornucopioides* | 0.00000 | 0.02799 | **enormous** | 1.63 |
+| *Craterellus tubaeformis* | 0.00011 | 0.09258 | **814x** | 1.38 |
+| *Cantharellus cibarius* | 0.00028 | 0.12171 | 438x | 1.07 |
+| *Hydnum repandum* | 0.00021 | 0.02832 | 133x | 1.29 |
+| *Boletus edulis* | 0.00152 | 0.08064 | 53x | 0.95 |
+| *Suillus luteus* | 0.00341 | 0.06689 | 20x | 0.76 |
+| *Amanita muscaria* | 0.00598 | 0.09937 | 17x | 0.67 |
+| *Leccinum versipelle* | 0.01263 | 0.09612 | 8x | 0.49 |
+| **synthetic null** | 0.04902 | 0.06865 | **1.4x** | **0.10** |
+
+The null surface is **flat**: its brightest ground is 1.4 times its dimmest,
+against 8x to 800x for every real species, and its coefficient of variation is
+five to sixteen times lower than any of them. A model with no ecology in it
+produces a map with no pattern in it, which is what should happen and had never
+been shown at map level before.
+
+The ordering of the real species is worth reading too, because it was not
+arranged. The two most habitat-restricted species produce the most structured
+maps. *A. muscaria* - registered in CLAUDE.md as "conspicuous, photogenic,
+heavily over-recorded, not strongly habitat-restricted" and predicted worst of
+the three - sits second from bottom at 17x. *L. versipelle*, a birch associate
+that grows wherever birch does, is the flattest real species at 8x. The maps
+rank by habitat specificity without being asked to.
+
+This is not a fourth validation of the same thing. AUC asks whether presences
+rank above background; dynamic range asks whether the surface says anything at
+all. A map could in principle score well on AUC and still be nearly flat, and
+that map would be useless to a forager while looking fine in a table.
+
+### 23d. Two bugs, both mine, and what they actually cost
+
+Recorded because the failure modes are more interesting than the fix.
+
+**A quadratic buffer exclusion.** The national script inlined a call that
+`build_maps.py` hoists:
+
+    tr = [i for i in tr if i not in _excluded_by_buffer(pts, tr, te, ...)]
+
+which re-runs the whole exclusion for every one of 52,000 rows. The call is
+deterministic, so the answer was identical and the maps already produced were
+correct. It simply went quadratic: *A. muscaria* sat at 100% CPU with zero disk
+I/O for four and a half hours before the silent log was looked at. **The right
+answer arriving too slowly is a failure no assertion on the result can catch**,
+so the test that now guards it counts the calls rather than checking the output.
+
+**A one-character read bug that cost a completed prediction.** `read(band, ...)`
+with a scalar index already returns 2-D; the preview took `[0]` of it, which is
+the raster's top row - a 1,192-cell sliver of Arctic sea, entirely nodata - and
+so reported the whole national surface as empty. The GeoTIFF was correct the
+whole time. It cost 36 minutes because the check fired *after* the raster was
+written and the script exited before recording anything. Both halves are fixed:
+statistics are written before the preview is drawn, and a species whose GeoTIFF
+and sidecar both exist is skipped on the next run.
+
+The same `[0]` had already produced two wrong diagnostics earlier the same day,
+including a "2.7% of Norway is land" reading that sent me looking for a mask bug
+that did not exist.
+
+### 23e. A measurement lesson: watching the job changed the job
+
+Six of the nine species ran in 33 to 38 minutes. Three did not: 99, 112 and 130
+minutes. The first was the quadratic bug. **The other two were me** - running
+the test suite repeatedly, opening 1.1 GB rasters and redrawing previews while
+the build was competing for the same cores and the same file cache.
+
+That matters because it was used as evidence. When the first estimate came in
+high, the smoke test's 5.3-hour figure was written off as having measured a warm
+cache. It had not: at 35 minutes a species the honest total is 5.3 hours, which
+is exactly what it predicted. The estimate was sound and the monitoring
+invalidated it.
+
 ## Open questions
 
 - **Should the maps still be blurred at all?** `build_maps.py` applies a 500 m
