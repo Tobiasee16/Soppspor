@@ -122,7 +122,10 @@ const shell = fs.readFileSync(path.join(DIR, "..", "web", "shell.html"), "utf8")
 const js = shell.slice(shell.indexOf("<script>") + 8, shell.lastIndexOf("</script>"));
 
 // the app closes over `view`; expose it for assertions
-const probe = js.replace("size();\nview.cx=", "global.__view=view;\nsize();\nview.cx=");
+// Anchored on the boot call to size() rather than on the line after it: what
+// follows has changed twice, and an anchor that moves with unrelated edits
+// fails loudly here every time.
+const probe = js.replace("\nsize();\n", "\nglobal.__view=view;\nsize();\n");
 if (probe === js) throw new Error("could not install the view probe");
 (0, eval)(probe);
 flush(3);

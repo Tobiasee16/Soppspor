@@ -29,6 +29,7 @@ const VERSION = "soppkart-v2";
 const SHELL = `${VERSION}-shell`;
 const TILES = `${VERSION}-tiles`;
 const DATA = `${VERSION}-data`;
+const ZONES = `${VERSION}-zones`;
 
 /* Topographic tiles are 60-115 kB each, which is heavier than a typical slippy
    map tile, so this is an entry cap chosen against a size budget rather than a
@@ -37,6 +38,13 @@ const DATA = `${VERSION}-data`;
 const TILE_LIMIT = 900;
 
 const TILE_HOSTS = ["cache.kartverket.no", "wms.geonorge.no"];
+
+/* Zone tiles are the estimate itself, so they are worth keeping harder than
+   the basemap: 40 kB each, and a cap of 600 is about 24 MB, which covers a
+   large region at the 128 m display grid. They are immutable - a rebuild
+   writes a new directory rather than changing a tile in place - so cache-first
+   with no revalidation is correct rather than merely convenient. */
+const ZONE_LIMIT = 600;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -99,6 +107,20 @@ async function networkFirst(request, cacheName) {
   }
 }
 
+/* Cache-first and then kept. A tile already looked at must still be there
+   with no signal, which is the whole promise of an offline-first map. */
+async function zoneFirst(request) {
+  const cache = await caches.open(ZONES);
+  const hit = await cache.match(request);
+  if (hit) return hit;
+  const res = await fetch(request);
+  if (res && res.ok) {
+    await cache.put(request, res.clone());
+    trim(ZONES, ZONE_LIMIT);
+  }
+  return res;
+}
+
 async function shellFirst(request) {
   const cache = await caches.open(SHELL);
   const key = "./index.html";
@@ -124,6 +146,10 @@ self.addEventListener("fetch", (event) => {
   }
   if (url.origin !== self.location.origin) return;   // Supabase and the rest
 
+  if (url.pathname.indexOf("/zones/") >= 0 && url.pathname.endsWith(".png")) {
+    event.respondWith(zoneFirst(request));
+    return;
+  }
   if (url.pathname.endsWith("/conditions.json")) {
     event.respondWith(networkFirst(request, DATA));
     return;

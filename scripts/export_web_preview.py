@@ -127,14 +127,20 @@ def quantise(arr: np.ndarray) -> tuple[str, float, float]:
     return base64.b64encode(out.tobytes()).decode("ascii"), lo, hi
 
 
-def _drop_species_that_failed_validation(payload: dict, null_auc: float | None) -> None:
+def drop_species_that_failed_validation(payload: dict, null_auc: float | None) -> None:
     """Remove species whose held-out AUC cannot be told apart from the null.
 
     The rule, stated so it is a rule and not a judgement call made once the
     numbers were in: **a species ships only if the lower bound of its transfer
     bootstrap interval sits above the synthetic null's transfer AUC.** The null
     has no ecology in it by construction, so a species that cannot clear it on
-    the held-out extent has not been shown to know anything about Kristiansand.
+    the held-out extent has not been shown to know anything about the ground
+    it is about to be drawn over.
+
+    Public rather than private because the national build applies the same
+    rule to the same numbers. One rule, one implementation: a second copy is
+    a second thing to keep true, and the bar this enforces was registered in
+    advance precisely so it could not be re-decided per build.
 
     This is not the same thing as dropping a species because it scored badly.
     CLAUDE.md forbids that, and it is not happening: every species stays in
@@ -467,7 +473,7 @@ def main() -> int:
             print(f"  NOTE {key}: only {n} held-out records behind its AUC",
                   flush=True)
 
-        _drop_species_that_failed_validation(payload, null_auc)
+        drop_species_that_failed_validation(payload, null_auc)
 
     # --- where the map is deliberately vague, and why ---
     from src.features.suppress import _polygon_mask

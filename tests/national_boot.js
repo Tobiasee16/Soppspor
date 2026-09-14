@@ -36,9 +36,12 @@ global.window.SOPP_ENV = { hosted: true, roaming: true, bounds: plan.bounds };
  * ask for tiles it was told are empty" is a real question - one 404 per empty
  * tile per species is most of the Norwegian Sea on every pan. */
 const asked = [];
+/* Tiles may live outside the scenario directory: the national suite points
+ * this at the exporter's own output rather than copying 163 MB per run. */
+const TILES = plan.tilesRoot || DIR;
 global.fetch = function (url) {
   asked.push(url);
-  const p = path.join(DIR, url);
+  const p = path.join(/\.png$/.test(url) ? TILES : DIR, url);
   if (!/\.png$/.test(url) || !fs.existsSync(p))
     return Promise.resolve({ ok: false, status: 404 });
   const b = fs.readFileSync(p);
@@ -68,6 +71,15 @@ const probe = js.slice(0, at) + `
   zones: () => SEL.map(function(s){ return s._zones ? s._zones.paths.length : null; }),
   zoneOrigin: () => SEL.map(function(s){ return s._zones ? [s._zones.ox, s._zones.oy] : null; }),
   bytes: () => (SEL[0].bytes ? Buffer.from(SEL[0].bytes).toString("base64") : null),
+  /* How much of the loaded window is scored ground. "It settled" is not the
+     same as "there is anything there", and the national build opened on an
+     empty window once. */
+  scored: () => {
+    if (!SEL[0].bytes) return 0;
+    var n = 0, b = SEL[0].bytes;
+    for (var i = 0; i < b.length; i++) if (b[i]) n++;
+    return n;
+  },
   /* A world point, answered through whatever window happens to be loaded. The
      whole question of this suite is whether the answer depends on that. */
   probe: function(e, n){
@@ -109,7 +121,8 @@ async function settle() {
 (async () => {
   const out = { boot: true, tiled: app.tiled(), steps: [] };
   const note = stub.node("coverNote");
-  out.opened = { view: app.view(), settled: await settle(), win: app.win() };
+  out.opened = { view: app.view(), settled: await settle(), win: app.win(),
+                 zones: app.zones(), blank: app.blank(), scored: app.scored() };
   for (const st of plan.steps) {
     if (st.view) app.goTo(st.view[0], st.view[1], st.view[2]);
     if (st.toggle) app.toggle(st.toggle);

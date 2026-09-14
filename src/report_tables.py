@@ -68,6 +68,27 @@ def transfer_aucs(path: pathlib.Path, model: str = "maxent-style"
     return out, null_auc
 
 
+def fitted_counts(path: pathlib.Path) -> dict[str, int]:
+    """`{scientific name: records the model was fitted on}`, same table.
+
+    The interface quotes this in plain language - "2 302 funn i landet utenom
+    Nordland" - and a sentence with a number in it goes stale exactly as
+    quietly as a table does. Reading it back means a refit changes the prose
+    without anybody remembering to.
+    """
+    out: dict[str, int] = {}
+    if not path.exists():
+        return out
+    for cells in _rows(path, "held-out record counts"):
+        if len(cells) < 2 or cells[0].lower() == "set":
+            continue
+        try:
+            out[cells[0]] = int(cells[1].replace(",", "").replace(" ", ""))
+        except ValueError:
+            continue
+    return out
+
+
 def held_out_counts(path: pathlib.Path) -> dict[str, int]:
     """`{scientific name: held-out record count}` from the counts table.
 

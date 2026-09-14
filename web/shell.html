@@ -389,7 +389,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
       <p class="about" style="margin:12px 0 0"><b>Trykk for å skru arter av og på.</b>
         Du kan ha inntil fire på kartet samtidig; hver art har sin egen farge, og
         med flere valgt vises bare de beste områdene for hver.</p>
-      <p class="about" style="margin:8px 0 0">Det store tallet er
+      <p class="about" style="margin:8px 0 0" id="ab_species">Det store tallet er
         <b>treffsikkerhet</b>: AUC målt på Kristiansand etter at modellen er
         tilpasset på resten av Agder. 0,50 er ren gjetning, 1,00 er perfekt.
         Under står <b>hvor mange funn i Kristiansand tallet er målt på</b>.
@@ -427,11 +427,11 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
     <div class="panel" id="pOm">
       <h1>Om kartet</h1>
       <div class="doc">
-        <p class="lead">Kartet er et <b>anslag</b>, ikke en fasit. Det viser ikke hvor
+        <p class="lead" id="ab_lead">Kartet er et <b>anslag</b>, ikke en fasit. Det viser ikke hvor
           det står sopp. Det viser hvor terrenget <b>ligner på steder der arten faktisk
           er funnet før</b>, justert for hvor mye det har regnet i det siste &mdash;
           og det er noe annet.</p>
-        <p>Ingen har gått over Kristiansand og registrert hva som vokser hvor. Det
+        <p id="ab_intro">Ingen har gått over Kristiansand og registrert hva som vokser hvor. Det
           finnes bare spredte funn, samlet inn av folk som gikk der de pleier å gå.
           Modellen tar de funnene, lærer hva slags terreng de ligger i, og farger
           resten av kommunen etter hvor godt den ligner.</p>
@@ -439,7 +439,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
         <h2>Slik blir kartet til</h2>
 
         <div class="step"><span class="n">1</span><h3>Funnene hentes inn</h3>
-          <p>Fra <b>Artskart</b> (Artsdatabanken og GBIF-Norge), én art om gangen.
+          <p id="ab_s1">Fra <b>Artskart</b> (Artsdatabanken og GBIF-Norge), én art om gangen.
             For traktkantarell er det 248 funn i Agder etter at funn som ligger oppå
             hverandre er tynnet bort; de andre artene ligger mellom 126 og 396.
             Det finnes <b>ingen registrerte fravær</b> &mdash; ingen har notert
@@ -447,7 +447,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
             hele prosjektet.</p></div>
 
         <div class="step"><span class="n">2</span><h3>Vi korrigerer for hvor folk går</h3>
-          <p>Soppfunn klumper seg langs stier, veier og nær folk. En modell som får
+          <p id="ab_s2">Soppfunn klumper seg langs stier, veier og nær folk. En modell som får
             tilfeldige punkter å sammenligne med, lærer bare «nær vei». Derfor trekkes
             sammenligningspunktene fra <b>alle soppfunn i Agder</b> &mdash; 82 129
             registreringer, 3 882 etter tynning. Da har både funnene og
@@ -455,7 +455,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
             enn tilgjengelighet for å skille dem.</p></div>
 
         <div class="step"><span class="n">3</span><h3>Terrenget beskrives</h3>
-          <p>Hver 16&nbsp;m rute får <b>40 tall</b> knyttet til seg, fra offentlige
+          <p id="ab_s3">Hver 16&nbsp;m rute får <b>40 tall</b> knyttet til seg, fra offentlige
             kartdata:</p>
           <ul>
             <li><b>Terreng</b> fra Kartverkets høydemodell: høyde, helning, himmelretning,
@@ -470,7 +470,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
           </ul></div>
 
         <div class="step"><span class="n">4</span><h3>Modellen tilpasses</h3>
-          <p>En <b>MaxEnt-type modell</b> (L1-straffet logistisk regresjon med
+          <p id="ab_s4">En <b>MaxEnt-type modell</b> (L1-straffet logistisk regresjon med
             kvadratiske ledd) lærer hvilke kombinasjoner av de 40 tallene som skiller
             funnstedene fra sammenligningspunktene. Den tilpasses på <b>Agder minus
             Kristiansand</b>, pluss en 4 km sone rundt kommunen som også holdes unna.
@@ -481,18 +481,19 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
             flaten <b>jevnes ut</b> før den tegnes &mdash; en strek rundt enkeltruter
             ville vært en strek rundt støy.</p></div>
 
-        <div class="step"><span class="n">6</span><h3>Ferske forhold legges oppå</h3>
-          <p>Nedbøren de siste 21 døgnene hentes fra <b>MET seNorge</b> og sammenlignes
+        <div class="step"><span class="n">6</span><h3 id="ab_s6h">Ferske forhold legges oppå</h3>
+          <p id="ab_s6">Nedbøren de siste 21 døgnene hentes fra <b>MET seNorge</b> og sammenlignes
             med hva som er normalt der på den datoen. Ruter som har fått mer enn vanlig
             vektes opp, ruter som har fått mindre vektes ned. Så deles resultatet i de
             øverste <b>30&nbsp;%, 15&nbsp;% og 5&nbsp;%</b> innenfor kommunen.</p></div>
 
         <div class="warn">
-          <p><b>Sonene er en rangering, ikke en sannsynlighet.</b> «Topp» betyr at ruta
+          <p id="ab_zonewarn"><b>Sonene er en rangering, ikke en sannsynlighet.</b> «Topp» betyr at ruta
             er blant de 5&nbsp;% mest lovende <i>i Kristiansand</i>. Det sier ingenting
             om hvor mange sopp som står der, eller om det står noen i det hele tatt.</p>
         </div>
 
+        <div id="ab_clocks">
         <h2>To klokker: habitat og forhold</h2>
         <p>Kartet kombinerer to lag som oppdateres i helt ulikt tempo.</p>
         <ul>
@@ -519,6 +520,8 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
           <p>Trykk på en rute, så ser du begge tallene hver for seg.</p>
         </div>
 
+        </div>
+
         <h2>Hvordan vi vet om det virker i det hele tatt</h2>
         <p>Det er lett å lage et kart som ser overbevisende ut og ikke betyr noe.
           Tre ting er gjort for å hindre det:</p>
@@ -527,7 +530,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
             hverandre. Deler man tilfeldig, havner nabofunn på hver sin side og modellen
             får se fasiten. Her deles kartet i <b>7,5 km ruter</b> med en <b>4 km sone</b>
             som kastes, slik at test og trening ikke rører hverandre.</li>
-          <li><b>Overføringstest.</b> Modellen tilpasses på resten av Agder og testes
+          <li id="ab_transfer"><b>Overføringstest.</b> Modellen tilpasses på resten av Agder og testes
             én gang på Kristiansand, som den aldri har sett.</li>
           <li><b>En kontroll uten økologi.</b> Falske «funn» trekkes fra selve
             innsatsmønsteret, uten noe biologisk innhold. Den <i>skal</i> lande på 0,50.
@@ -536,12 +539,13 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
         </ul>
 
         <table id="aucTable"></table>
-        <p>AUC 0,50 er myntkast. 1,00 er perfekt. <b>Under 0,75 er svakt til
+        <p id="ab_auc">AUC 0,50 er myntkast. 1,00 er perfekt. <b>Under 0,75 er svakt til
           moderat</b> &mdash; bedre enn tilfeldig, langt fra pålitelig. Kolonnen
           til høyre er hvor mange funn i Kristiansand tallet er målt på; er den
           lav, er treffsikkerheten en pekepinn og ikke et mål. Kontrollen landet
           på 0,496, så korreksjonen for innsats holder.</p>
 
+        <div id="ab_order">
         <h2>Det som ikke gikk som forutsagt</h2>
         <p>Før noen modell ble kjørt, ble det skrevet ned hvilken rekkefølge vi ventet:
           traktkantarell best (den er kresen på fuktig mosegran), kantarell i midten,
@@ -557,8 +561,10 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
           skrevet ned på forhånd hvordan <i>de</i> skulle rangere, så de inngår ikke
           i testen over, og resultatet av den endres ikke av at de kom til.</p>
 
+        </div>
+
         <h2>Én art kom ikke gjennom</h2>
-        <p>Regelen er satt på forhånd: <b>en art vises bare hvis den slår kontrollen
+        <p id="ab_drop">Regelen er satt på forhånd: <b>en art vises bare hvis den slår kontrollen
           på terreng modellen aldri har sett.</b> Kontrollen er falske funn uten
           økologi i seg. Klarer ikke en art å skille seg fra den, har den ikke vist
           at den kan noe om Kristiansand, og da hører den ikke hjemme på et kart
@@ -569,14 +575,14 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
           er forskjell på hva som skal stå i en tabell og hva som skal tegnes som
           en blå sone til noen som skal bruke lørdagen på å gå dit.</p>
         <div class="warn">
-          <p><b>Flere av de andre hviler på få funn.</b> Kolonnen «Funn» i tabellen
+          <p id="ab_thin"><b>Flere av de andre hviler på få funn.</b> Kolonnen «Funn» i tabellen
             over er hvor mange registreringer i Kristiansand treffsikkerheten er
             målt på. Er den lav, er tallet en pekepinn og ikke et mål &mdash;
             artslisten merker de tynneste med «få funn».</p>
         </div>
 
         <h2>Svakheter du bør kjenne til</h2>
-        <ul>
+        <ul id="ab_weak">
           <li><b>Høyde over havet dominerer.</b> Den enkeltvariabelen bærer modellen
             mer enn noen annen. I dette landskapet henger høyde tett sammen med avstand
             til sjø og til by, så noe av «økologien» kan være geografi i forkledning.</li>
@@ -1208,7 +1214,7 @@ function ztFitMpp(){
    rectangle is mostly sea. What matters is the set of cells the model actually
    scores: it frames the opening view, and everything outside it is dimmed. */
 var maskC=document.createElement("canvas");
-var DATA=null;
+var DATA=null,HOME=null;
 if(TILED){
   /* No veil in a national build. The veil dims what the model never scored,
      which over Kristiansand is the Skagerrak and most of the rectangle; over
@@ -1223,6 +1229,26 @@ if(TILED){
   DATA = tr1<0 ? GRID.slice()
        : [NOX+tc0*TP*CELL, NOY-Math.min(NH,(tr1+1)*TP)*CELL,
           NOX+Math.min(NW,(tc1+1)*TP)*CELL, NOY-tr0*TP*CELL];
+  /* Where the map opens, which is not the middle of that rectangle. Norway is
+     a long diagonal country, so the centre of any box drawn around it is out
+     in the Norwegian Sea - the first national build opened there, on a screen
+     with no zones and nothing to say why.
+
+     The median occupied tile row, and then the median occupied column within
+     that row. Both are guaranteed to exist, and a median lands in the mass of
+     the country rather than in the middle of its bounding box. It is still an
+     arbitrary place; it is simply an arbitrary place with ground in it, and a
+     position fix replaces it a moment later. */
+  var rows={},r,c;
+  D.species.forEach(function(sp){(sp.tiles||[]).forEach(function(id){
+    var p=id.split("_");
+    (rows[p[0]]||(rows[p[0]]=[])).push(+p[1]);});});
+  var rk=Object.keys(rows).map(Number).sort(function(a,b){return a-b;});
+  if(rk.length){
+    r=rk[rk.length>>1];
+    c=rows[r].sort(function(a,b){return a-b;})[rows[r].length>>1];
+    HOME=[NOX+(c+0.5)*TP*CELL, NOY-(r+0.5)*TP*CELL];
+  }
 }else{
 maskC.width=GW;maskC.height=GH;
 (function(){
@@ -2165,7 +2191,10 @@ function manualOffer(msg){
     card.classList.remove("on");
     setPlacing(true,"Trykk på kartet der du står.");});
 }
-var PILL_META="Kristiansand · anslag";
+/* What the pill says under the species name when one is chosen. It names
+   the area the estimate covers, so it comes from the payload rather than
+   from here: the same shell serves one kommune and the whole country. */
+var PILL_META=(D.meta&&D.meta.area_label)||"Kristiansand · anslag";
 function toast(msg){
   var el=document.getElementById("pillMeta");
   el.textContent=msg;
@@ -2867,7 +2896,7 @@ function renderPill(){
   if(!el)return;
   el.textContent=SEL.length===1?SEL[0].no:SEL.length+" arter";
   var meta=document.getElementById("pillMeta");
-  if(meta)meta.textContent=SEL.length===1?"Kristiansand · anslag"
+  if(meta)meta.textContent=SEL.length===1?PILL_META
     :SEL.map(function(x){return x.no;}).join(", ");
 }
 /* The synthetic null is a validation device, not a mushroom. Offering it in
@@ -2921,6 +2950,25 @@ function renderSpecies(){renderInto(spSheetList);}
    the next time the model is refitted - which is exactly what would have
    happened here, silently, the moment five species were added. Built from the
    payload instead, so it cannot disagree with the picker. */
+/* Where the estimate was tested. Named once, because three separate pieces
+   of copy quote it and a build that changes the held-out region must not be
+   able to change only two of them. */
+var TESTED_ON=(D.meta&&D.meta.tested_on)||"Kristiansand";
+
+/* Region-specific prose, replaced from the payload when the build is not the
+   one the markup describes. The text lives next to the numbers it quotes -
+   scripts/build_hosted.py reads those straight out of the run reports - rather
+   than being duplicated here, and the markup stays the readable default for
+   the build it was written for.
+
+   Deliberately a replacement rather than a second copy in the file. Two sets
+   of prose in one document is two sets to keep true, and the one nobody is
+   looking at is the one that goes stale. */
+if(D.about) Object.keys(D.about).forEach(function(k){
+  var el=document.getElementById(k);
+  if(el)el.innerHTML=D.about[k];
+});
+
 (function aucTable(){
   var t=document.getElementById("aucTable");
   if(!t)return;
@@ -2950,7 +2998,7 @@ function renderSpecies(){renderInto(spSheetList);}
     h+='<p><b>'+sp.no+'</b> (<i>'+sp.scientific+'</i>) traff '
       +String(sp.transfer_auc).replace(".",",")+' mot kontrollens '
       +String((D.meta.null_transfer_auc||0.5).toFixed(2)).replace(".",",")
-      +', målt på bare '+sp.held_out_n+' funn i Kristiansand. '
+      +', målt på bare '+sp.held_out_n+' funn i '+TESTED_ON+'. '
       +'Usikkerheten spenner fra '+String(sp.transfer_ci||"").replace(/-/," til ").replace(/\./g,",")
       +' &mdash; det er ikke til å skille fra ren gjetning, så arten vises ikke.</p>';
   });
@@ -3338,7 +3386,8 @@ if(window.matchMedia) try{ window.matchMedia("(prefers-color-scheme:dark)")
   .addEventListener("change",function(){ if(PREF.theme==="auto") draw(); }); }catch(e){}
 
 size();
-view.cx=(DATA[0]+DATA[2])/2; view.cy=(DATA[1]+DATA[3])/2;
+if(!HOME) HOME=[(DATA[0]+DATA[2])/2,(DATA[1]+DATA[3])/2];
+view.cx=HOME[0]; view.cy=HOME[1];
 view.mpp=Math.min(fitMpp(),maxMpp());
 /* A national build would otherwise open on the whole country, where the zones
    are not drawn at all - a first screen without the one thing the user came
