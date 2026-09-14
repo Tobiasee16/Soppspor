@@ -65,11 +65,15 @@ in the schema rather than in client code, where they could be forgotten:
    psql "$SUPABASE_DB_URL" -f backend/schema.sql
    ```
    or paste it into the SQL editor. It is idempotent.
-4. Schedule the tombstone purge (SQL editor, needs `pg_cron`):
-   ```sql
-   select cron.schedule('purge-spot-tombstones', '17 3 * * *',
-                        $$select public.purge_tombstones()$$);
-   ```
+4. **Schedule the tombstone purge.** Paste
+   `migrations/004_schedule_tombstone_purge.sql` into the SQL editor. It
+   enables `pg_cron`, schedules the job, and carries the queries to verify it
+   afterwards.
+
+   This is not housekeeping any more. `web/personvern.html` tells the reader
+   that a deleted spot is removed permanently within 30 days, and nothing
+   removes it unless this job runs. **Do this before publishing the policy**,
+   not after.
 5. Give me the Project URL and anon key and I will wire the client sync layer
    to them. Until then the app keeps working exactly as it does now, entirely
    on the device.

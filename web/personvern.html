@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="no">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme:light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme:dark)">
+<meta name="description" content="Hva Soppspor lagrer om deg, hvem som kan se det, og hvordan du får det slettet.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<title>Personvern &mdash; Soppspor</title>
+<style>
+/* The app's own tokens, copied rather than imported: this page has to render
+   on its own, before any of the app has loaded, and on a phone that has never
+   opened it. Keep in step with the :root block in shell.html. */
+:root{
+  --bg:#f2f2f7; --card:#ffffff; --sep:#dcdce0;
+  --ink:#000; --ink-2:#3c3c43; --ink-3:#8a8a8e; --ink-4:#c6c6ca;
+  --sf:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display",
+      "Helvetica Neue",Helvetica,Arial,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#000; --card:#1c1c1e; --sep:#38383a;
+  --ink:#fff; --ink-2:#ebebf5; --ink-3:#8e8e93; --ink-4:#48484a;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink-2);font-family:var(--sf);
+  font-size:15px;line-height:1.6;-webkit-text-size-adjust:100%}
+main{max-width:640px;margin:0 auto;padding:28px 20px 64px;
+  padding-left:max(20px,env(safe-area-inset-left));
+  padding-right:max(20px,env(safe-area-inset-right));
+  padding-bottom:max(64px,env(safe-area-inset-bottom))}
+h1{font-size:26px;line-height:1.25;color:var(--ink);margin:0 0 6px;letter-spacing:-.4px}
+h2{font-size:17px;color:var(--ink);margin:34px 0 8px;letter-spacing:-.2px}
+h3{font-size:15px;color:var(--ink);margin:20px 0 4px}
+p,li{margin:0 0 11px}
+ul{margin:0 0 11px;padding-left:20px}
+li{margin:0 0 6px}
+b,strong{color:var(--ink);font-weight:600}
+a{color:var(--ink-2);text-decoration:underline;text-underline-offset:2px;
+  text-decoration-color:var(--ink-4)}
+.upd{color:var(--ink-3);font-size:13px;margin:0 0 4px}
+.back{display:inline-block;margin:0 0 22px;font-size:14px}
+.sum{background:var(--card);border:1px solid var(--sep);border-radius:12px;
+  padding:16px 18px 6px;margin:18px 0 8px}
+.sum ul{padding-left:18px}
+table{border-collapse:collapse;width:100%;margin:0 0 12px;font-size:14px}
+th,td{text-align:left;vertical-align:top;padding:7px 10px 7px 0;
+  border-bottom:1px solid var(--sep)}
+th{color:var(--ink);font-weight:600;white-space:nowrap}
+footer{margin-top:40px;padding-top:16px;border-top:1px solid var(--sep);
+  color:var(--ink-3);font-size:13px}
+</style>
+</head>
+<body>
+<main>
+
+<a class="back" href="./">&larr; Tilbake til kartet</a>
+
+<h1>Personvern i Soppspor</h1>
+<p class="upd">Sist oppdatert 15. september 2026</p>
+
+<div class="sum">
+<ul>
+  <li>Appen virker <b>uten konto</b> og <b>uten nett</b>.</li>
+  <li>Det eneste vi lagrer om deg er <b>stedene du selv lagrer</b>, og
+      e-postadressen din hvis du velger å legge den inn.</li>
+  <li>Stedene dine brukes <b>aldri</b> til å lage kartet.</li>
+  <li>Ingen sporing, ingen analyseverktøy, ingen annonser. Ingenting deles eller
+      selges.</li>
+  <li>Du kan <b>slette alt selv</b>, når som helst, uten å spørre oss.</li>
+</ul>
+</div>
+
+<h2>Hvem er ansvarlig</h2>
+<p>Behandlingsansvarlig for Soppspor er <b>Tobias Engedal Ek</b>, som
+privatperson. Spørsmål om personvern, innsyn eller sletting går til
+<a href="mailto:support@soppspor.no">support@soppspor.no</a>.</p>
+
+<h2>Hva vi lagrer</h2>
+<p>Når du lagrer et sted i kartet, lagres dette &mdash; og ikke noe annet:</p>
+
+<table>
+<tr><th>Posisjon</th><td>Lengde- og breddegrad for stedet du lagret.</td></tr>
+<tr><th>Dato</th><td>Datoen du satte på stedet.</td></tr>
+<tr><th>Notat</th><td>Teksten du selv skrev, inntil 2000 tegn. Kan være tom.</td></tr>
+<tr><th>Art</th><td>Hvilken art kartet viste da du lagret stedet.</td></tr>
+<tr><th>Tidspunkt</th><td>Når raden ble opprettet og sist endret. Dette brukes
+  til å holde flere enheter i takt.</td></tr>
+<tr><th>En id</th><td>Et tilfeldig tall som skiller stedet fra de andre dine.</td></tr>
+<tr><th>E-post</th><td>Bare hvis du legger den inn, og bare for at du skal kunne
+  logge inn igjen.</td></tr>
+</table>
+
+<p>Vi lagrer <b>ikke</b> navn, telefonnummer, adresse, fødselsdato, kontakter,
+bilder, enhets-id, annonse-id eller posisjonshistorikk. Vi fører ingen logg over
+hvor du har vært &mdash; bare over de stedene du selv valgte å lagre.</p>
+
+<h2>Hva vi ikke gjør med dem</h2>
+<p><b>Stedene dine er aldri med på å lage kartet.</b> Soneanslaget er regnet ut
+fra offentlige datakilder alene: artsobservasjoner fra Artskart (Artsdatabanken
+og GBIF-Norge), skogdata fra NIBIO, terreng og kart fra Kartverket, løsmasser fra
+NGU og nedbør fra Meteorologisk institutt. Ingen brukers steder inngår &mdash;
+ikke samlet, ikke anonymisert, ikke frivillig.</p>
+<p>Stedene blir aldri slått sammen med andres, aldri vist til andre brukere,
+aldri delt med tredjeparter, aldri brukt til statistikk og aldri solgt.</p>
+
+<h2>Hvem som kan se stedene dine</h2>
+<p><b>Ingen andre brukere.</b> Det er en regel i selve databasen
+(&laquo;row-level security&raquo;), ikke en innstilling i appen, og den gjelder
+hver eneste spørring: en bruker kan bare lese sine egne rader.</p>
+<p><b>Vi som drifter appen kan teknisk sett lese dem, og vi gjør det ikke.</b>
+Stedene er lagret som vanlige rader, ikke kryptert slik at bare du har nøkkelen.
+Det er et bevisst valg: krypterte steder kunne ikke hentes tilbake med bare en
+e-postadresse hvis du mister telefonen. Vi sier det heller rett ut enn å la det
+være underforstått. Det du har som garanti er databasereglene over, at du kan
+slette alt selv, og at du kan la være å slå på synkronisering i det hele tatt
+&mdash; da forlater ikke stedene telefonen din.</p>
+
+<h2>Konto</h2>
+<p>Du trenger ingen konto for å bruke kartet, og du trenger ingen konto for å
+lagre steder på din egen telefon.</p>
+<p>Slår du på synkronisering, opprettes en <b>anonym konto</b>: et tilfeldig
+nummer, uten navn og uten e-post. Legger du siden til en e-postadresse, er det
+utelukkende for at du skal kunne logge inn igjen på en ny telefon. Vi sender deg
+en innloggingslenke; vi lagrer aldri noe passord. Innloggings-e-poster sendes
+gjennom Supabase, som driver databasen.</p>
+
+<h2>Hvor dataene ligger</h2>
+<ul>
+  <li><b>På telefonen din</b>, i nettleserens eget lager, så appen virker uten
+      nett.</li>
+  <li><b>Hos Supabase</b>, i regionen <code>eu-west-1</code> (Irland), altså
+      innenfor EU. Supabase er databehandler for oss.</li>
+</ul>
+
+<h2>Hvem andre får se noe</h2>
+<p>Appen snakker med nøyaktig to tjenester utenfor telefonen din:</p>
+<ul>
+  <li><b>Kartverket</b> leverer kartbakgrunnen. De ser IP-adressen din og hvilket
+      kartutsnitt du ser på &mdash; ikke hva du har lagret, og ikke hvilken art
+      du ser etter.</li>
+  <li><b>Supabase</b> lagrer stedene dine og håndterer innlogging, som beskrevet
+      over.</li>
+</ul>
+<p>Nedbørstallene hentes ikke mens du bruker appen: de følger med selve appen som
+en ferdig fil, så Meteorologisk institutt får aldri vite at det er du som ser på
+dem. Nettstedet som serverer appen ser IP-adressen din i vanlige tjenerlogger,
+slik alle nettsteder gjør.</p>
+<p>Det finnes ingen analyseverktøy, ingen sporingspiksler, ingen
+informasjonskapsler til reklame og ingen tredjeparts skript i appen.</p>
+
+<h2>Hvor lenge vi lagrer</h2>
+<ul>
+  <li><b>Stedene dine</b> lagres til du sletter dem.</li>
+  <li><b>Et slettet sted</b> fjernes fra enhetene dine med en gang. På serveren
+      merkes raden som slettet en kort stund, slik at de andre enhetene dine får
+      beskjed om at stedet er borte. Merkede rader fjernes permanent innen
+      30 dager.</li>
+  <li><b>Sletter du kontoen</b>, fjernes både stedene og selve kontoen med en
+      gang, uten mellomsteg.</li>
+  <li><b>På telefonen</b> ligger dataene til du sletter dem, sletter nettleserens
+      data, eller avinstallerer appen.</li>
+</ul>
+
+<h2>Rettighetene dine</h2>
+<p>Du har rett til innsyn i det vi har om deg, til å rette det, til å få det
+slettet, til å ta det med deg, og til å protestere mot behandlingen. De tre
+første kan du bruke direkte i appen, uten å kontakte oss:</p>
+<ul>
+  <li><b>Innsyn og kopi:</b> <i>Mine steder &rarr; Kopier stedene mine</i> gir deg
+      alt du har lagret, i lesbar form du kan lime inn hvor du vil.</li>
+  <li><b>Retting:</b> åpne stedet i kartet og endre det.</li>
+  <li><b>Sletting:</b> <i>Innstillinger &rarr; Personvern &rarr; Slett kontoen og
+      alle stedene</i>. Den kan ikke angres, og vi kan ikke hente det tilbake
+      etterpå.</li>
+</ul>
+<p>Vil du heller be oss gjøre det, skriv til
+<a href="mailto:support@soppspor.no">support@soppspor.no</a>. Du har også rett
+til å klage til <b>Datatilsynet</b> hvis du mener vi behandler opplysninger om
+deg i strid med regelverket.</p>
+
+<h2>Behandlingsgrunnlag</h2>
+<p>Vi behandler stedene dine og e-postadressen din for å levere den tjenesten du
+selv ba om &mdash; å lagre steder og finne dem igjen på en annen enhet. Det
+rettslige grunnlaget er oppfyllelse av avtale, personvernforordningen artikkel
+6 nr. 1 bokstav b. Slår du av synkronisering, behandler vi ingenting: da ligger
+alt bare på telefonen din.</p>
+
+<h2>Barn</h2>
+<p>Appen er ikke rettet mot barn og samler ikke bevisst inn opplysninger om
+barn. Den inneholder ingen sosiale funksjoner og ingen deling mellom brukere.</p>
+
+<h2>Sikkerhet</h2>
+<p>All trafikk går over HTTPS. Tilgang til dine rader er styrt av databasens egne
+regler, ikke av appen, slik at en feil i appen ikke kan gi tilgang til andres
+data. Nøkkelen appen bruker er en offentlig nøkkel som ikke gir tilgang til noe
+på egen hånd.</p>
+
+<h2>Endringer</h2>
+<p>Endres denne siden, oppdateres datoen øverst. Endringer som betyr noe for hva
+vi lagrer eller hvem som ser det, varsles i appen.</p>
+
+<h2>En påminnelse om hva kartet er</h2>
+<p>Sonene i kartet er et <b>anslag</b> regnet ut fra offentlige kartdata, ikke en
+fasit, og de er aldri kontrollert mot noens faktiske turer. Soppspor sier aldri
+om noe er spiselig og kjenner ikke igjen arter fra bilder. Det du finner, svarer
+du for selv.</p>
+
+<footer>
+<p>Soppspor &middot; Behandlingsansvarlig: Tobias Engedal Ek &middot;
+<a href="mailto:support@soppspor.no">support@soppspor.no</a></p>
+<p>Trenger du denne siden på engelsk, skriv til adressen over.</p>
+</footer>
+
+</main>
+</body>
+</html>

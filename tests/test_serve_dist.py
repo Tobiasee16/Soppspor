@@ -108,6 +108,27 @@ class TestTheAppStillRoams:
         assert h.headers_out["Cache-Control"] == "no-cache"
 
 
+class TestThePrivacyPolicyIsItsOwnPage:
+    """It is a second real page behind a single-page fallback, which is exactly
+    the shape that goes wrong quietly: a rewrite that swallows it returns the
+    app with a 200, so a reader who asked for the policy gets the map and no
+    error, and nobody finds out."""
+
+    def test_it_is_served_as_itself(self, dist):
+        (dist / "personvern.html").write_text(
+            "<!doctype html>personvern", encoding="utf-8")
+        handled, h = get(dist, "/personvern.html")
+        assert handled and h.sent == [("ok", 200)]
+        assert b"personvern" in h.body
+        assert b"page" not in h.body, "the fallback served the app instead"
+
+    def test_a_build_that_lost_it_404s_rather_than_showing_the_map(self, dist):
+        handled, h = get(dist, "/personvern.html")
+        assert handled
+        assert h.sent == [("error", 404)], h.sent
+        assert b"page" not in h.body
+
+
 class TestTheDeployedRuleMatches:
     """The host has to behave the way the local server does, or the build that
     was tested is not the build that is live."""

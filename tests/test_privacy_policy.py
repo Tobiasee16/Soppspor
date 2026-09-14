@@ -1,0 +1,163 @@
+"""The privacy policy has to keep agreeing with the code it describes.
+
+Spots are stored as readable rows, protected by row-level security and by a
+policy of not looking at them. That was a deliberate decision, and it moves the
+weight onto the two things that make such a promise credible to somebody who
+cannot audit it: a working delete-everything path, and a plain statement of what
+is held. The delete path has tests. This is the other half.
+
+A privacy policy fails silently. Nothing crashes when it starts describing a
+different product - when a third party is added and the list of who sees what is
+not, when a retention window is changed in SQL and not in the prose, when the
+page stops being copied into the build and the link in settings 404s. So the
+checks here deliberately tie the prose to the thing it claims about: the hosts
+the app actually contacts, the interval `purge_tombstones()` actually uses, the
+length limit the database actually enforces.
+"""
+from __future__ import annotations
+
+import json
+import pathlib
+import re
+
+import pytest
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+POLICY = ROOT / "web" / "personvern.html"
+
+CONTROLLER = "Tobias Engedal Ek"
+SUPPORT = "support@soppspor.no"
+
+# Every external host the app can contact, and the party the policy has to name
+# for it. A host with no entry here fails the test rather than passing quietly:
+# adding a third party is exactly the change that must not happen without the
+# policy following it.
+PARTIES = [
+    (re.compile(r"(?:^|\.)kartverket\.no$|(?:^|\.)geonorge\.no$"), "Kartverket"),
+    (re.compile(r"(?:^|\.)supabase\.(?:co|com)$"), "Supabase"),
+]
+
+
+@pytest.fixture(scope="module")
+def policy() -> str:
+    """The page as written, for checks about its structure."""
+    assert POLICY.exists(), "web/personvern.html is gone; settings links to it"
+    return POLICY.read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
+def prose(policy: str) -> str:
+    """The page with its whitespace collapsed, for checks about its wording.
+
+    Prose gets rewrapped. A phrase check that fails because an editor moved a
+    line break is a test that trains people to ignore it.
+    """
+    return re.sub(r"\s+", " ", policy)
+
+
+def contacted_hosts() -> set[str]:
+    """Hosts the shipped app can reach, from the sources that decide them."""
+    hosts: set[str] = set()
+    for rel in ("web/shell.html", "web/sw.js"):
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        hosts |= set(re.findall(r"https://([a-zA-Z0-9.-]+)", text))
+        # sw.js lists cacheable tile hosts as bare strings, not URLs.
+        for m in re.finditer(r"TILE_HOSTS\s*=\s*\[([^\]]*)\]", text):
+            hosts |= set(re.findall(r'"([a-zA-Z0-9.-]+)"', m.group(1)))
+    cfg = ROOT / "config" / "supabase.json"
+    if cfg.exists():
+        url = json.loads(cfg.read_text(encoding="utf-8")).get("url", "")
+        m = re.match(r"https://([a-zA-Z0-9.-]+)", url)
+        if m:
+            hosts.add(m.group(1))
+    return hosts
+
+
+class TestItNamesTheRightPeople:
+    def test_it_names_the_data_controller(self, prose):
+        assert CONTROLLER in prose
+
+    def test_it_gives_the_service_address(self, prose):
+        assert SUPPORT in prose
+
+    def test_it_ships_no_other_address(self, prose):
+        """A personal address in a policy is a personal address on the web."""
+        found = set(re.findall(r"[\w.+-]+@[\w-]+\.[\w.]+", prose))
+        assert found == {SUPPORT}, found
+
+
+class TestItDescribesTheAppThatExists:
+    def test_every_third_party_the_app_contacts_is_named(self, prose):
+        """The check that matters: adding a host without updating the policy."""
+        for host in sorted(contacted_hosts()):
+            party = next((n for rx, n in PARTIES if rx.search(host)), None)
+            assert party, (
+                f"{host} is contacted by the app and this test does not know "
+                "who it belongs to - name the party and add it to PARTIES")
+            assert party in prose, f"{host} is contacted but {party} is unnamed"
+
+    def test_the_region_matches_what_was_checked(self, prose):
+        """Recorded in backend/DECISION.md after being verified in the console."""
+        decision = (ROOT / "backend" / "DECISION.md").read_text(encoding="utf-8")
+        assert "eu-west-1" in decision, "the recorded region moved; check the policy"
+        assert "eu-west-1" in prose
+
+    def test_the_retention_window_matches_the_function(self, prose):
+        """`purge_tombstones()` decides this, not the prose."""
+        schema = (ROOT / "backend" / "schema.sql").read_text(encoding="utf-8")
+        m = re.search(r"purge_tombstones\(older_than interval default '(\d+) (\w+)'",
+                      schema)
+        assert m, "purge_tombstones() no longer declares a default interval"
+        assert m.group(2).startswith("day"), m.group(0)
+        assert f"{m.group(1)} dager" in prose, (
+            f"schema purges after {m.group(1)} days; the policy says otherwise")
+
+    def test_the_note_limit_matches_the_constraint(self, prose):
+        schema = (ROOT / "backend" / "schema.sql").read_text(encoding="utf-8")
+        m = re.search(r"char_length\(note\) <= (\d+)", schema)
+        assert m, "the note length constraint is gone"
+        assert f"{m.group(1)} tegn" in prose
+
+    def test_it_repeats_the_two_permanent_safety_lines(self, prose):
+        """Never says whether something is edible, never identifies from a photo.
+
+        These are the two constraints the product may never relax, so the one
+        document a careful reader will actually open should carry them.
+        """
+        assert "spiselig" in prose
+        assert "bilder" in prose or "bilde" in prose
+
+    def test_it_says_the_map_is_an_estimate(self, prose):
+        assert "anslag" in prose and "ikke en fasit" in prose
+
+
+class TestItIsActuallyReachable:
+    def test_the_app_links_to_it(self):
+        shell = (ROOT / "web" / "shell.html").read_text(encoding="utf-8")
+        assert 'href="personvern.html"' in shell
+
+    def test_the_build_copies_it(self):
+        build = (ROOT / "scripts" / "build_hosted.py").read_text(encoding="utf-8")
+        assert "personvern.html" in build
+
+    def test_it_is_routed_ahead_of_the_single_page_catch_all(self):
+        """A rewrite that swallows a real file turns a missing page into a 200."""
+        build = (ROOT / "scripts" / "build_hosted.py").read_text(encoding="utf-8")
+        mine = build.index("/personvern.html  /personvern.html  200")
+        catch = build.index('"/*  /index.html  200"')
+        assert mine < catch, "the catch-all would swallow the policy"
+
+    def test_it_is_readable_offline(self):
+        """People often open it while deciding to delete their account, and
+        "you can read what we do with your data, provided you have signal" is
+        not much of a commitment."""
+        sw = (ROOT / "web" / "sw.js").read_text(encoding="utf-8")
+        m = re.search(r"addAll\(\[([^\]]*)\]\)", sw)
+        assert m, "the precache list changed shape"
+        assert "personvern.html" in m.group(1)
+
+    def test_it_stands_alone_as_a_page(self, policy):
+        """No app, no payload, no service worker needed to read it."""
+        assert policy.lstrip().lower().startswith("<!doctype html>")
+        assert '<html lang="no">' in policy
+        assert "<script" not in policy.lower()

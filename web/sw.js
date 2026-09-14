@@ -54,7 +54,12 @@ const ZONE_LIMIT = 600;
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(SHELL)
-      .then((c) => c.addAll(["./", "./index.html", "./manifest.webmanifest"]))
+      /* The policy is precached with the shell. Somebody reading it is often
+         doing so because they are about to delete their account or are unsure
+         what is held about them, and "you can read what we do with your data,
+         provided you have signal" is not much of a commitment. */
+      .then((c) => c.addAll(["./", "./index.html", "./manifest.webmanifest",
+                             "./personvern.html"]))
       .then(() => self.skipWaiting())
       .catch(() => self.skipWaiting()),
   );

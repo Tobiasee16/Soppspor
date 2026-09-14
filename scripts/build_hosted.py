@@ -661,6 +661,17 @@ def main() -> int:
         shutil.copyfile(WEB / "sw.js", out / "sw.js")
     else:
         print("  WARNING: sw.js missing from web/")
+    # The privacy policy is a real page rather than a panel inside the app, so
+    # that it has an address: somebody deciding whether to sign up has to be
+    # able to read it without installing anything first, and a login e-mail or
+    # a store listing needs a link it can point at. A build without it is a
+    # build that promises things in settings it does not deliver, so this is
+    # loud rather than silent.
+    if (WEB / "personvern.html").exists():
+        shutil.copyfile(WEB / "personvern.html", out / "personvern.html")
+    else:
+        print("  WARNING: personvern.html missing from web/ - "
+              "the app links to a page that will 404")
     if (WEB / "icons").exists():
         shutil.copytree(WEB / "icons", out / "icons", dirs_exist_ok=True)
 
@@ -703,6 +714,10 @@ def main() -> int:
     (out / "_redirects").write_text(
         "/zones/*  /zones/:splat  200" + chr(10)
         + "/context/*  /context/:splat  200" + chr(10)
+        # Ahead of the catch-all for the same reason the tile rules are: a
+        # single-page rewrite that swallows a real file turns a missing page
+        # into a 200 serving the app, which looks like it worked.
+        + "/personvern.html  /personvern.html  200" + chr(10)
         + "/*  /index.html  200" + chr(10),
         encoding="utf-8")
 
