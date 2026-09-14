@@ -110,6 +110,7 @@ const probe = js.slice(0, at) + `
     return true;
   },
   card: () => String(document.getElementById("cardBody").innerHTML || ""),
+  trailsRow: () => !!document.getElementById("rowTrails").hidden,
   cardTitle: () => String(document.getElementById("cardTitle").textContent || ""),
 };` + js.slice(at);
 
@@ -135,7 +136,8 @@ async function settle() {
 }
 
 (async () => {
-  const out = { boot: true, tiled: app.tiled(), steps: [] };
+  const out = { boot: true, tiled: app.tiled(), steps: [],
+                trailsRowHidden: app.trailsRow() };
   const note = stub.node("coverNote");
   out.opened = { view: app.view(), settled: await settle(), win: app.win(),
                  zones: app.zones(), blank: app.blank(), scored: app.scored(),

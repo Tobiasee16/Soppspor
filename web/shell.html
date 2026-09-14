@@ -622,7 +622,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
             <button type="button" data-v="plain" aria-pressed="true">Enkelt</button>
             <button type="button" data-v="topo" aria-pressed="false">Topo</button>
           </div></div>
-        <div class="row"><span class="lbl">Merkede stier
+        <div class="row" id="rowTrails"><span class="lbl">Merkede stier
             <span class="sub">turruter fra Kartverket, Turrutebasen</span></span>
           <span class="sw"><input type="checkbox" id="swTrails" checked><i></i></span></div>
       </div>
@@ -3324,6 +3324,19 @@ wireSeg("segBase",function(v){PREF.base=v;requestDraw();});
 document.getElementById("swTrails").addEventListener("change",function(e){
   PREF.trails=e.target.checked;savePrefs();requestDraw();});
 document.getElementById("swTrails").checked=!!PREF.trails;
+/* Hidden when this build carries no route geometry. Turrutebasen is packed
+   into the page, which works for one kommune - 5,804 lines in 395 kB - and
+   does not for the mainland, where the same packing is tens of megabytes and
+   would want tiling of its own. Until that exists the national build has no
+   vector routes, and a switch that silently governs nothing is worse than no
+   switch: it tells the reader the feature is there and broken.
+
+   Marked routes are still visible nationally, drawn into Kartverket's `topo`
+   sheet, which is the other option in the basemap picker directly above. */
+(function(){
+  var row=document.getElementById("rowTrails");
+  if(row) row.hidden=!TR;
+})();
 markSeg("segTheme",PREF.theme);markSeg("segBase",PREF.base);
 renderPill();renderLegend();
 

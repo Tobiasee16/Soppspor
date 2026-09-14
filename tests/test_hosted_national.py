@@ -302,6 +302,12 @@ class TestItActuallyDraws:
         assert op["scored"] / cells > 0.5, (
             f"only {op['scored']} of {cells} opening cells are scored ground")
 
+    def test_it_does_not_offer_a_switch_that_governs_nothing(self, run):
+        """Turrutebasen is packed into the page, which works for one kommune
+        and not for the mainland, so this build has no vector routes. A switch
+        that silently does nothing says the feature is there and broken."""
+        assert run["trailsRowHidden"] is True
+
     def test_it_boots_and_settles(self, run):
         assert run["tiled"] is True
         assert all(s["settled"] for s in run["steps"]), \

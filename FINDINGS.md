@@ -3715,6 +3715,67 @@ What it does not have, in order of how much it matters:
    quoting.
 3. **No TWI anywhere nationally**, as above.
 
+### 25f. The window commit was slow, and it was the strings
+
+Correctness was pinned; speed was not measured. A window commit rebinds the
+grid, re-smooths it, re-ranks it and re-traces three contour levels, and it
+runs every time the viewport leaves the loaded margin. Measured over the real
+national tiles:
+
+| view | m/px | level | cells | commit |
+|---|---|---|---|---|
+| a wood, walking zoom | 12 | 0 | 5,936 | 6 ms |
+| a valley | 40 | 0 | 59,508 | 52 ms |
+| **a county** | **120** | **0** | **520,198** | **605 ms** |
+| level 1 takes over | 170 | 1 | 66,976 | 53 ms |
+| the whole country | 3000 | 2 | 373,500 | 119 ms |
+
+This desktop is three to five times faster than a mid-range phone, so the
+county row was a stall a user could count - at a zoom the pyramid was built to
+serve.
+
+**505 ms of the 605 was stitching contour segments into rings**, 3.2 us per
+segment across 158,518 of them. Not tracing, not smoothing, not ranking: the
+bookkeeping. Each segment end was keyed by a string built from two rounded
+coordinates, stored in a plain object that becomes a dictionary at a hundred
+thousand distinct keys, and the ring walk recomputed those keys as it went -
+including the ring's own first key on every step of every ring.
+
+The key is now the two rounded coordinates packed into one float in a `Map`,
+computed once per segment end up front, with a segment end held as one integer
+rather than an object. Same algorithm, same traversal order.
+
+    605 ms -> 291 ms; stitching 505 -> 158.
+
+**The geometry was proven identical rather than assumed.** The committed
+version and the rewrite were each run over the real national tiles at four
+zooms with a recording `Path2D`, and compared vertex for vertex: 135,560 path
+operations at the worst case, all matching. That was only possible because the
+DOM stub was changed to record its path vertices - it had been discarding them,
+which left the tracer and the stitcher countable but not checkable.
+
+A method note worth keeping: the first measurement said "repaint is 87% of the
+commit", which is true and not actionable. Splitting repaint into tracing and
+stitching is what turned it into a change. Timing one stage tells you where to
+look next, not what to do.
+
+### 25g. The national build has no marked routes, and now says so
+
+Turrutebasen is packed into the page - 5,804 lines and 60,986 vertices in
+395 kB, which is the right shape for one kommune. The mainland is 111 times
+that area, so the same packing is tens of megabytes and wants tiling of its
+own. The national build therefore ships none, and did so silently while still
+offering a switch for them in settings.
+
+A switch that governs nothing is worse than a missing one: it tells the reader
+the feature is there and broken. The row is hidden when the build carries no
+route geometry, and pinned in both directions - the inline build offers it, the
+tiled build does not.
+
+Marked routes are still visible nationally. Kartverket's `topo` sheet draws
+them, and it is the other option in the basemap picker directly above the row
+that is now hidden.
+
 ## Open questions
 
 - **Should the maps still be blurred at all?** `build_maps.py` applies a 500 m

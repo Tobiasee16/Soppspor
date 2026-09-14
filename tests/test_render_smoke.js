@@ -54,6 +54,7 @@ const probe = js.slice(0, at) + `
   pill: () => document.getElementById("pillName").textContent,
   card: () => document.getElementById("cardBody").innerHTML,
   BOUNDS: () => BOUNDS,
+  trailsRowHidden: () => !!document.getElementById("rowTrails").hidden,
   goTo: (e, n, mpp) => { view.cx = e; view.cy = n; view.mpp = mpp;
                          clampView(); draw(); },
   /* Whether the scored area is on screen - what decides the dimming veil and
@@ -82,6 +83,8 @@ check("the payload's shipped species are all there", app.D.species.length === 7,
 check("blek piggsopp is not among them",
       !app.D.species.some(s => /piggsopp/i.test(s.no)));
 check("the pill names the one species", app.pill() === app.SEL()[0].no, app.pill());
+// The inline build carries Turrutebasen, so the switch has something to govern.
+check("the marked-routes switch is offered", !app.trailsRowHidden());
 check("the legend explains the three shades",
       /høy/.test(app.legend()) && /topp/.test(app.legend()));
 
