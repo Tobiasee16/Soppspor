@@ -3799,6 +3799,53 @@ Marked routes are still visible nationally. Kartverket's `topo` sheet draws
 them, and it is the other option in the basemap picker directly above the row
 that is now hidden.
 
+### 25h. A suite nobody runs is not a gate
+
+Two of the sixteen node suites under `tests/` had been failing for at least six
+consecutive commits and nothing said so. `pytest` collects `testpaths =
+["tests"]`, which is Python only; the JS suites were run by hand, a few at a
+time, and "all JS suites pass" meant "the five I ran passed".
+
+Neither breakage was a bug in the thing under test. Both were the harness
+losing its grip on a file that moved underneath it:
+
+- `test_sync_e2e.js` injects a probe into the shell by matching the literal
+  `size();\nview.cx=`. A default map centre was added between those two lines,
+  so the anchor stopped matching - and `String.replace` returns its input
+  unchanged when the anchor is absent rather than raising. The probe silently
+  vanished and the suite died forty lines later on `cannot read SYNC of
+  undefined`, a symptom that says nothing about the cause.
+- `test_om_tables.js` extracts one function from the shell and evaluates it
+  alone. The Om copy began quoting `TESTED_ON`, a name declared above it
+  precisely so that three pieces of copy cannot disagree about which region the
+  estimate was held out on - and a function cut away from its file cannot see a
+  declaration it was cut away from.
+
+`test_gestures.js` had already been re-anchored once for exactly the first
+reason, which should have been the signal that the pattern needed fixing rather
+than the instance.
+
+Three changes, in increasing order of what they prevent:
+
+1. Both probe injections now assert that their anchor matched, and name it when
+   it has not. A test that reaches into another file will eventually reach into
+   nothing; it should fail at the reach, not at the symptom.
+2. `test_om_tables.js` is handed the region name and checks that it lands - a
+   build tested on other ground has to say so - so the injection buys an
+   assertion rather than only a workaround. Hardcoding the region back into the
+   copy fails it.
+3. `tests/test_js_suites.py` runs every `tests/test_*.js` under pytest, so one
+   command is the whole gate. Moving the boot anchor now turns the Python run
+   red, which is the check that was missing.
+
+The one suite that talks to the live Supabase project stays opt-in behind
+`SOPP_LIVE=1`: it writes rows to the real database and cleans up after itself,
+which is a reasonable thing to do deliberately and not on every routine test
+run. It is skipped *loudly*, which is the whole difference between a known
+exclusion and the invisible one this entry is about.
+
+    697 passed, 1 skipped.
+
 ## Open questions
 
 - **Should the maps still be blurred at all?** `build_maps.py` applies a 500 m

@@ -125,6 +125,11 @@ const js = shell.slice(shell.indexOf("<script>") + 8, shell.lastIndexOf("</scrip
 // Anchored on the boot call to size() rather than on the line after it: what
 // follows has changed twice, and an anchor that moves with unrelated edits
 // fails loudly here every time.
+/* Asserted rather than assumed: `String.replace` with a missing anchor
+   returns the string unchanged, which would leave `__view` undefined and fail
+   somewhere unrelated. This anchor has already drifted once. */
+if (js.indexOf("\nsize();\n") < 0)
+  throw new Error("probe anchor missing from shell.html - the shell moved");
 const probe = js.replace("\nsize();\n", "\nglobal.__view=view;\nsize();\n");
 if (probe === js) throw new Error("could not install the view probe");
 (0, eval)(probe);

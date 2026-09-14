@@ -85,12 +85,25 @@ global.window.SOPP_SUPABASE = { url: CFG.url, anon: CFG.anon };
 
 const shell = fs.readFileSync(path.join(DIR, "..", "web", "shell.html"), "utf8").split("\r\n").join("\n");
 let js = shell.slice(shell.indexOf("<script>") + 8, shell.lastIndexOf("</script>"));
-const probe = `global.__app={syncNow:syncNow,addSpot:addSpot,removeSpot:removeSpot,
+/* Injected just before the app finishes booting.
+
+   Anchored on `size();` alone, and asserted. The previous anchor included the
+   line after it, `view.cx=`, which stopped being the line after it the moment
+   a default map centre was added between the two. `String.replace` returns the
+   string unchanged when its anchor is gone, so the probe silently vanished and
+   the suite failed forty lines later with "cannot read SYNC of undefined" -
+   a symptom that says nothing about the cause. The shell will move again. */
+const ANCHOR = "\nsize();\n";
+if (js.indexOf(ANCHOR) < 0)
+  throw new Error("probe anchor missing from shell.html: " + JSON.stringify(ANCHOR) +
+                  " - the shell moved, so this test is reaching into nothing");
+const probe = `
+global.__app={syncNow:syncNow,addSpot:addSpot,removeSpot:removeSpot,
   get SPOTS(){return SPOTS;}, set SPOTS(v){SPOTS=v;}, get SESSION(){return SESSION;},
   get SYNC(){return SYNC;}, fromUTM33:fromUTM33, saveSpots:saveSpots};
 size();
-view.cx=`;
-js = js.replace("size();\nview.cx=", probe);
+`;
+js = js.replace(ANCHOR, probe);
 (0, eval)(js);
 
 const app = global.__app;

@@ -32,10 +32,16 @@ function iife(marker) {
   return shell.slice(open + 1, i);
 }
 
-function run(marker, id, D) {
+function run(marker, id, D, testedOn) {
   const el = { innerHTML: "", hidden: false };
   const document = { getElementById: x => (x === id ? el : null) };
-  new Function("D", "document", iife(marker))(D, document);
+  /* The shell names the held-out region once, above these functions, because
+     three separate pieces of copy quote it and a build that changes the region
+     must not be able to change only two of them. Extracted alone, the function
+     cannot see that declaration, so it is supplied here - and asserted below,
+     which is the drift the single declaration exists to prevent. */
+  new Function("D", "document", "TESTED_ON", iife(marker))(
+    D, document, testedOn || "Kristiansand");
   return el;
 }
 
@@ -86,6 +92,12 @@ const PAYLOAD = {
   check("so is how few records it rests on", /7 funn/.test(el.innerHTML));
   check("the interval is readable rather than a range string",
         /0,321 til 0,684/.test(el.innerHTML));
+  check("the held-out region is named", /i Kristiansand/.test(el.innerHTML));
+
+  // The national build tests on different ground, and this copy must follow it.
+  const nat = run("function droppedSpecies()", "dropped", PAYLOAD, "Agder");
+  check("a build tested elsewhere says so rather than saying Kristiansand",
+        /i Agder/.test(nat.innerHTML) && !/Kristiansand/.test(nat.innerHTML));
   check("the block is shown", el.hidden === false);
 
   // When every species passes, the section must disappear rather than sit empty.
