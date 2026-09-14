@@ -3,6 +3,8 @@
     python scripts/build_maps_national.py
     python scripts/build_maps_national.py --model lightgbm
     python scripts/build_maps_national.py --only craterellus_tubaeformis
+    python scripts/build_maps_national.py --png-only   # redraw views, no refit
+    python scripts/build_maps_national.py --refresh    # ignore cached rasters
 
 The national sibling of `build_maps.py`, separate rather than a `--national`
 flag because almost none of the body is shared - that script clips the stack to
@@ -284,10 +286,40 @@ def preview_png(tif: pathlib.Path, png: pathlib.Path, title: str, subtitle: str)
     plt.close(fig)
 
 
+def redraw_pngs(model_name: str) -> int:
+    """Redraw every preview from the GeoTIFFs, without refitting anything.
+
+    The raster is the artefact; the preview is a view of it. Keeping the view
+    derivable means a presentation fix never costs a six-hour refit - and it is
+    needed, because a long run holds whatever version of this module it loaded
+    at start. The footer-overlap fix landed two hours into a build that then
+    drew seven more previews with the old layout.
+    """
+    tifs = sorted(MAPS.glob(f"suitability_*_{model_name}_32m.tif"))
+    if not tifs:
+        raise SystemExit(f"no GeoTIFFs for model {model_name!r} in {MAPS}")
+    for tif in tifs:
+        with rasterio.open(tif) as src:
+            tags = src.tags()
+            cell_m = abs(src.transform.a)
+        species = tags.get("species", tif.stem)
+        held = tags.get("held_out", "")
+        held_name = held.split(" is a prediction")[0] if held else "the held-out fylke"
+        preview_png(tif, tif.with_suffix(".png"),
+                    f"{species} — habitat plausibility",
+                    f"Norway · {cell_m:.0f} m, previewed at {PREVIEW_CELL_M:.0f} m\n"
+                    f"{tags.get('model', model_name)}\n"
+                    f"fitted on 14 fylker, {held_name} held out")
+        print(f"redrew {tif.with_suffix('.png').name}", flush=True)
+    return 0
+
+
 def main() -> int:
     model_name = "maxent"
     if "--model" in sys.argv:
         model_name = sys.argv[sys.argv.index("--model") + 1]
+    if "--png-only" in sys.argv:
+        return redraw_pngs(model_name)
     only = sys.argv[sys.argv.index("--only") + 1] if "--only" in sys.argv else None
     model = {"maxent": MaxentStyle, "lightgbm": LightGBM}[model_name]()
 
