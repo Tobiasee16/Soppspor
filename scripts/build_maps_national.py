@@ -242,29 +242,44 @@ def preview_png(tif: pathlib.Path, png: pathlib.Path, title: str, subtitle: str)
     h, w = arr.shape
     fig_w = 7.0
     map_in = fig_w * h / w
-    head_in, foot_in = 0.9, 1.3
-    fig = plt.figure(figsize=(fig_w, map_in + head_in + foot_in), dpi=170)
+    head_in, foot_in = 1.05, 1.55
+    fig_h = map_in + head_in + foot_in
+
+    # Every vertical position below is an offset in INCHES converted at the
+    # point of use. Mixing inches and figure fractions is what put the
+    # disclaimer on top of the colourbar label: Norway is twice as tall as it
+    # is wide, so the sheet runs to about thirteen inches and a "0.16 of the
+    # figure" offset that looks roomy on a square map collapses to a fifth of
+    # an inch here. The footer has to stay legible - CLAUDE.md requires the
+    # disclaimer, and a disclaimer nobody can read is not one.
+    def up(inches):
+        return inches / fig_h
+
+    fig = plt.figure(figsize=(fig_w, fig_h), dpi=170)
     fig.patch.set_facecolor("#ffffff")
-    ax = fig.add_axes([0.02, foot_in / (map_in + head_in + foot_in), 0.96,
-                       map_in / (map_in + head_in + foot_in)])
+    ax = fig.add_axes([0.02, up(foot_in), 0.96, up(map_in)])
     ax.set_facecolor("#f4f4f2")
     im = ax.imshow(np.ma.masked_invalid(arr), cmap=cmap, vmin=vmin, vmax=vmax,
                    interpolation="nearest")
     ax.set_xticks([]); ax.set_yticks([])
     for s in ax.spines.values():
         s.set_visible(False)
-    fig.text(0.02, 1 - 0.30 / (map_in + head_in + foot_in), title,
-             fontsize=12, weight="bold", va="top")
-    fig.text(0.02, 1 - 0.58 / (map_in + head_in + foot_in), subtitle,
-             fontsize=7.5, va="top", color="#444444")
-    cax = fig.add_axes([0.10, 0.42 / (map_in + head_in + foot_in), 0.5, 0.018])
-    fig.colorbar(im, cax=cax, orientation="horizontal").set_label(
-        "lower  ←  habitat plausibility  →  higher", fontsize=7)
+
+    fig.text(0.02, 1 - up(0.32), title, fontsize=12, weight="bold", va="top")
+    fig.text(0.02, 1 - up(0.60), subtitle, fontsize=7.5, va="top",
+             color="#444444")
+
+    cax = fig.add_axes([0.06, up(0.86), 0.42, up(0.10)])
+    cb = fig.colorbar(im, cax=cax, orientation="horizontal")
+    cb.set_label("lower  ←  habitat plausibility  →  higher", fontsize=7,
+                 labelpad=4)
     cax.tick_params(labelsize=0, length=0)
-    fig.text(0.02, 0.16 / (map_in + head_in + foot_in),
-             "Not an edibility assessment and not a species identification. An "
-             "estimate from public geodata,\nnever validated against anybody's "
-             "actual walks.", fontsize=6.5, color="#666666", va="bottom")
+
+    fig.text(0.02, up(0.30),
+             "Not an edibility assessment and not a species identification.\n"
+             "An estimate from public geodata, never validated against "
+             "anybody's actual walks.", fontsize=6.5, color="#666666",
+             va="bottom", linespacing=1.5)
     fig.savefig(png, facecolor=fig.get_facecolor())
     plt.close(fig)
 
