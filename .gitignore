@@ -57,6 +57,7 @@ config/supabase.json
 # the rows - but a built artefact has no business in source control, and the
 # habit of committing one is how the *next* key ends up public.
 dist/
+dist_norge/
 
 # Wrangler's local state. `wrangler-account.json` holds the Cloudflare account
 # id and the account holder's email address; neither belongs in a public repo.

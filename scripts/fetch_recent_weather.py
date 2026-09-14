@@ -1,6 +1,7 @@
-"""Recent rainfall over Kristiansand, against what is normal for the date.
+"""Recent rainfall against what is normal for the date.
 
-    python scripts/fetch_recent_weather.py
+    python scripts/fetch_recent_weather.py              # Kristiansand
+    python scripts/fetch_recent_weather.py --national   # the whole mainland
 
 The model's rainfall feature is a **1991-2020 climatological mean** for the
 fruiting window. That is the right thing for a model: it describes what a place
@@ -40,6 +41,7 @@ import datetime as dt
 import json
 import pathlib
 import sys
+import warnings
 import urllib.parse
 import urllib.request
 
@@ -55,11 +57,27 @@ import numpy as np
 import yaml
 
 from src.geometry import Boundary
-from src.ingest.senorge import BASE, CTX, UA, SourceError, daily, parse_dods, window_for
+from src.ingest.senorge import (BASE, CTX, NX, NY, UA, SourceError, Window,
+                                daily, parse_dods, window_for)
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 OUT_JSON = ROOT / "data" / "processed" / "conditions.json"
 OUT_MD = ROOT / "data" / "processed" / "conditions.md"
+NAT_JSON = ROOT / "data" / "processed" / "conditions_norge.json"
+NAT_MD = ROOT / "data" / "processed" / "conditions_norge.md"
+
+# The national file is delivered on a coarser grid than it is computed on. The
+# computation stays at seNorge's own kilometre - the download is 15 seconds for
+# a 21-day national pull and 7 minutes for the 30-year baseline, so there is
+# nothing to save by asking for less - but the file is fetched by every phone
+# on every launch, and a kilometre grid over the mainland is 1.85 million cells
+# whether or not anybody can see the difference.
+#
+# Aggregation is a mean of the kilometre cells under each block, not a sample
+# of one of them. A sample would be cheaper to download and would report a
+# ridge's rainfall for the valley beside it; the mean is what the block
+# actually got.
+DELIVER_M = 4000
 
 WINDOW_DAYS = 21          # the trailing window that matters for fruiting
 SHORT_DAYS = 7
@@ -112,9 +130,13 @@ def main() -> int:
     # day with a lag of a day or two, so a scheduler that fires hourly would
     # otherwise refetch thirty years of climatology for a file that has not
     # moved. Checking the time axis is one small request.
-    if "--if-new" in sys.argv and OUT_JSON.exists():
+    national = "--national" in sys.argv
+    out_json, out_md = (NAT_JSON, NAT_MD) if national else (OUT_JSON, OUT_MD)
+    block = DELIVER_M // 1000 if national else 1
+
+    if "--if-new" in sys.argv and out_json.exists():
         try:
-            have = json.loads(OUT_JSON.read_text(encoding="utf-8")).get("last_day")
+            have = json.loads(out_json.read_text(encoding="utf-8")).get("last_day")
             latest = available_days(dt.date.today().year)[-1].isoformat()
         except (OSError, ValueError, SourceError, IndexError) as exc:
             print(f"could not check for new data ({exc}); fetching anyway", flush=True)
@@ -124,12 +146,18 @@ def main() -> int:
                 return 0
             print(f"seNorge moved {have} -> {latest}", flush=True)
 
-    area = yaml.safe_load((ROOT / "config" / "study_area.yaml").read_text(encoding="utf-8"))
-    cfg = area["prediction_extent"]
-    fc = json.loads((ROOT / cfg["boundary_file"]).read_text(encoding="utf-8"))
-    bbox = Boundary(fc["features"][0]["geometry"], name=cfg["name"]).bbox
-    w = window_for(bbox)
-    print(f"seNorge window {w.width} x {w.height} cells over {cfg['name']}", flush=True)
+    if national:
+        w = Window(0, NX, 0, NY)
+        where = "the Norwegian mainland"
+    else:
+        area = yaml.safe_load(
+            (ROOT / "config" / "study_area.yaml").read_text(encoding="utf-8"))
+        cfg = area["prediction_extent"]
+        fc = json.loads((ROOT / cfg["boundary_file"]).read_text(encoding="utf-8"))
+        bbox = Boundary(fc["features"][0]["geometry"], name=cfg["name"]).bbox
+        w = window_for(bbox)
+        where = cfg["name"]
+    print(f"seNorge window {w.width} x {w.height} cells over {where}", flush=True)
 
     today = dt.date.today()
     days = available_days(today.year)
@@ -158,19 +186,48 @@ def main() -> int:
         start = end - dt.timedelta(days=WINDOW_DAYS - 1)
         jan1 = dt.date(year, 1, 1)
         t0, t1 = (start - jan1).days, (end - jan1).days + 1
-        tot = np.nansum(daily(year, t0, t1, w, "rr"), axis=0)
+        rr_y = daily(year, t0, t1, w, "rr")
+        tot = np.nansum(rr_y, axis=0)
+        # A cell outside Norway is fill on every day of every year, and a bare
+        # nansum turns that into 0.0 - a claim that it did not rain there,
+        # which is false. `senorge.seasonal_total` has always masked it; this
+        # loop did not, and the effect scales with how much of the window is
+        # sea. Over Kristiansand it shifted the baseline a little. Over the
+        # mainland, where two thirds of the seNorge rectangle is outside
+        # Norway, it divided the reported normal by three: the summary said
+        # 2.82x normal while the percentiles it was printed beside sat at a
+        # median of 0.51.
+        tot[np.isnan(rr_y).all(axis=0)] = np.nan
         stack.append(tot)
         print(f"  {year}: mean {np.nanmean(tot):5.1f} mm", flush=True)
     clim = np.array(stack)
 
-    clim_mean = np.nanmean(clim, axis=0)
-    clim_sd = np.nanstd(clim, axis=0)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", "Mean of empty slice", RuntimeWarning)
+        warnings.filterwarnings("ignore", "Degrees of freedom <= 0", RuntimeWarning)
+        clim_mean = np.nanmean(clim, axis=0)
+        clim_sd = np.nanstd(clim, axis=0)
     # Empirical percentile against this cell's own 30 years, which needs no
     # distributional assumption and is what the interface actually shows.
     pct = (clim < rain21[None, :, :]).sum(axis=0) / clim.shape[0]
     pct = np.where(np.isnan(rain21), np.nan, pct)
 
+    def blocks(a):
+        """Mean each block of kilometre cells, padding the edge rather than
+        cropping it. Finnmark's eastern tip and the southern coast both fall in
+        a partial block, and cropping would drop real ground."""
+        if block == 1:
+            return a
+        h, wd = a.shape
+        H, W = -(-h // block), -(-wd // block)
+        pad = np.full((H * block, W * block), np.nan, dtype="float64")
+        pad[:h, :wd] = a
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", "Mean of empty slice", RuntimeWarning)
+            return np.nanmean(pad.reshape(H, block, W, block), axis=(1, 3))
+
     def flat(a, nd=1):
+        a = blocks(a)
         return [None if not np.isfinite(v) else round(float(v), nd) for v in a.ravel()]
 
     # Mean over the kommune for each day of the window. `rr` is (day, y, x)
@@ -197,16 +254,27 @@ def main() -> int:
         "short_days": SHORT_DAYS,
         "baseline": [CLIM_FROM, CLIM_TO],
         "crs": "EPSG:25833",
-        "grid": {"west": w.west, "north": w.north, "step": 1000.0,
-                 "w": w.width, "h": w.height},
+        "grid": {"west": w.west, "north": w.north, "step": 1000.0 * block,
+                 "w": -(-w.width // block), "h": -(-w.height // block)},
+        "native_step_m": 1000.0,
         "daily_rain_mm": per_day,
-        "rain21": flat(rain21), "rain7": flat(rain7), "tg7": flat(tg7),
-        "clim_mean": flat(clim_mean), "clim_sd": flat(clim_sd),
+        "rain21": flat(rain21, 0),
         "pct": flat(pct, 3),
         "summary": summary,
     }
-    OUT_JSON.parent.mkdir(parents=True, exist_ok=True)
-    OUT_JSON.write_text(json.dumps(out, separators=(",", ":")), encoding="utf-8")
+    if not national:
+        # The interface reads only `pct` and `rain21` per cell; the rest are
+        # summarised. Kristiansand ships them anyway because the file is tiny
+        # and they are the raw material behind the summary, but over the
+        # mainland four unread arrays are most of the download.
+        out.update(rain7=flat(rain7), tg7=flat(tg7),
+                   clim_mean=flat(clim_mean), clim_sd=flat(clim_sd))
+        out["rain21"] = flat(rain21)
+    out_json.parent.mkdir(parents=True, exist_ok=True)
+    out_json.write_text(json.dumps(out, separators=(",", ":")), encoding="utf-8")
+    print(f"  {out_json.name}: {out_json.stat().st_size / 1e6:.2f} MB on a "
+          f"{out['grid']['w']} x {out['grid']['h']} grid at "
+          f"{out['grid']['step']:.0f} m", flush=True)
 
     a = []
     p = a.append
@@ -225,7 +293,11 @@ def main() -> int:
     p(f"| lag behind today | {lag} day(s) |")
     p(f"| trailing window | {WINDOW_DAYS} days |")
     p(f"| baseline | {CLIM_FROM}-{CLIM_TO}, same calendar window |")
-    p(f"| grid | seNorge 1 km, {w.width} x {w.height} cells |")
+    p(f"| computed on | seNorge 1 km, {w.width} x {w.height} cells |")
+    if block > 1:
+        g = out["grid"]
+        p(f"| delivered on | {g['step']:.0f} m, {g['w']} x {g['h']} cells, "
+          f"block means of the kilometre cells |")
     p("")
     p("The lag is read from the file's own time axis on every run rather than "
       "assumed, so the window cannot silently slide if MET's publishing "
@@ -247,13 +319,13 @@ def main() -> int:
       "compared against its own 30 years for the same calendar window, so the "
       "number that reaches the interface is 'wetter or drier than this place "
       "usually is by now', which is comparable across the map.\n")
-    OUT_MD.write_text("\n".join(a), encoding="utf-8")
+    out_md.write_text("\n".join(a), encoding="utf-8")
 
     print(f"\nrain {summary['rain21_mean']} mm vs normal "
           f"{summary['clim_mean']} mm = {summary['ratio']:.2f}x "
           f"({summary['pct_mean']:.0%} percentile)")
-    print(f"written: {OUT_JSON.relative_to(ROOT)}")
-    print(f"written: {OUT_MD.relative_to(ROOT)}")
+    print(f"written: {out_json.relative_to(ROOT)}")
+    print(f"written: {out_md.relative_to(ROOT)}")
     return 0
 
 
