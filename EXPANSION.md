@@ -103,6 +103,39 @@ so the current ~25-minute run becomes several hours, not days.
 
 Everything here is an overnight job on one machine. None of it needs a cluster.
 
+#### CORRECTION, 2026-09-14: the arithmetic above mixed two different cells
+
+The table divides by **total grid cells** and multiplies by **scored cells**,
+which are not the same thing and differ by a factor of four.
+
+Kristiansand's grid is 11.4 M cells but only **2.74 M were ever scored** — the
+rest are sea and neighbouring kommuner, masked out and never handed to a model.
+So the measured Agder rate was about 30,400 scored cells per second, not the
+126,000 that 11.4 M ÷ 90 s implies. The "Norway at 32 m, 316 M" row, meanwhile,
+is already a *land-only* figure — the measured national mask holds 317.3 M
+cells, so that part was right.
+
+Corrected against the same rate, Norway at 32 m was really **≈ 20 hours** for
+seven species, not five. The first national run projected 18.6 hours and
+confirmed it.
+
+**The five-hour figure turned out to be right anyway, for a different reason.**
+`_nearest_by_block` grouped points with a Python-level loop over every point,
+which is invisible at 67,000 training points and dominant at 4.2 M grid cells
+per block. Vectorising it took the same strip from 98 s to 28 s with
+byte-identical output, and the national prediction now measures **36 minutes
+per species, 5.3 hours for nine sets** — eight species plus the null, where the
+table above costed seven.
+
+Two lessons worth keeping, since this document exists to be trusted:
+
+* **State which cells a rate is per.** A prediction rate quoted per grid cell
+  and applied to land cells is out by whatever fraction of the grid is masked,
+  and that fraction is not a constant between regions.
+* **An estimate that lands on the right answer can still be wrong.** Had nobody
+  measured, this would have read as a five-hour job that took twenty, and the
+  optimisation that actually made it five would never have been looked for.
+
 ## 4. The validation has to be redone, and it might not come out well
 
 This is the part that is not just a bigger button press.
@@ -133,6 +166,41 @@ So a national map needs the whole apparatus re-run at national scale:
 
 The harness already does all of this. It has to be pointed at a bigger extent,
 not rewritten.
+
+### ANSWERED, 2026-09-14: it was run, and it came out well
+
+Every item on that list happened, in that order. Nordland was registered as the
+held-out region in FINDINGS section 16 before the national feature stack
+existed. Full results are in FINDINGS section 22; the short version:
+
+| | result |
+|---|---|
+| null, national blocked CV | 0.490 +/- 0.009 |
+| null, transfer to Nordland | 0.514 [0.480-0.552] |
+| registered ordering, blocked CV | **PASS** on both models |
+| registered ordering, transfer | **PASS** on both models |
+| *C. tubaeformis* on transfer | 0.600 → **0.808**, intervals not overlapping |
+
+The specific worry above - that elevation is partly an accessibility proxy and
+gets *stronger* nationally, so the fit could "score better on paper and mean
+less" - was the right thing to worry about and was tested rather than argued
+about. National AUC did rise, by a median of +0.07, exactly as section 16e
+registered it would and for the extent reasons it gave. But **the gain is
+uncorrelated with elevation**: across the eight species, the gain in elevation
+importance predicts the gain in AUC at Spearman +0.024. Whatever produced the
+improvement, it was not the model leaning harder on the suspect feature.
+
+The one feature that *did* look like the answer - autumn rainfall, correlating
+with the gain at +0.826 - was ablated out entirely, at a cost of 0.008 AUC on
+blocked CV and 0.000 on transfer, with *C. tubaeformis* keeping first place on
+both models and both harnesses. So no load-bearing conclusion rests on it
+either. See FINDINGS 22h.
+
+What this does **not** establish is that the national map is as trustworthy as
+Kristiansand's. Phase 0's map was a prediction onto held-out ground over its
+whole extent; the national map is fitted on fourteen fylker and drawn over
+fifteen, so only Nordland is held-out and the rest is in-sample. The Nordland
+number is what bounds trust in the other fourteen.
 
 ## 5. The delivery format is the hard stop
 
