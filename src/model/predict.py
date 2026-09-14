@@ -19,9 +19,16 @@ terrain nearest-neighbour, which reproduces the training distribution exactly.
 """
 from __future__ import annotations
 
+import pathlib
+
 import numpy as np
 
 from src.features.stack import sample_layers
+
+# Building a multi-line message by concatenation rather than with an escape,
+# because backslash escapes inside heredoc'd Python get eaten by this project's
+# tooling and have silently corrupted a source file more than once.
+NEWLINE = chr(10)
 
 
 def grid_coords(transform, height: int, width: int, row_slice: slice
@@ -94,6 +101,96 @@ def predict_grid(model_predict, layers, feature_names, transform, height, width,
         if progress:
             progress(stop, height)
     return out
+
+
+def predict_grid_to_raster(model_predict, layers, feature_names, transform,
+                           height, width, dst_path, crs, inside_block=None,
+                           rows_per_block: int = 512, progress=None) -> dict:
+    """Score every cell and stream it to a GeoTIFF, a row-block at a time.
+
+    `predict_grid` builds the whole surface in memory and hands it back. That
+    is right for Kristiansand - 4,029 x 2,823 at 16 m is 11.4 million cells and
+    45 MB - and impossible nationally: 38,173 x 48,022 at 32 m is 1.83 billion
+    cells and **7.3 GB as float32**, before the boundary mask, before the
+    sampling working set, on a machine with 15.7 GB.
+
+    So this writes each block as it is scored and never holds more than one.
+    The numbers are identical to `predict_grid`'s - pinned in
+    tests/test_predict_to_raster.py, which runs both paths over the same grid
+    and demands exact equality including NaN placement.
+
+    `inside_block(start, stop)` returns the boolean mask for those rows, so the
+    caller can rasterise the boundary per block instead of allocating a
+    national one: all of Norway as a single uint8 mask is another 1.83 GB.
+
+    The partial file is deleted if anything raises. This project has now been
+    bitten three times by a half-written artefact that looked entirely
+    plausible - a truncated download, a clobbered report and a 3.1 GB terrain
+    raster that died at 54% - and a suitability map is the worst of the three
+    to get wrong quietly, because nobody can tell by looking.
+    """
+    import rasterio
+
+    dst_path = pathlib.Path(dst_path)
+    profile = {
+        "driver": "GTiff", "height": height, "width": width, "count": 1,
+        "dtype": "float32", "crs": crs, "transform": transform,
+        "nodata": float("nan"), "compress": "deflate", "tiled": True,
+        "blockxsize": 256, "blockysize": 256,
+        # 7.3 GB of float32 is well past the 4 GB classic TIFF ceiling, and the
+        # failure mode is a write error at 54% rather than at the start.
+        "BIGTIFF": "IF_SAFER",
+    }
+    stats = {"scored": 0, "masked_out": 0, "no_features": 0}
+    try:
+        with rasterio.open(dst_path, "w", **profile) as dst:
+            for start in range(0, height, rows_per_block):
+                stop = min(start + rows_per_block, height)
+                east, north, _ = grid_coords(transform, height, width,
+                                             slice(start, stop))
+                flat_e, flat_n = east.ravel(), north.ravel()
+
+                if inside_block is not None:
+                    keep = np.asarray(inside_block(start, stop), dtype=bool).ravel()
+                else:
+                    keep = np.ones(flat_e.size, dtype=bool)
+                stats["masked_out"] += int((~keep).sum())
+
+                block = np.full(flat_e.size, np.nan)
+                if keep.any():
+                    # An (N, 2) array rather than a list of N tuples: at four
+                    # million cells a block, materialising the tuples and
+                    # converting them straight back costs more than the read.
+                    coords = np.column_stack((flat_e[keep], flat_n[keep]))
+                    X, names = sample_layers(layers, coords)
+                    if list(names) != list(feature_names):
+                        raise ValueError(
+                            "the prediction stack does not match the fitted "
+                            "feature set."
+                            + NEWLINE + f"  fitted:    {list(feature_names)}"
+                            + NEWLINE + f"  predicting:{list(names)}")
+                    good = np.isfinite(X).all(axis=1)
+                    stats["no_features"] += int((~good).sum())
+                    stats["scored"] += int(good.sum())
+                    scores = np.full(len(coords), np.nan)
+                    if good.any():
+                        # The fitted callables put their input through
+                        # `_as_array`, so handing them the ndarray is the same
+                        # call with one fewer copy. `.tolist()` here builds four
+                        # million Python lists of 39 floats per block.
+                        scores[good] = np.asarray(
+                            model_predict(X[good]), dtype="float64")
+                    block[keep] = scores
+
+                dst.write(block.reshape(stop - start, width).astype("float32"),
+                          1, window=rasterio.windows.Window(0, start, width,
+                                                            stop - start))
+                if progress:
+                    progress(stop, height)
+    except BaseException:
+        dst_path.unlink(missing_ok=True)
+        raise
+    return stats
 
 
 def snap_grid(bbox, cell_m: float, origin: tuple[float, float]):
