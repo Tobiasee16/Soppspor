@@ -3376,6 +3376,196 @@ cache. It had not: at 35 minutes a species the honest total is 5.3 hours, which
 is exactly what it predicted. The estimate was sound and the monitoring
 invalidated it.
 
+## 24. Delivering the national map, and making the page say true things - 2026-09-14
+
+EXPANSION section 5 named the delivery format as the hard stop and named the
+replacement: zone data fetched per region rather than shipped whole. This is
+that. The plumbing turned out to be the smaller half.
+
+Built with:
+
+    python scripts/export_zone_tiles.py
+    python scripts/build_hosted.py --national
+
+### 24a. The window, and the one thing that could not become window-relative
+
+`GW`, `GH`, `OX` and `OY` stop meaning "the study area" and start meaning "the
+window currently loaded". Forty-odd places in `shell.html` read them and none
+needed rewriting, because each only ever asked about *the current grid*. Two
+things did:
+
+* **A traced zone path belongs to the window it was traced in.** Drawn against
+  the current origin after a pan, a whole landscape of contours is offset by
+  exactly how far the window travelled. The geometry now carries its own
+  origin. This is the failure mode worth naming: the map renders perfectly,
+  every curve closes, and the good ground is in the wrong wood.
+* **A cell index is an offset into the window.** The card remembers where it is
+  in metres and finds its cell again after a move.
+
+The thing that must *not* follow the window is the ranking. "The top 5 %" has
+to mean the top 5 % of Norway wherever the user is standing, or the same wood
+drifts in and out of a zone as they pan and nothing looks wrong. Two shipped
+artefacts hold that: the tile byte is a **national percentile** rather than a
+linearly scaled score, and the post-smoothing re-rank is a **shipped 256-entry
+CDF** rather than a sort of what is loaded.
+
+Measured, in `tests/test_zone_window.py`, against the same ground seen from two
+different windows through the interface's own code:
+
+| | |
+|---|---|
+| window rank vs. whole-country rank | within **0.02** |
+| same ground, two different windows | identical to **1e-6** |
+
+The second is the user-visible property. The first is bounded by the halo: the
+blur is two separable 3-tap passes, so it reaches two cells, and a window
+carrying two cells of margin smooths its interior exactly as the national
+surface was smoothed.
+
+### 24b. The conditions rank is the one approximation, and it is stated
+
+The habitat lookup is exact - computed over the whole country at build time.
+The *conditions-adjusted* rank cannot be, because the weather is not known when
+the tiles are cut, and ranking it against the loaded window would put "the top
+5 %" straight back inside the viewport.
+
+So it is derived in the app from the conditions grid itself. The habitat rank
+H is uniform on [0,1] by construction and the multiplier m is read off that
+grid, so
+
+    P(H*m <= s) = mean over the grid of min(1, s/m)
+
+which is one sort and a running sum. **The assumption is that H and m are
+independent nationally**, and they are not quite - wetter regions hold somewhat
+better habitat. The error is a smooth national bias of a few percent, not
+something that moves when the user pans, and it sits on a term whose weight is
+a stated judgement rather than a fitted estimate. Recorded here because the
+distinction between the exact lookup and the approximate one is exactly the
+sort of thing that gets forgotten and then quoted as if it were measured.
+
+A uniform conditions field must leave the ranking untouched - a constant
+multiplier cannot reorder anything - and that is pinned as a test rather than
+argued: if it ever drifts, the layer is quietly rescaling the map on a still
+day.
+
+### 24c. Tiles are read as data, not drawn as pictures
+
+The obvious decoder is an `Image` element and `getImageData`. That hands the
+bytes to a canvas, and a canvas is entitled to colour-manage what it is given.
+For a value that *is* a national percentile, a browser nudging 176 to 175
+somewhere inside a colour transform would be invisible and would move zone
+boundaries.
+
+So the PNG is parsed in the app: the encoder writes 8-bit greyscale with filter
+0 on every scanline, which makes the inflated payload the samples themselves,
+and `DecompressionStream` is the platform's own zlib. No dependency, no
+hand-written inflate, and a filtered scanline throws rather than being guessed
+at - a corrupt tile drops out as nodata instead of leaking a landscape of
+plausible wrong numbers.
+
+### 24d. What the tests caught that review did not
+
+Four defects, all of them in code I had just written and read:
+
+1. **The coverage note depended on the markup, not on the code.** The memo
+   guarded the whole call, so the first one - almost always "nothing to say" -
+   matched the initial state and returned without touching the element. It
+   worked only because the element carries `hidden` in the HTML.
+2. **The build opened on the Norwegian Sea.** The opening view was the centre
+   of the tile index's bounding box, and for a country shaped like Norway the
+   centre of any box drawn around it is water. The first screen had no zones on
+   it, no explanation, and nothing wrong-looking about it. It now opens on the
+   median occupied tile.
+3. **The shell's own `<title>` landed in the body of every hosted page**,
+   naming one kommune on a map of the country. Invisible because
+   `document.title` returns the first title in tree order.
+4. **The counter-test in `test_national_rank.py` did not bite** - covered in
+   section 23, and the same lesson: a fixture that is uniform random makes
+   every window a representative sample, so local ranking was right by
+   accident. Norway is not uniform, which is the entire reason the shipped
+   lookup exists.
+
+Three mutations confirm the suite is load-bearing: bypassing the national
+lookup, an off-by-one in the window assembler, and keeping stale geometry
+across a window move each fail it.
+
+### 24e. What it costs, and what it buys
+
+| | |
+|---|---|
+| page | 0.22 MB |
+| zone tiles on the host | 141.6 MB, 3,640 files, 38.9 kB each |
+| tiles fetched at launch | 9, about 350 kB |
+| tiles fetched per window move | typically 4 |
+| ground per window at walking zoom | about 560 km2 |
+
+The page no longer grows with area. Against the artifact build's 14.77 MB for
+45 x 64 km, this is the whole mainland for a fiftieth of the download, and the
+service worker keeps every tile already looked at so the map works with no
+signal over ground already walked.
+
+**The zones stop above 600,000 cells - about 9,800 km2** - and the map says so
+rather than drawing a smear. At that scale a 128 m cell is a fraction of a
+pixel. Coarser overview levels are the proper answer and are not built; the
+exporter would need one CDF per level, because the same blur over a coarser
+grid covers different ground and the shipped lookup would otherwise be read
+against a distribution that was never computed from it.
+
+### 24f. The page had to be rewritten, not just re-pointed
+
+This is the half that was not plumbing. A tiled build that renders perfectly
+while the Om page describes a model fitted on Agder and tested on Kristiansand
+is worse than one that does not build: the map is right, the account of it is
+wrong, and nothing on screen looks amiss.
+
+Every sentence that names a region or quotes a number is now addressable by id
+and replaced from the payload, with the numbers read back out of the run
+reports rather than typed - 39 features, fourteen fylker, 2,302 records,
+1,234,631 in the target-group pool. A layout change in a report stops the build
+instead of shipping a paragraph it cannot substantiate, which is the same rule
+`src/report_tables.py` already applied to the AUC table, extended to the prose.
+
+A scan in `tests/test_hosted_national.py` walks the markup, finds every mention
+of a region, and requires it to sit inside an element the build overrides, so a
+new region-specific sentence without an id fails there rather than reaching a
+reader. Two elements are exceptions and both are pinned rather than assumed:
+the coverage note, which a tiled build cannot reach, and the pill, which is
+overwritten at boot from the payload's own area label.
+
+Three things the national page says that the Kristiansand one does not:
+
+* **Only Nordland is out of sample.** The other fourteen fylker are terrain the
+  model was fitted on. That is a weaker claim than Phase 0's Kristiansand map,
+  which was held out over its whole extent, and the page says so rather than
+  letting the transfer AUC imply otherwise.
+* **The registered ordering held.** It failed on Agder and passed nationally;
+  both results stand, and so does the caveat from section 22b that the AUC gain
+  is an extent effect rather than a better model.
+* **There is no fresh rainfall layer.** seNorge is fetched for Agder, and
+  Agder's weather laid over a map of Norway would be wrong everywhere else, so
+  the build ships no conditions file and the page says the layer is absent.
+
+The pre-registered ship-or-drop bar - a species ships only if the lower bound
+of its transfer interval clears the synthetic null - is applied to the national
+numbers rather than re-decided for them. All eight clear it, **blek piggsopp
+included**, which the Kristiansand build drops. That is the rule working in
+both directions rather than only against.
+
+### 24g. What is still missing from the national app
+
+Three gaps, none of them hidden from the user by the interface:
+
+1. **No overview levels.** Zoom out past a region and the zones vanish with a
+   line of text. A pyramid is cheap in tiles (+33 %) and needs one CDF per
+   level to keep the zone thresholds meaning the same thing across zooms.
+2. **No national conditions.** The weather fetch covers Agder. Going national
+   means seNorge over a 1,215 x 1,525 km grid, daily, plus the 1991-2020
+   climatology to compare it against.
+3. **No national context layers.** Tapping a cell in Kristiansand reports the
+   terrain, forest and substrate behind the score; nationally it reports only
+   the score, because 39 national feature rasters at 32 m is another delivery
+   problem of its own. The card degrades rather than lying.
+
 ## Open questions
 
 - **Should the maps still be blurred at all?** `build_maps.py` applies a 500 m

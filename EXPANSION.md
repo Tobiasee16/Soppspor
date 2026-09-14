@@ -249,6 +249,37 @@ is CSP-blocked in the artifact too, so **the published link is frozen at whateve
 weather was baked in at build time**. Hosting fixes the daily refresh as a side
 effect.
 
+### DONE, 2026-09-14: built, and it came in under the estimate
+
+`scripts/export_zone_tiles.py` cuts the national surfaces into 256-cell tiles
+on the 128 m display grid, and `scripts/build_hosted.py --national` assembles
+the page around them. The interface fetches the ground it is looking at.
+
+| | estimated above | built |
+|---|---|---|
+| page | ~4 MB | **0.22 MB** |
+| zones, per species nationally | 26.4 MB at 128 m | 17.7 MB average, fetched in pieces |
+| zones fetched at launch | - | 9 tiles, ~350 kB |
+| basemap | Kartverket at runtime | as planned |
+
+The page came in an order of magnitude under the estimate because the model
+payload is no longer in it at all - only a tile index, eight 256-entry lookups
+and the prose. It does not grow with area.
+
+Two things the estimate did not anticipate, both in FINDINGS section 24:
+
+* **The ranking is the hard part, not the bytes.** A percentile computed over
+  whatever is on screen changes meaning as the user pans, so the tile byte is a
+  national rank and the post-smoothing re-rank is a shipped lookup. Without
+  that, the same wood drifts in and out of a zone while the map looks fine.
+* **The page had to be rewritten, not just re-pointed.** Every sentence naming
+  Agder or Kristiansand is replaced from the payload, with the numbers read out
+  of the run reports. That was more work than the tiling.
+
+What this does **not** deliver: zones above about 9,800 km2 on screen (overview
+levels are unbuilt), the fresh rainfall layer nationally (seNorge is fetched
+for Agder only), and the card's "why this cell" layers nationally.
+
 ### What hosting costs
 
 | | |
