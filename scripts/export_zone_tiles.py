@@ -150,6 +150,73 @@ def to_percentile_bytes(grid: np.ndarray) -> tuple[np.ndarray, int]:
     return out, int(vals.size)
 
 
+def _blur_pass(P: np.ndarray, V: np.ndarray, axis: int):
+    """One validity-weighted 3-tap box pass, matching `smoothPct` in shell.html.
+
+    Weighted by validity rather than plain, because only a fifth of the grid
+    holds a value and the rest is sea: a plain blur averages every coastal cell
+    against a crowd of zeros and drags the whole field down. The interface
+    found this the hard way - the 95th-percentile zone disappeared completely
+    and the 85th covered 0.1% of the grid.
+
+    Edges count only the neighbours that exist, exactly as the JS does, so the
+    two implementations agree cell for cell.
+    """
+    def shift(a, k):
+        out = np.zeros_like(a)
+        if k > 0:
+            sl_dst = (slice(k, None), slice(None)) if axis == 0 else (slice(None), slice(k, None))
+            sl_src = (slice(None, -k), slice(None)) if axis == 0 else (slice(None), slice(None, -k))
+        else:
+            sl_dst = (slice(None, k), slice(None)) if axis == 0 else (slice(None), slice(None, k))
+            sl_src = (slice(-k, None), slice(None)) if axis == 0 else (slice(None), slice(-k, None))
+        out[sl_dst] = a[sl_src]
+        return out
+
+    PV = P * V
+    num = PV + shift(PV, 1) + shift(PV, -1)
+    den = V + shift(V, 1) + shift(V, -1)
+    ones = np.ones_like(V)
+    n = ones + shift(ones, 1) + shift(ones, -1)
+    newP = np.where(den > 0, num / np.maximum(den, 1e-12), 0.0).astype("float32")
+    newV = (den / n).astype("float32")
+    return newP, newV
+
+
+def smoothed_rank_lut(grid: np.ndarray, buckets: int = 256) -> list[float]:
+    """What the interface's post-smoothing re-rank would give, computed nationally.
+
+    `habitatField` in shell.html smooths the percentile surface and then ranks
+    it *again*, because smoothing pulls the extremes in hard - on the raw
+    scores 5% of cells sit above the 95th percentile and after the blur none of
+    them do, so the top of the ramp stops existing. Re-ranking restores it.
+
+    That second rank is the one genuinely global step in the whole pipeline. Do
+    it over the visible window and the zones move when the user pans, because
+    "the top 5%" silently becomes "the top 5% of what is on screen". So it is
+    precomputed here as a 256-entry CDF: the app smooths its own window, looks
+    the value up, and gets the national answer.
+    """
+    finite = np.isfinite(grid)
+    vals = grid[finite]
+    if vals.size == 0:
+        return [0.0] * buckets
+    ordered = np.sort(vals)
+    P = np.zeros(grid.shape, dtype="float32")
+    P[finite] = (np.searchsorted(ordered, vals, side="left")
+                 / max(vals.size - 1, 1)).astype("float32")
+    V = finite.astype("float32")
+    for _ in range(2):
+        P, V = _blur_pass(P, V, axis=1)
+        P, V = _blur_pass(P, V, axis=0)
+    P[~finite] = 0.0                      # never scored stays under every zone
+
+    smooth = np.sort(P[finite])
+    edges = np.arange(buckets, dtype="float64") / (buckets - 1)
+    return (np.searchsorted(smooth, edges, side="left")
+            / smooth.size).round(6).tolist()
+
+
 def cut_tiles(byts: np.ndarray, dest: pathlib.Path) -> list[str]:
     """Write every non-empty tile. Returns the ids that exist, as 'row_col'."""
     dest.mkdir(parents=True, exist_ok=True)
@@ -194,6 +261,7 @@ def main() -> int:
         t0 = time.time()
         grid, transform = downsample(tif)
         byts, n_finite = to_percentile_bytes(grid)
+        lut = smoothed_rank_lut(grid)
         ids = cut_tiles(byts, OUT / key)
 
         if meta["cell_m"] is None:
@@ -212,6 +280,10 @@ def main() -> int:
             "transfer_ci": aucs.get(sci, {}).get("ci"),
             "held_out_n": held.get(sci) or held.get(sp.get("label", "")),
             "scored_cells": n_finite, "tiles": ids,
+            # 256-entry CDF of the nationally smoothed percentile surface. The
+            # app smooths its own window and looks the result up here, so the
+            # zone thresholds mean the same thing wherever the user is.
+            "smoothed_rank_lut": lut,
         })
         print(f"{key:30s}{len(ids):5d} tiles{kb/1024:8.1f} MB  "
               f"{n_finite:,} cells  ({time.time()-t0:.0f}s)", flush=True)
