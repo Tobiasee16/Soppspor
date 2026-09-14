@@ -3566,6 +3566,155 @@ Three gaps, none of them hidden from the user by the interface:
    the score, because 39 national feature rasters at 32 m is another delivery
    problem of its own. The card degrades rather than lying.
 
+## 25. Closing the three gaps the national app shipped with - 2026-09-14
+
+Section 24e listed what the tiled build did not do: no overview levels, no
+national weather, no context layers behind a tap. All three are now closed.
+The weather one turned up a data bug that predates the national work.
+
+### 25a. Sea counted as a year with no rain
+
+`senorge.seasonal_total` has always masked a cell that is fill on every day of
+a window - its comment says why, in as many words: *zero rainfall is a claim,
+and a false one*. The climatology loop in `fetch_recent_weather.py` used a bare
+`np.nansum` and did not. So every cell outside Norway summed to 0.0 and entered
+the 30-year baseline as a year with no rain.
+
+The error scales with how much of the window is sea, which is exactly why it
+survived Phase 0:
+
+| | before | after |
+|---|---|---|
+| Kristiansand, normal for the date | 107.3 mm | 111.5 mm |
+| mainland, normal for the date | 22.8 mm | **69.7 mm** |
+| mainland, reported as | 2.82x normal | 0.92x normal |
+
+Two thirds of the seNorge rectangle is outside Norway, so the national baseline
+came out at roughly a third of its true value.
+
+**What caught it was two numbers printed next to each other that could not both
+be true.** The summary line said the country had 2.82 times its usual rain; the
+percentile distribution printed beside it had a median of 0.51 and 4.5% of
+cells above the 90th. A country at 2.8x normal does not have a median
+percentile of a half. The per-cell percentiles were right all along - `pct` is
+masked correctly, so nothing that drives the map was ever wrong - and it was
+the ratio that was broken.
+
+Worth keeping as a method note: the two numbers were derived from the same
+arrays by different routes, and printing both is what made the inconsistency
+visible. A summary that had only reported the ratio would have looked fine.
+
+### 25b. Three resolutions, and why each needs its own lookup
+
+The app holds a budget of *cells*, not of ground, so one resolution covers
+about 9,800 km2 and then stops. That is the first thing a beginner does - zoom
+out to see where in the county is worth walking - and section 24 shipped with
+it answered by a line of text.
+
+The exporter now cuts three levels, each a factor of four coarser:
+
+| level | cell | grid | tiles per species |
+|---|---|---|---|
+| 0 | 128 m | 9,543 x 12,005 | 455 |
+| 1 | 512 m | 2,385 x 3,001 | 45 |
+| 2 | 2,048 m | 596 x 750 | 6 |
+
+Four-fold steps because the cost is in the number of levels, not their
+coarseness: the pyramid adds 11% to what is shipped and the coarsest level puts
+the whole mainland in 447,000 cells, inside the budget. The switch happens
+where the finer level runs out, which is also where its extra detail is below
+one screen pixel, so crossing one should be close to invisible.
+
+**Each level carries its own 256-entry rank lookup.** The same two-pass blur
+over a coarser grid covers different ground, so a 512 m field read against the
+128 m distribution would move every zone boundary - plausibly, and with nothing
+reporting it. This is the same failure the shipped lookup exists to prevent,
+one axis over.
+
+**Coarser levels are built from sums and counts, not from means.** A 512 m cell
+is the mean of the 32 m cells under it only if the sixteen 128 m cells it came
+from each held the same number of valid ones, and at the coast they do not.
+Carrying the counts makes every level exactly the mean of its source cells
+instead of a weighting that quietly favours whichever coarse cells happened to
+be half sea. `tests/test_zone_tiles.py` pins it with a fixture where the two
+disagree by more than half.
+
+### 25c. The card's reasoning, and three grids that do not line up
+
+Seven layers - land cover, tree species, stand age, crown cover, substrate,
+elevation, autumn rainfall - tiled on the zone grid, **all seven stacked in one
+PNG per tile**, fetched only when somebody taps. 455 tiles, 35.3 MB, 76 kB
+each. A tap now reads `Skog, gran, ~73 ar, 200 moh.` rather than a percentile
+on its own, which is what CLAUDE.md's progressive disclosure asked for.
+
+Stacked rather than one file per layer because a tap needs all seven at once,
+they compress better together, and the zone tiles' PNG decoder reads them
+unchanged.
+
+The sources do not share a grid, and each way they differ is its own mistake
+waiting to happen:
+
+| layer | source grid | how it is read |
+|---|---|---|
+| AR50, NGU losmasser | 32 m, the national grid | block mean, or majority for a class |
+| SR16 | 16 m, its own origin | nearest neighbour at cell centres |
+| autumn rainfall | 1 km, a third origin | sampled at cell centres |
+
+The SR16 offsets work out to whole cells - row `2332 + 8r`, column `8c` - which
+is a fact with a test rather than an assumption with a comment, and each reader
+refuses a grid it does not tile exactly rather than rounding into it. SR16 is
+striped one row per block, so reading only the rows the cell centres fall on
+costs an eighth of the file: three layers in 29 seconds.
+
+**Classes take the majority of their block, never the mean.** Halfway between
+bog and bare rock is not a substrate. Ties go to the first code in a fixed
+order, so a re-export does not redraw class boundaries for no visible reason.
+
+**There is no TWI in the set, and the page says so.** The national model does
+not have the feature either - flow accumulation over 1.83 billion cells does
+not fit in 15.7 GB, measured in FINDINGS 18 - so the row is omitted rather than
+shown as a dash, and the Om page's feature list, which is markup written for
+Kristiansand, is replaced with one that does not claim it. A dash against a
+named quantity reads as "missing here" when it is missing everywhere.
+
+### 25d. What the tests caught this time
+
+Three defects, none of them found by reading the code:
+
+1. **A layer the payload does not carry came back `undefined`**, and every
+   guard in the card tests `!== null`, so an absent layer printed "NaN mm".
+2. **The national conditions file was inlined into the page and shipped beside
+   it** - 1.19 MB of weather in what is otherwise a 0.27 MB page. Kristiansand
+   inlines its 70 kB copy deliberately, as an offline floor; at national size
+   there is nothing for it to be the floor of, because a first launch with no
+   signal has no map tiles either.
+3. **The test harness decoded node's UTF-8 output as cp1252**, which turned
+   every `a` with a ring the card prints into mojibake. It had never bitten
+   because every earlier assertion happened to be ASCII, and it would have
+   hidden any Norwegian one from here on.
+
+### 25e. Where the national app stands
+
+| | |
+|---|---|
+| page | 0.27 MB |
+| zone tiles | 4,048 files, 152.4 MB, three levels |
+| context tiles | 455 files, 35.3 MB |
+| conditions | 1.19 MB, about 100 kB gzipped, refetched per launch |
+| at launch | the page, one conditions file, and 9 zone tiles |
+| per pan | typically 4 tiles; per tap, 1 context tile |
+
+What it does not have, in order of how much it matters:
+
+1. **Nordland is the only held-out ground.** Not a delivery gap - a validation
+   one, and the page carries it rather than letting the transfer AUC imply
+   otherwise. It is also not fixable without another fit.
+2. **The conditions grid is 4 km**, aggregated from seNorge's kilometre by
+   block means. A rainfall anomaly barely moves over 4 km; the millimetre
+   figure on a mountainside does, and the page says which resolution it is
+   quoting.
+3. **No TWI anywhere nationally**, as above.
+
 ## Open questions
 
 - **Should the maps still be blurred at all?** `build_maps.py` applies a 500 m

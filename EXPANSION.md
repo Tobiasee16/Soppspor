@@ -276,9 +276,15 @@ Two things the estimate did not anticipate, both in FINDINGS section 24:
   Agder or Kristiansand is replaced from the payload, with the numbers read out
   of the run reports. That was more work than the tiling.
 
-What this does **not** deliver: zones above about 9,800 km2 on screen (overview
-levels are unbuilt), the fresh rainfall layer nationally (seNorge is fetched
-for Agder only), and the card's "why this cell" layers nationally.
+All three gaps it shipped with are now closed - overview levels at 512 m and
+2048 m, the rainfall layer fetched for the whole mainland, and the card's seven
+context layers tiled behind a tap. See FINDINGS section 25, which also records
+the climatology bug the national weather turned up: sea cells had been counted
+as a year with no rain since Phase 0.
+
+What remains is not a delivery problem. **Nordland is the only ground the
+national model never saw**, so the transfer AUC bounds trust in a map that is
+otherwise in-sample, and the page says so.
 
 ### What hosting costs
 
