@@ -14,8 +14,8 @@ limits are permanent and structural, not settings.
 
 ```
 ./deploy.sh --cloudflare            # builds Norway, publishes, then checks what is live
-python scripts/build_hosted.py --national     # -> dist_norge/, 204 MB of static site
-python -m pytest -q                 # 808 tests: Python and the JS suites together
+python scripts/build_hosted.py --national     # -> dist_norge/, 222 MB of static site
+python -m pytest -q                 # 811 tests: Python and the JS suites together
 ```
 
 ## What it actually does
@@ -61,7 +61,7 @@ map that looks convincing and means nothing:
 
 | | |
 |---|---|
-| `scripts/build_hosted.py --national` | `dist_norge/`, about 204 MB: one page plus 4,040 zone tiles, 711 habitat-mask tiles and the context layer. Basemap from Kartverket at runtime. Installs to a home screen and works offline over ground already walked. **This is what is deployed.** |
+| `scripts/build_hosted.py --national` | `dist_norge/`, about 222 MB: one page plus 4,040 zone tiles, 711 habitat-mask tiles, the context layer and 15 fylke route files. Basemap from Kartverket at runtime. Installs to a home screen and works offline over ground already walked. **This is what is deployed.** |
 | `scripts/build_hosted.py` | `dist/`, one page and no tiles — the Kristiansand-only build, which carries its whole surface inline. |
 | `scripts/build_interface.py` | one self-contained HTML file, 14.8 MB, everything inlined. Needs no server and cannot leave Kristiansand — the basemap alone would be a gigabyte nationally. See `EXPANSION.md`. |
 
@@ -85,6 +85,13 @@ The **national** build additionally needs the zone and mask tiles under
 `data/processed/zone_tiles/`, which are not committed — they are 180 MB and
 come from an overnight prediction run. A fresh clone builds the Kristiansand
 app; rebuilding the national one means re-running the pipeline.
+
+It also wants the marked routes under `data/processed/trails/`, 17.9 MB across
+15 fylke files, likewise not committed. Those are cheap to rebuild, unlike the
+tiles: `python scripts/fetch_trails.py --national` pulls them from Geonorge's
+download API in about a minute, one request per fylke. Without them the build
+ships no routes and the settings switch hides itself, which is correct
+behaviour rather than a broken one.
 
 The model surface (`payload.js`) and the marked routes are committed, because
 regenerating the first one means 31 GB of rasters and an overnight pipeline
