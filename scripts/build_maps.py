@@ -21,11 +21,15 @@ and a model must not be handed a feature computed at a resolution it was never
 fitted on. The map is 16 m because SR16 and the substrate layer carry real
 detail there.
 
-**Every raster passes through suppression before export.** CLAUDE.md requires
-the capability from the start rather than as a later policy layer, so there is
-no code path here that writes a file without it. With no sensitive sites
-configured it is a no-op and says so, loudly, in the report and in the GeoTIFF
-metadata.
+**No raster is screened, and the metadata says so.** CLAUDE.md used to require
+a blur near red-listed habitat on every export. The owner withdrew that
+requirement in September 2026 and the blur was removed here on 2026-09-15,
+because the state in between - blurred maps with nothing admitting it - is the
+one this file's own reasoning calls worse than either alternative. Each GeoTIFF
+still carries a `suppression` tag saying none: an artefact that goes silent on
+the subject cannot be told apart from one made before anybody asked, and these
+rasters outlive the conversation. `src/features/suppress.py` stays in the tree,
+unused and still tested, because policy comes back.
 
 **Single-hue sequential ramp, blue, light to dark.** CLAUDE.md hard constraint
 7 forbids red-to-green anywhere: red/green reads as danger/safe, which is
@@ -59,7 +63,6 @@ import run_models as rm
 from src import species as species_cfg
 from src.features.background import null_and_background
 from src.features.stack import build
-from src.features.suppress import suppress
 from src.geometry import Boundary
 from src.model.models import LightGBM, MaxentStyle
 from src.model.predict import predict_grid, snap_grid
@@ -87,6 +90,13 @@ NATURBASE_FILE = INTERIM / "naturbase_kristiansand_25833.geojson"
 SENSITIVE_SITES: list[tuple[float, float]] = []
 SUPPRESSION_RADIUS_M = 500.0
 SUPPRESSION_MODE = "blur"
+
+# What every exported raster now records about screening. `src/features/
+# suppress.py` stays in the tree, unused and tested, because the decision that
+# retired it is a policy one and policy comes back.
+SUPPRESSION_NOTE = ("none - the red-list blur was withdrawn as a requirement "
+                    "in September 2026 and removed from this pipeline on "
+                    "2026-09-15; see FINDINGS 26g")
 
 
 def sensitive_polygons() -> list:
@@ -332,7 +342,6 @@ def main() -> int:
           f"{inside_mask.size:,} cells\n", flush=True)
 
     MAPS.mkdir(parents=True, exist_ok=True)
-    sensitive = sensitive_polygons()
     rows = []
     for name, coords in sets.items():
         t0 = time.time()
@@ -361,11 +370,19 @@ def main() -> int:
                            inside_mask=inside_mask, rows_per_block=512,
                            progress=progress)
 
-        treated, report = suppress(arr, transform, SENSITIVE_SITES,
-                                   polygons=sensitive,
-                                   radius_m=SUPPRESSION_RADIUS_M,
-                                   mode=SUPPRESSION_MODE)
-        print(f"    {report.describe()}", flush=True)
+        # Not suppressed. CLAUDE.md required a blur near red-listed habitat
+        # until the owner withdrew the requirement in September 2026; the blur
+        # itself was removed on 2026-09-15, on the owner's decision, because a
+        # half-applied version of a withdrawn rule is the worst of the three
+        # options. See FINDINGS 26g.
+        #
+        # The tag below still says so rather than going silent. An artefact
+        # that does not mention suppression cannot be told apart from one made
+        # before anybody asked the question, and these rasters outlive the
+        # conversation that produced them.
+        treated = arr
+        suppression_note = SUPPRESSION_NOTE
+        print(f"    suppression: {suppression_note}", flush=True)
 
         # The config key, not the genus. Slugging on the first word collided the
         # moment a second Craterellus was added: C. tubaeformis and
@@ -385,7 +402,7 @@ def main() -> int:
                 species=name, model=model.name,
                 fitted_on=f"{train_cfg['name']} minus {pred_cfg['name']} "
                           f"and a {buffer_m:.0f} m buffer",
-                suppression=report.describe(),
+                suppression=suppression_note,
                 not_an_edibility_assessment="true",
                 terrain_resolution="32 m, resampled to the 16 m grid",
             )
@@ -406,7 +423,7 @@ def main() -> int:
                      "median": float(np.median(finite)) if finite.size else float("nan"),
                      "p99": float(np.percentile(finite, 99)) if finite.size else float("nan"),
                      "max": float(finite.max()) if finite.size else float("nan"),
-                     "suppression": report.describe(),
+                     "suppression": suppression_note,
                      "n_train": len(tr)})
         print(f"    written in {time.time() - t0:.0f}s: {tif.name}, {png.name}\n",
               flush=True)
@@ -460,36 +477,33 @@ def write_report(rows, model, spp, train_cfg, pred_cfg, buffer_m, height, width)
           f"| {r['max']:.3f} |")
     a("")
 
-    a("## Red-list suppression\n")
-    a("CLAUDE.md requires this capability in the tile pipeline from the start, "
-      "not as a later policy layer. It is wired in: every raster above passed "
-      "through `src/features/suppress.py` before export, and the result is "
-      "recorded in each GeoTIFF's metadata.\n")
+    a("## Red-list suppression — removed\n")
+    a("**These rasters are not screened, and that is a decision rather than a "
+      "gap.** CLAUDE.md once required every raster to leave through "
+      "`src/features/suppress.py`, blurring 500 m around Naturbase sensitive "
+      "sites — 12.62% of scored cells in Kristiansand. The owner withdrew "
+      "that requirement in September 2026 and called the in-app blur option "
+      "\"stupid\"; the blur left this pipeline on 2026-09-15.\n")
     for r in rows:
         a(f"* {r['species']}: {r['suppression']}")
     a("")
-    if rows and all(r["suppression"].startswith("suppression") for r in rows):
-        a("The sensitive set comes from Miljodirektoratet Naturbase NiN "
-          "naturtyper - see [naturbase.md](naturbase.md) for the pull and for "
-          "the rule deciding what counts as sensitive. The mode is `blur`, not "
-          "`mask`, because a hole in a map is itself a signal: a sharp nodata "
-          "disc says 'something is here' as loudly as a high score would.\n")
-        a("**This is not a security control.** Naturbase is public, so a "
-          "determined reader can recover these locations from the source. "
-          "Suppression removes the fine structure that would let someone walk "
-          "to a specific stand; it raises the effort, it does not prevent.\n")
-        a("**It covers only what has been surveyed.** Most of Agder has never "
-          "been mapped for naturtyper, so these polygons mark where somebody "
-          "looked, not where the sensitive habitat is. The unmapped ground is "
-          "the larger gap and suppression cannot close it.\n")
-    else:
-        a("**These maps are not screened.** The sensitive set is empty because "
-          "Miljodirektoratet Naturbase (NiN naturtyper) has not been fetched - "
-          "run `scripts/fetch_naturbase.py`. The suppression step ran and did "
-          "nothing. Do not publish these rasters or hand them to anyone outside "
-          "the project until the sensitive set is populated: the habitats "
-          "richest in interesting fungi are disproportionately the ones holding "
-          "threatened species.\n")
+    a("The intermediate state is what forced the choice. Between the "
+      "requirement being withdrawn and the blur being removed these maps were "
+      "blurred and nothing said so — the combination `export_web_preview.py` "
+      "calls worse than either option, because *a blurred area that does not "
+      "admit it is blurred is worse than no suppression at all: the reader "
+      "trusts detail that is not there.* The three ways out were remove, "
+      "disclose, or keep and say so in Om. Remove was chosen.\n")
+    a("Two things worth keeping in view now that nothing is screened. "
+      "Naturbase is public, so suppression was never a security control — it "
+      "raised the effort of walking to a specific stand and did not prevent "
+      "it. And it only ever covered surveyed ground: most of Agder has never "
+      "been mapped for naturtyper, so the polygons marked where somebody "
+      "looked, not where sensitive habitat is. The unmapped ground was always "
+      "the larger gap and the blur could not close it.\n")
+    a("`src/features/suppress.py` stays in the tree, unused and still tested. "
+      "The decision that retired it is a policy one, and policy comes back.\n")
+    a("")
 
     a("## What the colours mean, and what they do not\n")
     a("Single-hue sequential ramp, blue, light to dark. CLAUDE.md hard "

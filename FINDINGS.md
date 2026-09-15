@@ -4468,3 +4468,48 @@ This is also the one guarantee in the project that **cannot** be added to
 a user being able to trigger a global purge would be far worse than the check
 being manual. So the verification is three SQL queries run by the owner, and
 the README now records the answer rather than the intention.
+
+### 26g. The red-list blur is removed
+
+Decided by the owner on 2026-09-15, closing the open question that had stood
+since the requirement was withdrawn. `build_maps.py` no longer calls
+`src/features/suppress.py`; the 500 m blur around 1,857 Naturbase sites, which
+touched **12.62%** of scored cells in Kristiansand, is gone from the export
+path.
+
+The choice was between three states, and what forced it was that the project
+had been sitting in the worst of them. The requirement went in September 2026
+and the in-app disclosure went with it, but the pipeline kept blurring - so the
+Kristiansand rasters were smoothed near sensitive habitat and nothing anywhere
+said so. `export_web_preview.py`'s own docstring names that combination
+exactly: *a blurred area that does not admit it is blurred is worse than no
+suppression at all, because the reader trusts detail that is not there.*
+Remove, disclose, or keep-and-say-so; remove was chosen, on the reasoning that
+a half-applied version of a withdrawn rule defends nothing.
+
+Three things this does not change, recorded so the decision is not read as
+bigger than it is:
+
+- **Nothing deployed was ever blurred.** The national build has never had a
+  suppression pass. This was always confined to `SOPP_BUILD=kommune` and the
+  Phase 0 GeoTIFFs.
+- **It was never a security control.** Naturbase is public. The blur raised the
+  effort of walking to a named stand; it could not prevent it, and the module
+  said so.
+- **It only ever covered surveyed ground.** Most of Agder has never been mapped
+  for naturtyper, so the polygons marked where somebody looked rather than
+  where sensitive habitat is. The unmapped ground was always the larger gap.
+
+Each GeoTIFF still carries a `suppression` tag, now reading *none*. Going
+silent was the one option not considered: an artefact that does not mention
+screening cannot be told apart from one made before the question was asked, and
+these rasters outlive the conversation that produced them. The module stays in
+the tree, unused and still tested, because the decision that retired it is a
+policy one and policy comes back.
+
+**The published Phase 0 GeoTIFFs are still the suppressed ones.** Regenerating
+them needs the full raster stack and an overnight run, so the code is correct
+from here and the artefacts on disk are not. That is a real inconsistency and
+it is recorded rather than glossed: anything re-exported from now on is
+unscreened, anything already in `data/processed/maps/` was screened, and their
+metadata tags are how you tell which.
