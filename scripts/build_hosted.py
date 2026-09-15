@@ -379,6 +379,21 @@ def national_about(f: dict, null_auc: float | None, excluded: list,
     return about
 
 
+def mask_meta(meta: dict) -> dict | None:
+    """The mask block for the payload, with the tile url made page-relative.
+
+    The exporter writes ids under `mask/`; the build puts them under `zones/`
+    alongside the species, so the one string that says where they live is
+    rewritten here rather than in the interface.
+    """
+    m = meta.get("mask")
+    if not m:
+        return None
+    out = dict(m)
+    out["url"] = "zones/" + str(m.get("url", "mask/{z}/{row}_{col}.png"))
+    return out
+
+
 def national_payload() -> tuple[str, dict, list[str]]:
     """`(payload script, meta, shipped species keys)` for a tiled build."""
     meta = json.loads(NAT_META.read_text(encoding="utf-8"))
@@ -405,6 +420,12 @@ def national_payload() -> tuple[str, dict, list[str]]:
             # this string and to nothing in the interface.
             "tiles": {"url": "zones/{sp}/{z}/{row}_{col}.png",
                       "cols": meta["tiles"]["cols"], "rows": meta["tiles"]["rows"]},
+            # The habitat mask, four times finer than the zone tiles, which
+            # the interface erases with so that a lake keeps its own shape
+            # instead of the 128 m diamond the grid would otherwise draw
+            # around it. Absent from a build that has not exported one, and
+            # the interface then falls back to leaving blank cells as holes.
+            "mask": mask_meta(meta),
             # One entry per pyramid level, coarsest last. Without these the app
             # holds a single resolution and the zones stop when a screenful of
             # them stops fitting in its cell budget.
@@ -473,6 +494,17 @@ def copy_tiles(out: pathlib.Path, keys: list[str]) -> tuple[int, int]:
     if dest.exists():
         shutil.rmtree(dest)
     n, size = 0, 0
+    # The mask is one set for every species - it describes the ground, not a
+    # prediction about it - so it rides under zones/ where the immutable cache
+    # header and the service worker's tile rule already reach it.
+    mask_src = NAT_TILES / "mask"
+    if mask_src.is_dir():
+        for src in sorted(mask_src.rglob("*.png")):
+            out_file = dest / "mask" / src.relative_to(mask_src)
+            out_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, out_file)
+            n += 1
+            size += src.stat().st_size
     for key in keys:
         src_dir = NAT_TILES / key
         if not src_dir.is_dir():

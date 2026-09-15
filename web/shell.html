@@ -1245,7 +1245,7 @@ function ztCommit(z,win,key){
        distribution would move every zone boundary by an amount nothing would
        report. */
     sp.smoothed_rank_lut=sp.lutAt[Math.min(z,sp.lutAt.length-1)];
-    sp._s=null;sp._lut=null;sp._hf=null;sp._sf=null;
+    sp._s=null;sp._lut=null;sp._hf=null;sp._sf=null;sp._df=null;
   }
   ztReselect();
   repaint();
@@ -1691,6 +1691,82 @@ function drawTrails(){
   ctx.restore();
 }
 
+/* ---------- the habitat mask ---------- */
+/* A zone tile holds 128 m cells and a cell that is mostly lake carries no
+   score, so the tracer had to close a ring around every one of them - and a
+   ring around a single cell can only be a diamond, four edge midpoints joined
+   up. Nationally there are 63,011 such one-cell blanks. The map came back from
+   the phone stippled with little rotated squares that matched nothing on the
+   ground: "the random squares look very weird ... it looks half done".
+
+   So the grid stops being asked to draw the edge of a 100 m tarn. The contour
+   runs through small blanks (see drawField), and the real shape is cut out
+   afterwards with this: AR50 at its own 32 m resolution, one tile per zone
+   tile position at four times the pixels, written by
+   scripts/export_mask_tiles.py. Habitat is transparent and everything else
+   opaque, which is exactly what `destination-out` consumes, so the file is
+   used as it arrives rather than decoded into a mask of our own.
+
+   Eight tiles cached. Each is a megapixel, which a browser holds as four
+   megabytes of bitmap whatever the file on disk cost, and the zoom range where
+   zones are drawn never shows more than a handful at once. */
+var MSK=D.meta.mask||null;
+var MK={cache:{},order:[],MAX:8,has:null};
+if(MSK&&MSK.tiles){
+  MK.has=MSK.tiles.map(function(ids){
+    var h={},i;for(i=0;i<ids.length;i++)h[ids[i]]=1;return h;});
+}
+function mkURL(z,r,c){
+  return String(MSK.url).split("{z}").join(z)
+         .split("{row}").join(r).split("{col}").join(c);
+}
+function mkTile(z,r,c){
+  var id=r+"_"+c;
+  if(MK.has&&(!MK.has[z]||!MK.has[z][id]))return null;   // never written
+  var k=z+"/"+id,e=MK.cache[k];
+  if(e){
+    /* Touch it, so the eight that survive are the eight in use rather than the
+       eight fetched most recently. */
+    var at=MK.order.indexOf(k);
+    if(at>=0){MK.order.splice(at,1);MK.order.push(k);}
+    return e;
+  }
+  e={img:new Image(),ok:false};
+  e.img.onload=function(){e.ok=true;requestDraw();};
+  e.img.onerror=function(){e.bad=true;};
+  e.img.src=mkURL(z,r,c);
+  MK.cache[k]=e;MK.order.push(k);
+  while(MK.order.length>MK.MAX){var old=MK.order.shift();delete MK.cache[old];}
+  return e;
+}
+/* Erase everything that is not habitat out of whatever has just been painted.
+   Only the tiles the screen actually overlaps: the loaded window is larger
+   than the viewport and fetching mask tiles for ground nobody is looking at
+   would be bytes and bitmap for nothing. */
+function mkErase(g){
+  if(!MSK||!TILED)return;
+  var z=ZT.z,side=ZT.tile*CELL;
+  if(!(side>0)||!isFinite(side))return;
+  var wl=view.cx-CW*view.mpp/2,wr=view.cx+CW*view.mpp/2;
+  var wb=view.cy-CH*view.mpp/2,wt=view.cy+CH*view.mpp/2;
+  var c0=Math.floor((wl-NOX)/side),c1=Math.floor((wr-NOX)/side);
+  var r0=Math.floor((NOY-wt)/side),r1=Math.floor((NOY-wb)/side);
+  g.save();
+  g.setTransform(DPR,0,0,DPR,0,0);
+  g.globalCompositeOperation="destination-out";
+  for(var r=r0;r<=r1;r++)for(var c=c0;c<=c1;c++){
+    if(r<0||c<0)continue;
+    var e=mkTile(z,r,c);
+    if(!e||!e.ok)continue;
+    /* Rounded the same way at both edges, so neighbouring tiles land on one
+       integer boundary and no unerased hairline opens between them. */
+    var tl=w2s(NOX+c*side,NOY-r*side),br=w2s(NOX+(c+1)*side,NOY-(r+1)*side);
+    var x0=Math.round(tl[0]),y0=Math.round(tl[1]);
+    g.drawImage(e.img,x0,y0,Math.round(br[0])-x0,Math.round(br[1])-y0);
+  }
+  g.restore();
+}
+
 /* ---------- zones ---------- */
 /* The heat surface reads as a wash, which is honest about a continuous score
    but hard to act on. This traces three percentile thresholds through the same
@@ -1796,8 +1872,50 @@ function smoothPct(sp){
   for(var k=0;k<N;k++) if(!by[k]) P[k]=0;
   return P;
 }
-function buildZones(sp,levels){
+/* The field the contours are traced from, which is not quite the field the
+   card reports.
+
+   With the mask doing the cutting, a blank cell no longer has to be a hole in
+   the geometry - and it should not be one, because at 128 m a hole is a
+   diamond. Two passes of growing the field into its blanks let a contour run
+   straight over a small tarn or a house or two; anything larger stays blank in
+   the middle, because two passes only reach two cells in. Whatever the growth
+   puts over ground that grows nothing is then erased by mkErase at 32 m, which
+   is the whole point: the boundary ends up drawn at the mask's resolution
+   instead of the grid's.
+
+   `smoothField` itself is untouched, so a tap over water still finds no zone
+   and the card still says so. The drawing is allowed to be smoother than the
+   grid; it is not allowed to make a claim the card would contradict. */
+function drawField(sp){
   var P=smoothField(sp);
+  if(!MSK)return P;
+  if(sp._df)return sp._df;
+  var by=sp.bytes,N=GW*GH,A=new Float32Array(P),B=new Float32Array(N);
+  var have=new Uint8Array(N),i,x,y,dx,dy,pass;
+  for(i=0;i<N;i++)have[i]=by[i]?1:0;
+  for(pass=0;pass<2;pass++){
+    B.set(A);
+    var next=new Uint8Array(have);
+    for(y=0;y<GH;y++)for(x=0;x<GW;x++){
+      i=y*GW+x;
+      if(have[i])continue;
+      var sum=0,n=0;
+      for(dy=-1;dy<=1;dy++)for(dx=-1;dx<=1;dx++){
+        var xx=x+dx,yy=y+dy;
+        if(xx<0||yy<0||xx>=GW||yy>=GH)continue;
+        var j=yy*GW+xx;
+        if(!have[j])continue;
+        sum+=A[j];n++;
+      }
+      if(n){B[i]=sum/n;next[i]=1;}
+    }
+    A.set(B);have=next;
+  }
+  sp._df=A;return A;
+}
+function buildZones(sp,levels){
+  var P=drawField(sp);
   /* Outside the grid counts as zero, so every contour closes and no region is
      left as an open curve that cannot be filled. */
   function at(x,y){return (x<0||y<0||x>=GW||y>=GH)?0:P[y*GW+x];}
@@ -1903,10 +2021,33 @@ function simplifyRing(r){
   out.push(r[r.length-1]);
   return out;
 }
+/* Painted onto a surface of its own when there is a mask, because the erase
+   has to take out the zones and nothing else. Done on the map canvas it would
+   cut a hole through the Kartverket sheet underneath as well. */
+var zoneC=null,zoneCtx=null;
+function zoneSurface(){
+  if(!zoneC){zoneC=document.createElement("canvas");zoneCtx=zoneC.getContext("2d");}
+  if(zoneC.width!==canvas.width||zoneC.height!==canvas.height){
+    zoneC.width=canvas.width;zoneC.height=canvas.height;
+  }else{
+    zoneCtx.setTransform(1,0,0,1,0,0);
+    zoneCtx.clearRect(0,0,zoneC.width,zoneC.height);
+  }
+  return zoneCtx;
+}
 function drawZones(){
   if(!(view.mpp>0)||!isFinite(view.mpp))return;
-  ctx.save();
-  ctx.lineJoin="round";ctx.lineCap="round";
+  /* Nothing traced yet - zoomed out past the zone levels, or the window is
+     still loading. Worth returning here rather than inside the loop, because
+     the surface below costs a clear and a blit of the whole canvas and both
+     would be spent on an empty picture. */
+  var any=false;
+  for(var q=0;q<SEL.length;q++) if(SEL[q]._zones){any=true;break;}
+  if(!any)return;
+  var off=(MSK&&TILED)?zoneSurface():null;
+  var g=off||ctx;
+  g.save();
+  g.lineJoin="round";g.lineCap="round";
   /* Painted back to front in selection order, so the species the card is
      reporting on - the first one - ends up on top rather than buried. */
   for(var sIdx=SEL.length-1;sIdx>=0;sIdx--){
@@ -1921,18 +2062,25 @@ function drawZones(){
        settles. Scaling both by the current one would stretch the older. */
     var C=z.cell,k2=C/view.mpp;
     if(!(k2>0)||!isFinite(k2))continue;
-    ctx.setTransform(DPR,0,0,DPR,0,0);
-    ctx.translate((z.ox+0.5*C-view.cx)/view.mpp+CW/2,
-                  (view.cy-z.oy+0.5*C)/view.mpp+CH/2);
-    ctx.scale(k2,k2);
+    g.setTransform(DPR,0,0,DPR,0,0);
+    g.translate((z.ox+0.5*C-view.cx)/view.mpp+CW/2,
+                (view.cy-z.oy+0.5*C)/view.mpp+CH/2);
+    g.scale(k2,k2);
     for(var i=0;i<z.levels.length;i++){
       var pth=z.paths[i];if(!pth)continue;
       var lv=z.levels[i];
-      if(lv.fill!=="rgba(0,0,0,0)"){ctx.fillStyle=lv.fill;ctx.fill(pth,"evenodd");}
-      ctx.strokeStyle=lv.line;ctx.lineWidth=lv.w/k2;ctx.stroke(pth);
+      if(lv.fill!=="rgba(0,0,0,0)"){g.fillStyle=lv.fill;g.fill(pth,"evenodd");}
+      g.strokeStyle=lv.line;g.lineWidth=lv.w/k2;g.stroke(pth);
     }
   }
-  ctx.restore();
+  g.restore();
+  if(off){
+    mkErase(off);
+    ctx.save();
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.drawImage(zoneC,0,0);
+    ctx.restore();
+  }
 }
 /* Zone geometry is expensive - marching squares over the whole grid, three
    times - so it is cached on the species and only rebuilt when the selection
@@ -3629,7 +3777,7 @@ try{ document.addEventListener("visibilitychange",function(){
     COND=j;
     /* Zones are ranked on habitat *and* conditions, so a newer forecast
        invalidates the cached surface for every species. */
-    D.species.forEach(function(s){s._sf=null;});
+    D.species.forEach(function(s){s._sf=null;s._df=null;});
     renderCondPill();
     repaint();draw();
     if(selected>=0)show(selected);

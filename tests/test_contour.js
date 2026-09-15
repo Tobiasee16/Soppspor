@@ -4,7 +4,10 @@
 const fs = require("fs");
 
 const t = fs.readFileSync(__dirname + "/../web/shell.html", "utf8");
-const start = t.indexOf("function buildZones(");
+// drawField sits just above buildZones and feeds it, so the slice starts
+// there. With MSK null it hands the field straight back, which is the
+// behaviour every case below was written against.
+const start = t.indexOf("function drawField(");
 const end = t.indexOf("function drawZones()");
 if (start < 0 || end < 0) throw new Error("could not locate the contour block");
 const src = t.slice(start, end);
@@ -22,7 +25,7 @@ function smoothField() { return FIELD; }
 function pctLUT() { return null; }
 
 const run = new Function(
-  "GW", "GH", "Path2D", "smoothField", "pctLUT",
+  "GW", "GH", "Path2D", "smoothField", "pctLUT", "MSK",
   src + "\nreturn buildZones;");
 
 function build(w, h, field, levels) {
@@ -30,7 +33,7 @@ function build(w, h, field, levels) {
   // buildZones takes the species and its band list and *returns* the paths now,
   // instead of writing one module-level global: several species are drawn at
   // once and each keeps its own set.
-  const buildZones = run(GW, GH, Path2D, smoothField, pctLUT);
+  const buildZones = run(GW, GH, Path2D, smoothField, pctLUT, null);
   return buildZones({ key: "test" }, levels);
 }
 
