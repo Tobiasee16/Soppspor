@@ -4791,3 +4791,85 @@ asserts which files were asked for and how many times - including that a failed
 request is remembered rather than retried forever.
 
 Suite: **810 -> 811** pytest cases.
+
+## 29. Two-finger rotation - 2026-09-15
+
+Asked for as "rotate the direction of the map ... like google maps". Built in
+the order the risk demanded: the guard first, then the transform, then the
+gesture, then everything that had quietly assumed the map points north.
+
+### 29a. The guard, and why a round-trip was not one
+
+The dangerous path is not the drawing. It is this, in `armLongPress`:
+
+```js
+var w = s2w(cx - r.left, cy - r.top);
+var s = addSpot(w);
+```
+
+A long press turns a screen tap into a world coordinate and **saves it**. An
+inverse that is wrong under rotation stores somebody's mushroom spot in the
+wrong wood, silently, as a perfectly plausible pin. Saved spots are the one
+thing in this app that is genuinely the user's.
+
+So `tests/test_projection.js` was written before `view.rot` existed, asserting
+
+```
+s2w(w2s(p)) == p      for every rotation, zoom and point
+```
+
+**It passed at every angle against the pre-rotation transform.** Both functions
+ignored `rot` identically, so they remained exact inverses of each other while
+being entirely wrong about the geometry, and a self-consistency check cannot
+tell that from correct. The only assertion that failed was the throwaway one -
+*rotating the view moves where a point draws* - at 0.0 px.
+
+That is the finding worth keeping: **a function and its inverse can agree
+perfectly while both are broken the same way.** The file now also pins answers
+worked out by hand - at 90 degrees a point 5 km north draws 78.125 px to the
+right, at 180 that far down, at 37 the distance from centre is unchanged
+because a rotation turns without scaling. Those constrain the geometry; the
+round trip only constrains the two functions to each other.
+
+### 29b. What had assumed north
+
+Twelve places computed the visible world rectangle as `CW*mpp/2` by
+`CH*mpp/2` - every basemap and zone tile window, `clampView`, and the cull
+tests in the trail, tile and mask draws. A rotated viewport is a rotated
+rectangle, and the tiles it needs are the ones covering its **bounding box**:
+about twice as wide at 45 degrees, and simply swapped at 90.
+
+All twelve now go through `vhw()` / `vhh()`. The invariant tested is not "the
+box is bigger", which is false at 90 degrees on a tall screen, but that **all
+four corners of what the reader can see fall inside it**. Miss that and tiles
+vanish diagonally, which reads as a loading glitch rather than as a bug.
+
+### 29c. The gesture, and the threshold that makes it usable
+
+Two fingers never change distance without also changing angle, so rotation
+engages only after `ROT_START` - about 8 degrees of accumulated turn - or every
+pinch-zoom leaves the map a few degrees askew and it never comes back. Within
+`ROT_SNAP`, about 2 degrees, the map snaps to true north: otherwise it sits at
+0.4 degrees for the rest of the session and every tile window pays the rotated
+price for a rotation nobody can see.
+
+Zoom and rotation share **one** anchor correction rather than one each. Both
+want the ground under the fingers to stay under the fingers, and doing that
+twice in a frame fights itself.
+
+The compass appears only when the map is off north and taps back to it. Hidden
+at north deliberately: a control that does nothing is clutter, and a reader who
+has never rotated the map should never meet one. Its needle points where north
+actually is - a point due north draws at screen offset `(sin rot, -cos rot)`,
+which is "up" turned clockwise by `rot`, and a CSS `rotate()` turns clockwise
+too, so the angle goes straight through.
+
+### 29d. What the stubs had to learn
+
+Three existing suites broke the moment the tile window read `view.rot`:
+`test_tiles.js`, `test_mask_cut.js` and `test_trails_fylke.js` all build stub
+environments, and `Math.cos(undefined)` is `NaN`. They now take the real
+`vhw`/`vhh` source rather than a stub of it - a fake would be testing a
+viewport this app no longer has - and their views carry `rot: 0`.
+
+Suite: **811 -> 812** pytest cases, 42 assertions in the projection file alone.

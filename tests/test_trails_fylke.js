@@ -60,7 +60,7 @@ function harness(opts) {
     TR_PACKS: [],
     PREF: { trails: true },
     CW: 400, CH: 400,
-    view: { cx: 50000, cy: 50000, mpp: 50 },   // 20 km across, inside "a"
+    view: { cx: 50000, cy: 50000, mpp: 50, rot: 0 },   // 20 km across, inside "a"
     requestDraw: function () {},
     trailPack: function (d) { return { d: d, buckets: [] }; },
     fetch: function (u) {
@@ -70,7 +70,7 @@ function harness(opts) {
         : { ok: true, json: function () { return Promise.resolve({ stub: u }); } });
     },
   };
-  const fn = new Function("env", "with(env){" + grab("ensureTrails")
+  const fn = new Function("env", "with(env){" + grab("vhw") + grab("vhh") + grab("ensureTrails")
     + "\nreturn ensureTrails;}")(env);
   return { env: env, asked: asked, run: fn };
 }

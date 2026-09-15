@@ -399,6 +399,11 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
       <button class="fab" id="findBtn" aria-label="Søk etter sted eller adresse">
         <svg viewBox="0 0 24 24"><circle cx="10.6" cy="10.6" r="6.4"/>
           <path d="M15.4 15.4 21 21"/></svg></button>
+      <button class="fab" id="compass" aria-label="Vend kartet mot nord" hidden>
+        <svg viewBox="0 0 24 24" id="compassRose" aria-hidden="true">
+          <path d="M12 3 16 13 12 11 8 13Z" fill="currentColor" stroke="none"/>
+          <path d="M12 11 16 13 12 21 8 13Z" fill="none"/>
+        </svg></button>
       <button class="fab" id="gps" aria-label="Finn meg" aria-pressed="false">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.4"/><circle cx="12" cy="12" r="8"/>
           <path d="M12 1.6v2.6M12 19.8v2.6M22.4 12h-2.6M4.2 12H1.6"/></svg></button>
@@ -1009,10 +1014,10 @@ function rtGet(name,z,row,col){
 function rtRange(z){
   var span=RT_TILE*rtResOf(z);
   return {span:span,
-    c0:Math.floor((view.cx-CW*view.mpp/2-RT_OX)/span),
-    c1:Math.floor((view.cx+CW*view.mpp/2-RT_OX)/span),
-    r0:Math.floor((RT_OY-(view.cy+CH*view.mpp/2))/span),
-    r1:Math.floor((RT_OY-(view.cy-CH*view.mpp/2))/span)};
+    c0:Math.floor((view.cx-vhw()-RT_OX)/span),
+    c1:Math.floor((view.cx+vhw()-RT_OX)/span),
+    r0:Math.floor((RT_OY-(view.cy+vhh()))/span),
+    r1:Math.floor((RT_OY-(view.cy-vhh()))/span)};
 }
 function rtPaint(e){
   var b=e.bbox,tl=w2s(b[0],b[3]),br=w2s(b[2],b[1]);
@@ -1062,7 +1067,7 @@ function requestDraw(){ if(_pending)return; _pending=true;
 function maxMpp(){return Math.min((BOUNDS[2]-BOUNDS[0])/CW,(BOUNDS[3]-BOUNDS[1])/CH);}
 function clampView(){
   view.mpp=Math.min(Math.max(view.mpp,minMpp()),maxMpp());
-  var hw=CW*view.mpp/2,hh=CH*view.mpp/2,lo,hi;
+  var hw=vhw(),hh=vhh(),lo,hi;
   lo=BOUNDS[0]+hw; hi=BOUNDS[2]-hw;
   view.cx = lo>hi ? (BOUNDS[0]+BOUNDS[2])/2 : Math.min(Math.max(view.cx,lo),hi);
   lo=BOUNDS[1]+hh; hi=BOUNDS[3]-hh;
@@ -1090,6 +1095,21 @@ function s2w(x,y){
   var dx=x-CW/2,dy=y-CH/2,r=view.rot;
   if(r){var c=Math.cos(r),s=Math.sin(r),rx=dx*c+dy*s;dy=-dx*s+dy*c;dx=rx;}
   return[dx*view.mpp+view.cx,view.cy-dy*view.mpp];}
+/* Half the width and height of the smallest north-aligned world rectangle that
+   contains the viewport.
+
+   At rot 0 these are exactly CW*mpp/2 and CH*mpp/2, which is what every tile
+   window and cull test used directly before the map could turn. Rotated they
+   are not: at 45 degrees the bounding box of a 412x780 screen is about twice
+   as wide, and at 90 degrees the two simply swap. Anything still computing
+   from the screen dimensions loses tiles at the corners the moment the map
+   comes off north - visibly, but only diagonally, which is the kind of thing
+   that looks like a loading glitch. */
+function vhw(){var c=Math.abs(Math.cos(view.rot)),s=Math.abs(Math.sin(view.rot));
+  return (CW*c+CH*s)*view.mpp/2;}
+function vhh(){var c=Math.abs(Math.cos(view.rot)),s=Math.abs(Math.sin(view.rot));
+  return (CW*s+CH*c)*view.mpp/2;}
+
 
 /* ---------- the estimate, fetched as you move ---------- */
 /* Kristiansand ships its whole suitability surface inside the page: 3.78 MB of
@@ -1220,7 +1240,7 @@ function ztTile(key,z,row,col){
    one. At the country's edge there is nothing beyond to include, which is
    correct - the national surface had no neighbours there either. */
 function ztNeed(lv,m){
-  var hw=CW*view.mpp/2*(1+m),hh=CH*view.mpp/2*(1+m),C=lv.cell_m;
+  var hw=vhw()*(1+m),hh=vhh()*(1+m),C=lv.cell_m;
   return {x0:Math.max(0,Math.floor((view.cx-hw-NOX)/C)-ZT_HALO),
           x1:Math.min(lv.grid.w,Math.ceil((view.cx+hw-NOX)/C)+ZT_HALO),
           y0:Math.max(0,Math.floor((NOY-view.cy-hh)/C)-ZT_HALO),
@@ -1759,8 +1779,8 @@ function trailPack(d){
    a phone's battery disappears. */
 function ensureTrails(){
   if(!TR_INDEX||!PREF.trails)return;
-  var wl=view.cx-CW*view.mpp/2,wr=view.cx+CW*view.mpp/2;
-  var wb=view.cy-CH*view.mpp/2,wt=view.cy+CH*view.mpp/2;
+  var wl=view.cx-vhw(),wr=view.cx+vhw();
+  var wb=view.cy-vhh(),wt=view.cy+vhh();
   TR_INDEX.fylker.forEach(function(f){
     if(TR_STATE[f.slug])return;
     var b=f.bbox;
@@ -1784,8 +1804,8 @@ function drawTrails(){
   ctx.save();
   ctx.setTransform(DPR,0,0,DPR,0,0);
   ctx.lineJoin="round";ctx.lineCap="round";
-  var wl=view.cx-CW*view.mpp/2,wr=view.cx+CW*view.mpp/2;
-  var wb=view.cy-CH*view.mpp/2,wt=view.cy+CH*view.mpp/2;
+  var wl=view.cx-vhw(),wr=view.cx+vhw();
+  var wb=view.cy-vhh(),wt=view.cy+vhh();
   TR_PACKS.forEach(function(pk){
     var d=pk.d,u=d.unit_m,ox=d.origin[0],oy=d.origin[1],ext=d.extent,B=d.buckets;
     var k=u/view.mpp;
@@ -1875,8 +1895,8 @@ function mkErase(g){
   if(!MSK||!TILED)return;
   var z=ZT.z,side=ZT.tile*CELL;
   if(!(side>0)||!isFinite(side))return;
-  var wl=view.cx-CW*view.mpp/2,wr=view.cx+CW*view.mpp/2;
-  var wb=view.cy-CH*view.mpp/2,wt=view.cy+CH*view.mpp/2;
+  var wl=view.cx-vhw(),wr=view.cx+vhw();
+  var wb=view.cy-vhh(),wt=view.cy+vhh();
   var c0=Math.floor((wl-NOX)/side),c1=Math.floor((wr-NOX)/side);
   var r0=Math.floor((NOY-wt)/side),r1=Math.floor((NOY-wb)/side);
   g.save();
@@ -2287,8 +2307,8 @@ function syncLegend(){
 function condStamp(){return COND&&COND.last_day||"";}
 
 function drawTiles(tiles){
-  var wl=view.cx-CW*view.mpp/2,wr=view.cx+CW*view.mpp/2;
-  var wb=view.cy-CH*view.mpp/2,wt=view.cy+CH*view.mpp/2;
+  var wl=view.cx-vhw(),wr=view.cx+vhw();
+  var wb=view.cy-vhh(),wt=view.cy+vhh();
   for(var i=0;i<tiles.length;i++){
     var t=tiles[i],b=t.bbox;
     if(b[2]<wl||b[0]>wr||b[3]<wb||b[1]>wt)continue;
@@ -2425,6 +2445,14 @@ function zoomTo(target,ax,ay,ms){
   }
   zoomId=requestAnimationFrame(step);
 }
+/* Rotation engages only after the fingers have turned through ROT_START.
+   Without it every pinch-zoom tilts the map a couple of degrees, because two
+   fingers never change distance without also changing angle, and the map ends
+   up permanently askew from gestures nobody meant as rotations. */
+var ROT_START=0.14;          // ~8 degrees of accumulated turn
+var ROT_SNAP=0.035;          // ~2 degrees: close enough to north to be north
+var rotAccum=0,rotOn=false;
+
 canvas.addEventListener("pointerdown",function(e){
   stopGlide();stopZoom();
   try{canvas.setPointerCapture(e.pointerId);}catch(err){}
@@ -2434,25 +2462,49 @@ canvas.addEventListener("pointerdown",function(e){
     startX=e.clientX;startY=e.clientY;
     lastT=performance.now();vx=0;vy=0;
     armLongPress(e.clientX,e.clientY);
-  }else{ reseat(); moved=99; cancelLongPress(); }});
+  }else{ reseat(); moved=99; cancelLongPress();
+         rotAccum=0; rotOn=false; }});
 canvas.addEventListener("pointermove",function(e){
   if(!pts[e.pointerId])return;
   var ids=Object.keys(pts);
   if(ids.length>=2){var a=pts[ids[0]],b=pts[ids[1]],prev=Math.hypot(a.x-b.x,a.y-b.y);
+    var prevA=Math.atan2(b.y-a.y,b.x-a.x);
     var r0=canvas.getBoundingClientRect();
     var ax=((a.x+b.x)/2)-r0.left, ay=((a.y+b.y)/2)-r0.top;
     pts[e.pointerId]={x:e.clientX,y:e.clientY};a=pts[ids[0]];b=pts[ids[1]];
     var now=Math.hypot(a.x-b.x,a.y-b.y);
+    var nowA=Math.atan2(b.y-a.y,b.x-a.x);
     if(prev>2&&now>2){
       /* Fingers crossing or a dropped event can produce a wild ratio; a single
          move should never change the scale by more than a little. */
       var k2=Math.min(2,Math.max(0.5,prev/now));
+      /* The turn since the last move, brought into (-pi, pi]: the raw
+         difference jumps by a full turn whenever atan2 wraps, and a single
+         frame that says the fingers spun 350 degrees would fling the map. */
+      var da=nowA-prevA;
+      while(da>Math.PI)da-=2*Math.PI;
+      while(da<-Math.PI)da+=2*Math.PI;
+      if(!rotOn){
+        rotAccum+=da;
+        if(Math.abs(rotAccum)>ROT_START)rotOn=true;
+      }
+      /* One anchor correction for both transforms. Zoom and rotation each want
+         the ground under the fingers to stay under the fingers, and doing that
+         twice fights itself. */
       var before=s2w(ax,ay);
       view.mpp*=k2;
+      if(rotOn&&Math.abs(da)<0.6){
+        view.rot+=da;
+        if(view.rot>Math.PI)view.rot-=2*Math.PI;
+        if(view.rot<-Math.PI)view.rot+=2*Math.PI;
+        /* Near enough to north is north, or the map sits at 0.4 degrees for
+           the rest of the session and every tile window pays for it. */
+        if(Math.abs(view.rot)<ROT_SNAP)view.rot=0;
+      }
       clampView();
       var after=s2w(ax,ay);
       view.cx+=before[0]-after[0];view.cy+=before[1]-after[1];
-      clampView();requestDraw();}
+      clampView();requestDraw();renderCompass();}
     moved=99;vx=0;vy=0;return;}
   if(!last){last={x:e.clientX,y:e.clientY};return;}
   var dx=e.clientX-last.x,dy=e.clientY-last.y;
@@ -2687,6 +2739,35 @@ function pushOneDelete(s){
        headers:Object.assign(sbHeaders(),{Prefer:"resolution=merge-duplicates"}),
        body:JSON.stringify([toRow(s)])});
   }).catch(function(){});
+}
+/* The compass appears only when the map is off north, and taps back to it.
+   Hidden at north on purpose: a control that does nothing is clutter, and the
+   reader who has never rotated the map should never see one. `hidden` needs
+   the author-origin rule from 25j to beat `.fab`.
+
+   The needle points where north actually is. A point due north draws at screen
+   offset (sin rot, -cos rot), which is "up" turned clockwise by rot - and a
+   CSS rotate() turns clockwise too, so the angle goes straight through. */
+function renderCompass(){
+  var el=document.getElementById("compass");
+  if(!el)return;
+  var on=Math.abs(view.rot)>1e-6;
+  el.hidden=!on;
+  if(on){
+    var rose=document.getElementById("compassRose");
+    if(rose)rose.style.transform="rotate("+view.rot+"rad)";
+  }
+}
+function faceNorth(){
+  if(!view.rot)return;
+  var from=view.rot,t0=performance.now(),ms=260;
+  (function step(){
+    var t=Math.min(1,(performance.now()-t0)/ms),e=1-Math.pow(1-t,3);
+    view.rot=from*(1-e);
+    if(t>=1)view.rot=0;
+    clampView();draw();renderCompass();
+    if(t<1)requestAnimationFrame(step);
+  })();
 }
 function drawSpots(){
   for(var i=0;i<SPOTS.length;i++){
@@ -3978,6 +4059,9 @@ if(SB&&PREF.sync!==false)syncNow(true);
 
 wireSeg("segTheme",function(v){PREF.theme=v;applyTheme();draw();});
 wireSeg("segBase",function(v){PREF.base=v;requestDraw();});
+(function(){var c=document.getElementById("compass");
+  if(c)c.addEventListener("click",faceNorth);})();
+renderCompass();
 document.getElementById("swTrails").addEventListener("change",function(e){
   PREF.trails=e.target.checked;savePrefs();requestDraw();});
 document.getElementById("swTrails").checked=!!PREF.trails;

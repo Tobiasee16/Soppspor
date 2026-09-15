@@ -38,14 +38,14 @@ function grab(name) {
 const consts = shell.slice(shell.indexOf("var RT_BASE="),
                            shell.indexOf("function rtResOf("))
   + (shell.match(/var RT_BUDGET=\d+;/) || [""])[0];
-const src = consts + ["rtResOf", "rtCount", "rtLevel", "rtTileBox", "rtRange"].map(grab).join("\n");
+const src = consts + ["vhw", "vhh", "rtResOf", "rtCount", "rtLevel", "rtTileBox", "rtRange"].map(grab).join("\n");
 
 function api(view, DPR, CW, CH) {
   return new Function("view", "DPR", "CW", "CH",
     src + "return {rtResOf,rtCount,rtLevel,rtTileBox,rtRange,RT_BASE,RT_LAYER,RT_OX,RT_OY,RT_RES0,RT_TILE,RT_ZMAX,RT_BUDGET};")(
       view, DPR, CW, CH);
 }
-const T = api({ cx: 0, cy: 0, mpp: 10 }, 1, 400, 800);
+const T = api({ cx: 0, cy: 0, mpp: 10, rot: 0 }, 1, 400, 800);
 
 // --------------------------------------------------------- the grid itself --
 check("origin matches the service's WMTSCapabilities",
@@ -89,7 +89,7 @@ check("tiles are 256 px", T.RT_TILE === 256);
 {
   // A tile should never be coarser than the screen, or the map is blurred.
   for (const [mpp, dpr] of [[100, 1], [10, 2], [2, 3], [0.15, 3], [0.15, 1]]) {
-    const t = api({ cx: 76000, cy: 6467000, mpp }, dpr, 400, 800);
+    const t = api({ cx: 76000, cy: 6467000, mpp, rot: 0 }, dpr, 400, 800);
     const z = t.rtLevel(), res = t.rtResOf(z);
     const want = mpp / dpr * 1.3;
     // Level 18 is the finest the service publishes. Past that the basemap is
@@ -102,14 +102,14 @@ check("tiles are 256 px", T.RT_TILE === 256);
     check(`  ...and not needlessly finer than one level`,
           z === 0 || t.rtResOf(z - 1) > want, `level ${z}`);
   }
-  const deep = api({ cx: 0, cy: 0, mpp: 0.001 }, 3, 400, 800);
+  const deep = api({ cx: 0, cy: 0, mpp: 0.001, rot: 0 }, 3, 400, 800);
   check("an absurd zoom clamps to the deepest level the service has",
         deep.rtLevel() === T.RT_ZMAX, String(deep.rtLevel()));
 }
 
 // -------------------------------------------------- the range on screen --
 {
-  const t = api({ cx: 76000, cy: 6467000, mpp: 2 }, 3, 400, 800);
+  const t = api({ cx: 76000, cy: 6467000, mpp: 2, rot: 0 }, 3, 400, 800);
   const z = t.rtLevel(), g = t.rtRange(z);
   const nx = g.c1 - g.c0 + 1, ny = g.r1 - g.r0 + 1;
   check("a phone screen needs a sane number of tiles", nx * ny > 0 && nx * ny <= 80,
@@ -169,7 +169,7 @@ check("tiles are 256 px", T.RT_TILE === 256);
   for (const [CW, CH] of screens)
     for (const DPR of [1, 2, 3])
       for (let mpp = 0.15; mpp < 5000; mpp *= 1.15) {
-        const t = api({ cx: 76000, cy: 6467000, mpp }, DPR, CW, CH);
+        const t = api({ cx: 76000, cy: 6467000, mpp, rot: 0 }, DPR, CW, CH);
         const z = t.rtLevel(), n = t.rtCount(z);
         if (n > worst) { worst = n; worstAt = CW + "x" + CH + " DPR" + DPR + " "
                          + mpp.toFixed(2) + " m/px -> z" + z; }
@@ -184,7 +184,7 @@ check("tiles are 256 px", T.RT_TILE === 256);
 // The budget must still leave an ordinary phone genuinely sharp, or it has
 // solved the data problem by making the map worse.
 {
-  const t = api({ cx: 76000, cy: 6467000, mpp: 5 }, 3, 400, 800);
+  const t = api({ cx: 76000, cy: 6467000, mpp: 5, rot: 0 }, 3, 400, 800);
   const z = t.rtLevel();
   const upscale = t.rtResOf(z) / (5 / 3);
   check("a phone at 5 m/px still gets near device-pixel tiles", upscale <= 1.35,

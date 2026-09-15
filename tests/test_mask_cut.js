@@ -112,7 +112,7 @@ function run(withMask) {
  * of it inside tile row 1, column 1.
  */
 {
-  const view = { cx: 40000, cy: 50000, mpp: 10 };
+  const view = { cx: 40000, cy: 50000, mpp: 10, rot: 0 };
   const CW = 400, CH = 800, NOX = 0, NOY = 100000;
   const w2s = (e, n) => [(e - view.cx) / view.mpp + CW / 2,
                          (view.cy - n) / view.mpp + CH / 2];
@@ -134,7 +134,10 @@ function run(withMask) {
 
   const ARGS = ["MSK", "MK", "TILED", "ZT", "CELL", "view", "CW", "CH",
                 "NOX", "NOY", "DPR", "w2s", "requestDraw", "Image", "g"];
-  const SRC = grab("mkURL") + grab("mkTile") + grab("mkErase") + "mkErase(g);";
+  /* vhw/vhh ride along: the erase window follows the rotated viewport now,
+     so stubbing them would test a viewport the app no longer has. */
+  const SRC = grab("vhw") + grab("vhh")
+            + grab("mkURL") + grab("mkTile") + grab("mkErase") + "mkErase(g);";
   new Function(...ARGS, SRC)(
     MSK, MK, true, { z: 0, tile: 256 }, 128, view, CW, CH, NOX, NOY,
     1, w2s, () => {}, class {}, g);

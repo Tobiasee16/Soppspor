@@ -151,6 +151,52 @@ ROTS.forEach(function (rot) {
     r37.toFixed(4) + " px against " + px + " expected");
 }
 
+/* ---- the viewport's bounding box, which is what stops tiles going missing ----
+ *
+ * Every tile window and cull test is computed from vhw/vhh rather than from
+ * the screen size, because a rotated viewport is a rotated rectangle and the
+ * tiles it needs are the ones covering its bounding box. The invariant is not
+ * "vhw is bigger" - at 90 degrees on a tall screen it is smaller - it is that
+ * **all four corners of what the reader can see fall inside the box**. Miss
+ * that and tiles vanish diagonally, which reads as a loading glitch rather
+ * than as a bug.
+ */
+function halves(rotDeg, mpp) {
+  const env = {
+    CW: 412, CH: 780,
+    view: { cx: 440000, cy: 6450000, mpp: mpp, rot: rotDeg * Math.PI / 180 },
+  };
+  return new Function("env", "with(env){" + grab("vhw") + grab("vhh")
+    + grab("s2w") + "\n"
+    + "return {vhw:vhw,vhh:vhh,s2w:s2w,env:env};}")(env);
+}
+
+[0, 15, 30, 45, 60, 90, 137, -30].forEach(function (rot) {
+  const H = halves(rot, 64);
+  const hw = H.vhw(), hh = H.vhh();
+  const cx = H.env.view.cx, cy = H.env.view.cy;
+  let inside = true, worst = 0;
+  [[0, 0], [H.env.CW, 0], [0, H.env.CH], [H.env.CW, H.env.CH]].forEach(function (c) {
+    const w = H.s2w(c[0], c[1]);
+    const ox = Math.abs(w[0] - cx) - hw, oy = Math.abs(w[1] - cy) - hh;
+    worst = Math.max(worst, ox, oy);
+    if (ox > 1e-6 || oy > 1e-6) inside = false;
+  });
+  check("every screen corner is inside the tile box at " + rot + "°", inside,
+    "worst overhang " + worst.toFixed(3) + " m");
+});
+
+{
+  const a = halves(0, 64), b = halves(90, 64);
+  check("at 90° the box swaps its sides",
+    Math.abs(a.vhw() - b.vhh()) < 1e-6 && Math.abs(a.vhh() - b.vhw()) < 1e-6,
+    a.vhw().toFixed(0) + "/" + a.vhh().toFixed(0) + " against "
+    + b.vhw().toFixed(0) + "/" + b.vhh().toFixed(0));
+  const d = halves(45, 64);
+  check("at 45° the box is wider than the screen", d.vhw() > a.vhw(),
+    d.vhw().toFixed(0) + " m against " + a.vhw().toFixed(0) + " m");
+}
+
 /* ---- north stays north at zero ---- */
 {
   const P = make(0, 64);
