@@ -157,12 +157,39 @@ def main() -> int:
           sampled > 0 and not bad,
           f"{sampled - len(bad)}/{sampled} ok" + ("; " + bad[0] if bad else ""))
 
+    # The habitat mask. Its absence is the quiet kind of failure: the zones
+    # still draw, they simply stop being cut at the shoreline, so the map
+    # claims ground the model was never given. Nothing on screen would say so.
+    mask = (payload.get("meta", {}) or {}).get("mask") or {}
+    mtmpl, mlevels = mask.get("url", ""), mask.get("tiles") or []
+    msampled, mbad = 0, []
+    if mtmpl and mlevels and mlevels[0]:
+        ids = mlevels[0]
+        for tid in (ids[0], ids[len(ids) // 2], ids[-1]):
+            row, _, col = tid.partition("_")
+            url = (mtmpl.replace("{z}", "0")
+                   .replace("{row}", row).replace("{col}", col))
+            st, bd, ct = get(f"{origin}/{url}")
+            msampled += 1
+            # Colour type 3 with a tRNS chunk: a palette whose transparency is
+            # the payload. A tile that came back as the single-page fallback,
+            # or as an 8-bit grey zone tile by mistake, fails both halves.
+            ok = (st == 200 and bd[:8] == b"\x89PNG\r\n\x1a\n"
+                  and len(bd) > 33 and bd[25] == 3 and b"tRNS" in bd[:200])
+            if not ok:
+                mbad.append(f"{url} -> HTTP {st}, {ct}, {len(bd)} bytes")
+    check("the habitat mask is live and is a transparency mask",
+          msampled > 0 and not mbad,
+          f"{msampled - len(mbad)}/{msampled} ok" + ("; " + mbad[0] if mbad else ""))
+
     # And a count, so a partial upload that happened to miss the sample
-    # still has somewhere to show up.
+    # still has somewhere to show up. Mask tiles live under zones/ as well, so
+    # both are named here or the total would drift every time one changed.
     zones = out / "zones"
     on_disk = len(list(zones.rglob("*.png"))) if zones.exists() else 0
     expected = sum(len(lv) for sp in payload.get("species", [])
                    for lv in (sp.get("tiles") or []))
+    expected += sum(len(lv) for lv in mlevels)
     check("the build holds every tile its payload names",
           expected == 0 or on_disk >= expected,
           f"{on_disk} on disk, {expected} named")
