@@ -186,6 +186,25 @@ def test_the_write_is_verified_against_what_is_served(workflow):
         "nothing checks that the write actually reached a reader"
 
 
+def test_no_step_condition_reads_the_secrets_context(workflow):
+    """`secrets` is not an available context in a step-level `if:`. GitHub's
+    list there is github, needs, strategy, matrix, job, runner, env, vars,
+    steps and inputs - and a reference to `secrets` does not fail the step, it
+    invalidates the whole file, at which point the workflow stops being listed
+    at all. The symptom is not an error: it is a missing "Run workflow" button
+    and no runs, which reads exactly like nobody having pushed it.
+
+    Lift the secret to job-level `env:` and gate on `env.` instead."""
+    job = workflow["jobs"]["refresh"]
+    for step in job["steps"]:
+        cond = str(step.get("if", ""))
+        assert "secrets." not in cond, (
+            f"step {step.get('name', '?')!r} reads the secrets context in its "
+            f"if: condition ({cond!r}), which makes the workflow file invalid")
+    # and the lift has to actually be there for the gates to mean anything
+    assert "KV_ID" in (job.get("env") or {}),         "the job no longer lifts the KV id into env, so the gates read nothing"
+
+
 def test_an_unconfigured_repo_does_not_fail_twice_a_day(workflow):
     """The route falls through to the shipped file when there is no KV, so a
     project without the secrets is a working project. If the write step ran
@@ -196,7 +215,9 @@ def test_an_unconfigured_repo_does_not_fail_twice_a_day(workflow):
     write = next((s for n, s in steps.items() if n.startswith("Write it to KV")), None)
     assert write, "the workflow no longer writes to KV"
     cond = str(write.get("if", ""))
-    assert "CONDITIONS_KV_ID != ''" in cond and "CLOUDFLARE_API_TOKEN != ''" in cond, (
+    # Gated on job-level env rather than on `secrets`, which a step-level
+    # `if:` cannot read - see test_no_step_condition_reads_the_secrets_context.
+    assert "env.KV_ID != ''" in cond and "env.CF_TOKEN != ''" in cond, (
         f"the KV write runs regardless of whether KV is configured ({cond!r}), "
         "so an unconfigured repo fails on every scheduled run")
     assert any(n.startswith("Note that KV is not configured") for n in steps),         "nothing says why the write was skipped, which is the silent-no-op failure"

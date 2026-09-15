@@ -4553,3 +4553,34 @@ What remains is a real limit rather than a fault: until `soppspor.no` is
 verified, nobody but the account holder can recover an account. The domain is
 registered and its DNS is at Norsk Hosting, so it is a records-and-wait job, not
 a blocker.
+
+### 26i. A workflow that was invalid rather than missing
+
+Reported as "i cant find run workflow in github", which sounded like a
+navigation question and was not. The `workflow_dispatch` button was absent
+because **GitHub was not listing the workflow at all.**
+
+The gating commit in 26 had written the skip condition as:
+
+```yaml
+if: steps.live.outputs.write == 'yes' && secrets.CONDITIONS_KV_ID != ''
+```
+
+`secrets` is not an available context in a step-level `if:`. GitHub's list
+there is github, needs, strategy, matrix, job, runner, env, vars, steps and
+inputs. A reference to `secrets` does not fail the step at run time - it
+invalidates the file, and an invalid workflow is simply not offered. The
+symptom is therefore **not an error message**: it is a missing button and an
+empty run history, which is indistinguishable from nobody having pushed it.
+
+The fix lifts both secrets into job-level `env:`, which a step `if:` can read,
+and gates on `env.KV_ID` and `env.CF_TOKEN` instead.
+
+Worth recording as a shape rather than a typo. Both defects this feature has
+now produced were **invisible where the code was written and visible only where
+it runs** - the Pages function that shadowed a static asset, and a workflow
+that GitHub silently declined. Neither was reachable by the test suite as it
+stood, and both were found by a person looking at the product and saying
+something was not there. `tests/test_conditions_kv.py` now fails if any step
+condition reads `secrets`, which is the narrow version of the lesson; the wide
+version is 25n's, arriving for the third time.

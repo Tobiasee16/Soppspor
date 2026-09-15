@@ -53,6 +53,17 @@ jobs:
   refresh:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    # Lifted to job level so the steps below can gate on whether KV is
+    # configured. A step-level `if:` cannot read the `secrets` context - the
+    # available contexts there are github, needs, strategy, matrix, job,
+    # runner, env, vars, steps and inputs - and referencing `secrets` in one
+    # makes the whole file invalid, at which point GitHub stops listing the
+    # workflow at all rather than reporting a broken step. That is how this
+    # shipped and how it was found: no "Run workflow" button, because as far
+    # as GitHub was concerned there was no workflow.
+    env:
+      KV_ID: ${{ secrets.CONDITIONS_KV_ID }}
+      CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -131,13 +142,11 @@ jobs:
           fi
 
       - name: Write it to KV
-        if: steps.live.outputs.write == 'yes' && secrets.CONDITIONS_KV_ID != '' && secrets.CLOUDFLARE_API_TOKEN != ''
+        if: steps.live.outputs.write == 'yes' && env.KV_ID != '' && env.CF_TOKEN != ''
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          KV_ID: ${{ secrets.CONDITIONS_KV_ID }}
           LAST_DAY: ${{ steps.fetch.outputs.last_day }}
-          CONFIGURED: ${{ secrets.CONDITIONS_KV_ID != '' }}
         run: |
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "CLOUDFLARE_API_TOKEN is not set"; exit 1; }
           test -n "$KV_ID" || { echo "CONDITIONS_KV_ID is not set"; exit 1; }
@@ -153,7 +162,7 @@ jobs:
       # a short edge cache, so this waits for the change to actually appear
       # rather than reporting the write itself as the outcome.
       - name: Check it is really being served
-        if: steps.live.outputs.write == 'yes' && secrets.CONDITIONS_KV_ID != '' && secrets.CLOUDFLARE_API_TOKEN != ''
+        if: steps.live.outputs.write == 'yes' && env.KV_ID != '' && env.CF_TOKEN != ''
         env:
           WANT: ${{ steps.fetch.outputs.last_day }}
         run: |
@@ -179,7 +188,7 @@ jobs:
       # up yet would train everyone to ignore this workflow. It is loud in the
       # summary instead. See README, "The conditions layer".
       - name: Note that KV is not configured
-        if: steps.live.outputs.write == 'yes' && (secrets.CONDITIONS_KV_ID == '' || secrets.CLOUDFLARE_API_TOKEN == '')
+        if: steps.live.outputs.write == 'yes' && (env.KV_ID == '' || env.CF_TOKEN == '')
         run: |
           echo "::notice::KV is not configured, so nothing was written. The site is"               "serving the conditions file from the build. Add CLOUDFLARE_API_TOKEN,"               "CLOUDFLARE_ACCOUNT_ID and CONDITIONS_KV_ID to turn this on."
 
