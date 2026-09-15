@@ -555,6 +555,42 @@ fulldyrka, 25 innmarksbeite) and no other arealtype does.
 
 ---
 
+## Place-name and address search — Kartverket
+
+Not model input. These are read live by the interface when somebody uses the
+search field, and by nothing else in the pipeline. Recorded here because
+CLAUDE.md asks for every endpoint this project leans on, and because a search
+box is the one place a reader's own words leave the phone.
+
+| | |
+|---|---|
+| Place names | `https://api.kartverket.no/stedsnavn/v1/navn` |
+| Request | `sok=<query>&treffPerSide=25&utkoordsys=25833&fuzzy=true` |
+| Addresses | `https://ws.geonorge.no/adresser/v1/sok` |
+| Request | `sok=<query>&treffPerSide=25&utkoordsys=25833` |
+| Accessed | 2026-09-15 |
+| Licence | NLOD / CC BY 4.0 (Kartverket) |
+| CORS | `access-control-allow-origin: *` on both, checked 2026-09-15, so the browser calls them directly and no proxy of ours ever sees a query |
+| Consumer | `web/shell.html`, the search sheet |
+
+Two things worth writing down because they are not obvious from the docs.
+
+**The coordinate pair is named differently by each.** With `utkoordsys=25833`
+the place-name register answers `representasjonspunkt: {koordsys, nord, øst}`
+and the address register answers `representasjonspunkt: {epsg, lat, lon}` —
+where `lat` holds a *northing* and `lon` holds an *easting*. Reading those two
+in the same order puts every address in the Norwegian Sea and nothing
+downstream would notice, so `findPoint` checks the pair against the national
+bounds and swaps it if it is the wrong way round. `tests/test_search.js` pins
+both shapes against captured answers.
+
+**Server relevance is not the reader's relevance.** `fuzzy=true` on "Nordmarka"
+returns 1,325 matches and the one in Oslo is not reliably first, so the
+interface asks for 25 rows and sorts them by distance from the middle of the
+screen before showing 8.
+
+---
+
 ## Known data quality limits — carry these into the writeup
 
 - **SR16**: published validation reports models explaining ~70% of variance with

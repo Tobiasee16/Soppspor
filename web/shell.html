@@ -124,6 +124,12 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sf);
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
 
 /* legend, bottom centre, tells you what the blue means */
+.findRow{display:block;width:100%;text-align:left;border:none;
+  background:transparent;padding:12px 15px;border-bottom:.5px solid var(--sep);
+  cursor:pointer;font-family:var(--sf);min-height:56px}
+.findRow:last-child{border-bottom:none}
+.findRow .nm{display:block;font-size:16px;color:var(--ink)}
+.findRow .sub{display:block;font-size:12.5px;color:var(--ink-3);margin-top:1px}
 .legend{
   background:var(--sheet);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
   border-radius:8px;padding:5px 9px 6px;box-shadow:0 1px 6px #0000001f;pointer-events:none;
@@ -386,6 +392,9 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
       <span id="condTxt"></span></button>
 
     <div class="fabs">
+      <button class="fab" id="findBtn" aria-label="Søk etter sted eller adresse">
+        <svg viewBox="0 0 24 24"><circle cx="10.6" cy="10.6" r="6.4"/>
+          <path d="M15.4 15.4 21 21"/></svg></button>
       <button class="fab" id="gps" aria-label="Finn meg" aria-pressed="false">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.4"/><circle cx="12" cy="12" r="8"/>
           <path d="M12 1.6v2.6M12 19.8v2.6M22.4 12h-2.6M4.2 12H1.6"/></svg></button>
@@ -407,6 +416,24 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
       <b>Ingen soner her ennå.</b> Anslaget er foreløpig regnet ut for
       Kristiansand. Kart, stier, nedbør og dine egne steder virker over hele
       landet.</div>
+
+    <!-- place and address search, opened from the map -->
+    <div class="card" id="findSheet" role="dialog" aria-label="Søk">
+      <div class="grab"></div>
+      <div class="cardTop">
+        <h2>Søk</h2>
+        <button class="close" id="findClose" aria-label="Lukk">✕</button>
+      </div>
+      <input class="field" id="findQ" type="search" inputmode="search"
+             autocomplete="off" autocorrect="off" spellcheck="false"
+             placeholder="Sted eller adresse">
+      <div class="sheetList" id="findList"></div>
+      <div class="msg" id="findMsg" hidden></div>
+      <p class="about" style="margin:12px 0 0">Søket går til <b>Kartverket</b>
+        sine åpne registre over stedsnavn og adresser. Det du skriver sendes dit
+        for å finne stedet, og lagres ikke her. Stedene dine blir aldri søkt
+        opp noe annet sted enn på telefonen.</p>
+    </div>
 
     <!-- species chooser, opened from the map -->
     <div class="card" id="spSheet" role="dialog" aria-label="Velg art">
@@ -2966,8 +2993,213 @@ function syncNow(quiet){
 /* ---------- detail card ---------- */
 var card=document.getElementById("card"),cardBody=document.getElementById("cardBody"),
     cardTitle=document.getElementById("cardTitle");
+/* ---------- search ---------- */
+/* Two open registers, both Kartverket's, both answering in EPSG:25833 when
+   asked and both allowing a browser to call them directly:
+
+     stedsnavn  api.kartverket.no/stedsnavn/v1/navn   the national place-name
+                register, fuzzy so a half-remembered spelling still lands
+     adresser   ws.geonorge.no/adresser/v1/sok        every registered address
+
+   Recorded with their access date in data/SOURCES.md, as CLAUDE.md requires of
+   any endpoint this project leans on.
+
+   Both are asked for far more rows than are shown, because the server orders by
+   its own relevance and the reader's question is "which of these is near me".
+   "Nordmarka" matches 1,325 places and the one in Oslo is third; sorted by
+   distance from the middle of the screen it is first. Nothing about the search
+   is stored: no history, no last query, no analytics. What you typed goes to
+   Kartverket to be answered and nowhere else. */
+var FIND_SHOW=8, FIND_FETCH=25;
+var findSheet=document.getElementById("findSheet"),
+    findQ=document.getElementById("findQ"),
+    findList=document.getElementById("findList"),
+    findMsg=document.getElementById("findMsg");
+var findTimer=null,findCtl=null,findSeq=0;
+
+/* Mainland Norway plus Finnmark and a wide margin, in EPSG:25833. Deliberately
+   not BOUNDS: that is what this *build* covers, and a point outside it is a
+   different problem, reported separately below. */
+function findInNorway(e,n){
+  return e>=-200000&&e<=1300000&&n>=6300000&&n<=8000000;
+}
+/* The two registers name the same pair differently - stedsnavn gives
+   {nord, øst}, adresser gives {lat, lon} holding a northing and an easting
+   despite the names - and a swap would put every address in the Norwegian Sea
+   without anything reporting it. So the labels are a hint and the bounds are
+   the authority: whichever order lands in Norway is the answer, and a pair that
+   lands nowhere is dropped rather than drawn. */
+function findPoint(p){
+  if(!p)return null;
+  var a=p.nord,b=(p["\u00f8st"]!==undefined?p["\u00f8st"]:p.ost);
+  if(a===undefined&&b===undefined){a=p.lat;b=p.lon;}
+  a=+a;b=+b;
+  if(!isFinite(a)||!isFinite(b))return null;
+  if(findInNorway(b,a))return[b,a];
+  if(findInNorway(a,b))return[a,b];
+  return null;
+}
+/* A query with a digit in it is somebody typing a street number, so addresses
+   go first; otherwise the place name is what was meant. Within each group,
+   nearest to the middle of the screen. */
+function findRank(q,rows,cx,cy){
+  var addrFirst=/\d/.test(q);
+  return rows.slice().sort(function(a,b){
+    if(a.kind!==b.kind)
+      return (a.kind==="adresse")===addrFirst?-1:1;
+    var da=(a.e-cx)*(a.e-cx)+(a.n-cy)*(a.n-cy);
+    var db=(b.e-cx)*(b.e-cx)+(b.n-cy)*(b.n-cy);
+    return da-db;
+  });
+}
+function findParsePlaces(j){
+  var out=[],i,v,p;
+  var list=(j&&j.navn)||[];
+  for(i=0;i<list.length;i++){
+    v=list[i];p=findPoint(v.representasjonspunkt);
+    if(!p)continue;
+    out.push({kind:"sted",name:v["skrivem\u00e5te"]||"",
+              what:v.navneobjekttype||"Sted",
+              where:(v.kommuner&&v.kommuner[0]&&v.kommuner[0].kommunenavn)||"",
+              e:p[0],n:p[1]});
+  }
+  return out;
+}
+function findParseAddresses(j){
+  var out=[],i,v,p;
+  var list=(j&&j.adresser)||[];
+  for(i=0;i<list.length;i++){
+    v=list[i];p=findPoint(v.representasjonspunkt);
+    if(!p)continue;
+    out.push({kind:"adresse",name:v.adressetekst||"",what:"Adresse",
+              where:v.poststed||v.kommunenavn||"",e:p[0],n:p[1]});
+  }
+  return out;
+}
+function findDist(e,n){
+  var d=Math.sqrt((e-view.cx)*(e-view.cx)+(n-view.cy)*(n-view.cy));
+  return d<1000?Math.round(d/10)*10+" m"
+       : d<100000?nb((d/1000).toFixed(1))+" km"
+       : Math.round(d/1000)+" km";
+}
+function findSay(t){
+  findMsg.textContent=t||"";
+  findMsg.hidden=!t;
+}
+function findRender(rows){
+  findList.innerHTML="";
+  for(var i=0;i<rows.length;i++){
+    (function(r){
+      var b=document.createElement("button");
+      b.type="button";b.className="findRow";
+      b.innerHTML='<span class="nm"></span><span class="sub"></span>';
+      b.querySelector(".nm").textContent=r.name;
+      b.querySelector(".sub").textContent=
+        [r.what,r.where,findDist(r.e,r.n)].filter(Boolean).join(" · ");
+      b.addEventListener("click",function(){findGo(r);});
+      findList.appendChild(b);
+    })(rows[i]);
+  }
+}
+/* An address is worth about three metres a pixel and a named wood rather less,
+   because "Nordmarka" is a region and dropping the reader inside one tree of it
+   helps nobody. */
+function findGo(r){
+  if(BOUNDS&&(r.e<BOUNDS[0]||r.e>BOUNDS[2]||r.n<BOUNDS[1]||r.n>BOUNDS[3])){
+    findSay("Dette stedet ligger utenfor kartet i denne versjonen.");
+    return;
+  }
+  view.cx=r.e;view.cy=r.n;
+  view.mpp=r.kind==="adresse"?3:9;
+  clampView();
+  findShut();
+  selected=-1;
+  draw();
+}
+function findRun(q){
+  var seq=++findSeq;
+  if(findCtl){try{findCtl.abort();}catch(e){}}
+  findCtl=(typeof AbortController!=="undefined")?new AbortController():null;
+  var opt=findCtl?{signal:findCtl.signal}:{};
+  var enc=encodeURIComponent(q);
+  function ask(url,parse){
+    return fetch(url,opt).then(function(r){
+      return r.ok?r.json():null;}).then(function(j){
+      return j?parse(j):[];}).catch(function(){return null;});
+  }
+  Promise.all([
+    ask("https://api.kartverket.no/stedsnavn/v1/navn?sok="+enc
+        +"&treffPerSide="+FIND_FETCH+"&utkoordsys=25833&fuzzy=true",
+        findParsePlaces),
+    ask("https://ws.geonorge.no/adresser/v1/sok?sok="+enc
+        +"&treffPerSide="+FIND_FETCH+"&utkoordsys=25833",
+        findParseAddresses)
+  ]).then(function(res){
+    if(seq!==findSeq)return;                 // a newer keystroke won
+    /* null means that register failed, [] means it answered with nothing. A
+       reader whose network is down should be told that rather than "no hits". */
+    if(res[0]===null&&res[1]===null){
+      findSay("Fikk ikke kontakt med Kartverket. Søk krever nett.");
+      findList.innerHTML="";return;
+    }
+    var rows=findRank(q,(res[0]||[]).concat(res[1]||[]),view.cx,view.cy);
+    findRender(rows.slice(0,FIND_SHOW));
+    findSay(rows.length?"":"Ingen treff på \u201c"+q+"\u201d.");
+  });
+}
+function findInput(){
+  var q=findQ.value.trim();
+  if(findTimer)clearTimeout(findTimer);
+  if(q.length<2){
+    findSeq++;findList.innerHTML="";findSay("");
+    if(findCtl){try{findCtl.abort();}catch(e){}findCtl=null;}
+    return;
+  }
+  findSay("Søker\u2026");
+  findTimer=setTimeout(function(){findRun(q);},250);
+}
+if(findQ){
+  findQ.addEventListener("input",findInput);
+  findQ.addEventListener("keydown",function(e){
+    if(e.key==="Enter"){e.preventDefault();
+      if(findTimer)clearTimeout(findTimer);
+      var q=findQ.value.trim();
+      if(q.length>=2)findRun(q);}});
+}
+/* iOS lays the keyboard over the window rather than shrinking it, so a sheet
+   anchored to the bottom ends up behind the keys with its results out of
+   sight - which is most of a search box. visualViewport reports the part still
+   visible; lifting the sheet by the difference keeps the field and the first
+   few results above them. Guarded, because the API is absent on older Safari
+   and the sheet is fine as it is on a desktop. */
+function findLift(){
+  if(!window.visualViewport)return;
+  if(!findSheet.classList.contains("on")){findSheet.style.bottom="";return;}
+  var vv=window.visualViewport;
+  var gap=Math.max(0,Math.round(window.innerHeight-vv.height-vv.offsetTop));
+  findSheet.style.bottom=gap>40?gap+"px":"";
+}
+if(window.visualViewport){
+  window.visualViewport.addEventListener("resize",findLift);
+  window.visualViewport.addEventListener("scroll",findLift);
+}
+function findShut(){
+  findSheet.classList.remove("on");
+  findSheet.style.bottom="";
+}
+document.getElementById("findBtn").addEventListener("click",function(){
+  closeSheets();
+  findSheet.classList.add("on");
+  findSay("");
+  /* Focused only after the sheet is up: focusing a field behind a closed sheet
+     is what makes iOS raise the keyboard over nothing. */
+  setTimeout(function(){try{findQ.focus();}catch(e){}findLift();},260);
+});
+document.getElementById("findClose").addEventListener("click",findShut);
+
 var spSheet=document.getElementById("spSheet");
-function closeSheets(){card.classList.remove("on");spSheet.classList.remove("on");}
+function closeSheets(){card.classList.remove("on");spSheet.classList.remove("on");
+  if(findSheet){findSheet.classList.remove("on");findSheet.style.bottom="";}}
 document.getElementById("cardClose").addEventListener("click",function(){
   card.classList.remove("on");selected=-1;draw();});
 
@@ -2997,6 +3229,7 @@ makeDismissable(card,function(){selected=-1;draw();});
 document.getElementById("spClose").addEventListener("click",function(){
   spSheet.classList.remove("on");});
 makeDismissable(spSheet);
+makeDismissable(findSheet,function(){findSheet.style.bottom="";});
 
 /* Holding a finger on the spot is the gesture for "remember this", and it
    works with gloves on and without reading anything. */

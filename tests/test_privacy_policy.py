@@ -96,6 +96,18 @@ class TestItDescribesTheAppThatExists:
                 "who it belongs to - name the party and add it to PARTIES")
             assert party in prose, f"{host} is contacted but {party} is unnamed"
 
+    def test_it_says_what_the_search_field_sends(self, prose):
+        """A map tile reveals where you are looking; a search box reveals what
+        you were looking for, in your own words. The policy named Kartverket
+        already - it serves the basemap - so the host check above stayed green
+        when search was added and could not have caught this on its own."""
+        shell = (ROOT / "web" / "shell.html").read_text(encoding="utf-8")
+        if 'id="findQ"' not in shell:
+            pytest.skip("this build has no search field")
+        assert "søk" in prose.lower(), "the policy does not mention search at all"
+        assert "det du skriver" in prose.lower(), (
+            "the policy does not say that what you type is sent to Kartverket")
+
     def test_the_region_matches_what_was_checked(self, prose):
         """Recorded in backend/DECISION.md after being verified in the console."""
         decision = (ROOT / "backend" / "DECISION.md").read_text(encoding="utf-8")
