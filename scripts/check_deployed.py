@@ -29,6 +29,7 @@ import json
 import pathlib
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -206,13 +207,32 @@ def main() -> int:
     check("a path a person could arrive at reaches the app",
           status == 200 and b"window.SOPP=" in body, f"HTTP {status}")
 
-    status, body, ctype = get(origin + "/conditions.json")
+    # A cache-buster, because this check once passed on an edge-cached copy of
+    # the *previous* deployment while the live endpoint was answering 503. The
+    # conditions route is a Pages Function now, so what it returns depends on
+    # runtime state - a KV binding - that no amount of reading the built
+    # directory can predict, and an edge copy hides exactly that.
+    status, body, ctype = get(origin + f"/conditions.json?deploycheck={int(time.time())}")
     check("the weather is served", status == 200, f"HTTP {status}")
     if status == 200:
         try:
             cond = json.loads(body.decode("utf-8"))
             check("it carries a last day", bool(cond.get("last_day")),
                   str(cond.get("last_day")))
+            # And that it is *this* build's day, not whatever was there before.
+            # Checking only that some day exists is how a stale layer passes:
+            # the day that was already live is still a day.
+            built = out / "conditions.json"
+            if built.exists():
+                mine = json.loads(built.read_text(encoding="utf-8")).get("last_day")
+                check("the weather served is the weather built",
+                      cond.get("last_day") == mine,
+                      f"live {cond.get('last_day')} vs built {mine}")
+            else:
+                # No file in the build means the layer comes from KV, so the
+                # build has nothing to compare against and the route is the
+                # only source of truth.
+                print("      (no conditions.json in the build - served from KV)")
         except Exception as e:  # noqa: BLE001 - reported, not swallowed
             check("the weather parses as JSON", False, str(e)[:80])
 
