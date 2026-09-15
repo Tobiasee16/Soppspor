@@ -222,7 +222,8 @@ def write_report(rows, spread, sd, args):
         "|---|---|---|---|---|---|",
     ]
     for key, no_name, shift, lo, hi, n, blocks, own in rows:
-        lines.append(f"| *{key.replace('_', ' ')}* ({no_name}) | {n:,} | {blocks} "
+        latin = key.replace("_", " ").capitalize()
+        lines.append(f"| *{latin}* ({no_name}) | {n:,} | {blocks} "
                      f"| {own:.3f} | {shift:+.3f} | [{lo:+.3f}, {hi:+.3f}] |")
     lines += [
         "",
