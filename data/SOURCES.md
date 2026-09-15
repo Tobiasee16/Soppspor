@@ -512,6 +512,7 @@ shares to within 0.2 percentage points. Full breakdown:
 | Terrain | Kartverket høydedata, 1 m LiDAR DTM | **FETCHED 2026-09-09** | WCS, resampled server-side to 32 m over Agder. Slope, aspect, curvature and TWI derived. `data/interim/terrain_agder_32m.tif`. Kristiansand also held at 16 m: `data/interim/dtm_kristiansand_16m.tif` |
 | Weather | MET seNorge_2018 via THREDDS/OPeNDAP | **FETCHED 2026-09-09** | Autumn rainfall climatology, 1 km. `data/interim/autumn_rain_agder_1km.tif`. NLOD |
 | Superficial deposits | NGU løsmassekart | **FETCHED 2026-09-09** | 34,714 polygons → ten depositional groups at 32 m. `data/interim/losmasser_agder_32m.tif`. Calcareous vs. acidic substrate strongly structures fungal communities |
+| Bedrock lime content | NGU **Kalkinnhold i berggrunn** (NiN KA scale) | **FETCHED 2026-09-16** | 30,893 polygons, national, 1:250 000. `data/interim/berggrunn/`. The chemistry løsmasser was only a proxy for. Screened and **not adopted as a model feature** — FINDINGS 30 |
 | Land cover | NIBIO **AR50** (open stand-in for FKB-AR5) | **FETCHED 2026-09-10** | AR50 at 1:50 000, NLOD. `data/interim/ar50_agder_32m.tif`. FKB-AR5 at 1:5 000 is **WILL NOT FETCH** - Norge digitalt restricted, see below |
 | Soil moisture | NVE gridded HBV output | **NOT YET FETCHED** | 1 km soil moisture deficit, groundwater, runoff. Verified reachable as point queries; not pulled as a raster. Largely redundant with TWI plus the rainfall climatology, so low priority |
 | Habitat types | Miljødirektoratet Naturbase (NiN naturtyper) | **NOT YET FETCHED** | Context layer, not a model feature. Needed for the red-list suppression policy rather than for prediction |
@@ -669,3 +670,105 @@ answers a `ServiceExceptionReport` reading `*** HTTP TCP/IP AUT ***`, i.e. it
 requires authentication, and the older `opencache.statkart.no` host no longer
 resolves at all. So an in-app satellite layer needs a Geonorge agreement of the
 same kind AR5 is blocked on. Checked 2026-09-15.
+
+---
+
+## NGU bedrock and its lime content — resolved 2026-09-16
+
+CLAUDE.md lists superficial deposits because "calcareous vs. acidic substrate
+strongly structures fungal communities". Løsmasser classifies by *depositional
+origin*, which is a loose proxy for chemistry at best, so FINDINGS section 27
+left bedrock as the one untried route to the actual quantity. It is now fetched.
+
+### The endpoint that was guessed wrong
+
+A probe on 2026-09-15 tried `geo.ngu.no/mapserver/BerggrunnWMS2` and got HTTP
+200 carrying a MapServer error, *CGI variable "map" is not set*. That is what
+this host returns for **a service name that does not exist** — the rewrite
+finds no mapfile and the bare CGI answers. It is not a broken service and it is
+not an argument about parameters. The right move is the catalogue, not another
+guess:
+
+```
+https://kartkatalog.geonorge.no/api/search?text=berggrunn
+https://kartkatalog.geonorge.no/api/getdata/<uuid>
+```
+
+which names two live services, neither of them `BerggrunnWMS2`:
+
+| Service | What it carries |
+|---|---|
+| `https://geo.ngu.no/mapserver/BerggrunnWMS3` | the national bedrock database, at 1:1 350 000, 1:250 000 and 1:50 000 |
+| `https://geo.ngu.no/mapserver/BerggrunnOkologiWMS` | **lime content**, and ultramafic rock |
+
+Both answer `GetCapabilities` and `GetFeatureInfo` on the same WMS 1.1.1 + GML
+terms as every other layer here. Verified at the project's standard probe
+point, a real *C. tubaeformis* record at `(93674.87, 6466470.01)`:
+
+| Layer | Answer at the probe point |
+|---|---|
+| `Kalkinnhold_N250` | hovedbergart 440 Migmatitt, `kalkinnhold_hovedbergart` **1**, "Svært kalkfattig" |
+| `Berggrunn_regional_hovedbergarter` | Migmatitt, Svekonorwegisk orogen, Mesoproterozoikum |
+| `Berggrunn_lokal_hovedbergarter_fullzoom` | Kvartsdiorittisk gneis, updated 2025-12-07 |
+
+The regional and local sheets **disagree about the rock** at the same point.
+That is the scale difference, not an error, and it is the reason a bedrock
+feature has to state which sheet it came from.
+
+### Kalkinnhold i berggrunn — the dataset actually worth having
+
+`f5aeef1c-a080-40a9-b509-5e8a2f846928`, downloaded 2026-09-16, **27,658,295 B**.
+
+NGU has already placed every rock type on the **NiN `KA` ecocline** — the same
+five-step lime-content scale Miljødirektoratet's naturtyper use — so the
+rock-type-to-chemistry step does not have to be invented here:
+
+| KA | Label | Share of mainland Norway |
+|---|---|---|
+| 1 | Svært kalkfattig | 43.4 % |
+| 2 | Temmelig kalkfattig | 7.8 % |
+| 3 | Svak intermediær | 27.8 % |
+| 4 | Litt kalkrik | 18.9 % |
+| 5 | Svært kalkrik | 1.8 % |
+
+30,893 polygons, national, EPSG:32633 (**not** 25833 — it is the only
+projection offered, and the only format is `GEODATABASE_FILE`, read through
+pyogrio's `OpenFileGDB`). Reprojected on ingest like everything else.
+
+Three properties worth recording because they decide what can be built on it:
+
+1. **The rock-to-KA lookup is a clean function.** 109 distinct rock codes,
+   **zero** mapping to more than one KA value, consistent across the main rock
+   column and all three subordinate ones. So NGU's own mapping can be lifted
+   off this dataset and applied to other bedrock layers without inventing a
+   grouping — which is what `src/ingest/losmasser.py` had to do by hand.
+2. **It is 1:250 000 only.** Mean polygon area is about 20 km², so one polygon
+   covers roughly two thousand cells of the 32 m model grid. This layer cannot
+   express anything at the scale the map is drawn at.
+3. **The finer sheet does not cover the country.** Sampling
+   `Berggrunn_lokal_hovedbergarter_fullzoom` at 120 random fungal-record
+   locations returned bedrock at **60 %** and nothing at 40 %. A mixed N50/N250
+   feature would therefore vary in effective resolution by map sheet, which is
+   a mapping-effort surface — the same class of artefact the target-group
+   background exists to defeat, arriving through a new door.
+
+**Licence:** NLOD / CC BY 4.0 as published on Geonorge. Attribution: NGU.
+
+What it does and does not show is FINDINGS section 30. The short version: it is
+a real national gradient, it does not separate the eight species, and the
+species nominated as the likely calcicole shows it least.
+
+### A trap that belongs here: the boundary files are not WGS84
+
+`data/interim/**/boundary_*_25833.geojson` hold **EPSG:25833 metres** and
+record that in a non-standard key, `crs_declared_by_source`. GeoJSON's own spec
+says unmarked coordinates are WGS84, so `geopandas.read_file` labels them
+`EPSG:4326`, and a following `.to_crs("EPSG:25833")` reprojects metres as
+though they were degrees. Nothing raises. The clip simply returns **zero
+features**, which reads as "this dataset does not cover Agder".
+
+The project's own readers (`run_models.py`, `report_counts.py`,
+`build_maps_national.py`, `check_holdout_power.py`) all check
+`crs_declared_by_source` explicitly and there is a test for it. The trap is
+only waiting for someone who reaches for `gpd.read_file` directly. Use
+`.set_crs("EPSG:25833", allow_override=True)`, never `.to_crs`.

@@ -4660,6 +4660,13 @@ answers HTTP 200 with a MapServer error - *CGI variable "map" is not set* - so
 the service address is wrong rather than the service absent, and resolving it
 against the Geonorge catalogue is an unstarted hour of work.
 
+**Taken, 2026-09-16. See section 30.** The route was real and the answer is not
+the one hoped for: NGU's own lime-content classification shows all eight species
+shifted the same small way against the background, and the spread *between*
+species - the only part a per-species model could use - is a tenth of one
+standard deviation. 27's structural claim now has a measured number behind it
+instead of an argument. Do not re-fetch bedrock expecting more.
+
 ### 27b. The round numbers were already round; the sentence was wrong
 
 The owner asked for round numbers in the zone rings, after the README had
@@ -4917,3 +4924,155 @@ than numeric - `w2s` must be rotation-free because its output feeds
 both fail outright on the versions that went to the phone.
 
 Suite: **812** pytest cases, 48 assertions in the projection file.
+
+## 30. Bedrock chemistry, fetched at last - 2026-09-16
+
+Section 27 left exactly one route open to the owner's question about substrate:
+NGU's **bedrock** rather than its superficial deposits, because bedrock
+chemistry is what the ecology is actually about. It called that an unstarted
+hour of work. It is now done, and it answers more than it was expected to -
+though not in the direction anyone was hoping for.
+
+### 30a. The service, and why the first probe missed it
+
+`geo.ngu.no/mapserver/BerggrunnWMS2` answers HTTP 200 with a MapServer error,
+which 27 read as "the service address is wrong rather than the service absent".
+That was right, and the catalogue settles it in one call: the bedrock service is
+`BerggrunnWMS3`, and lime content lives in a **different service altogether**,
+`BerggrunnOkologiWMS`. Endpoints, layers and traps: `data/SOURCES.md`.
+
+The find is better than the plan. NGU publishes **Kalkinnhold i berggrunn**,
+which places every rock type on the **NiN `KA` ecocline** - the five-step lime
+scale, svært kalkfattig to svært kalkrik, that Miljødirektoratet's naturtyper
+already use. So the rock-type-to-chemistry step, which would have been the
+judgement-heavy part and the part most open to being tuned afterwards, did not
+have to be made here at all. National, 30,893 polygons, 27 MB, and the
+rock-to-KA lookup is a clean function: 109 rock codes, **zero** ambiguous.
+
+Nationally the gradient is real and well spread: 43.4 % svært kalkfattig,
+7.8 %, 27.8 %, 18.9 %, and 1.8 % svært kalkrik.
+
+### 30b. Agder had almost no gradient in it, and that is a better explanation
+
+| Extent | Svært kalkfattig | Above "svak intermediær" |
+|---|---|---|
+| Norway, mainland | 43.4 % | 20.7 % |
+| **Agder** | **86.3 %** | 8.6 % |
+| **Kristiansand** | **92.7 %** | 4.2 % |
+
+Section 9a reported eleven substrate columns at or below +0.012 importance and
+concluded the layer did not separate the species. 27 explained that as the layer
+measuring depositional origin instead of chemistry. Both are true, but this is
+the plainer reason and it is measurable: **the Phase 0 training extent is 86 %
+one lime class and the validation extent 93 %.** There was almost no substrate
+gradient in Agder for any layer to find. A feature that is nearly constant is
+not a feature, and no amount of picking a better substrate map would have
+changed a result obtained there.
+
+That also means the national map is the only place this question could ever have
+been asked, which is worth saying because Phase 0 was designed before there was
+a national map.
+
+### 30c. The screen, and the confound that nearly produced a false finding
+
+Before contemplating a refit, the association was measured directly and
+model-free: sample KA at each species' thinned precise presences, sample it at
+the 55,825-point target-group background, compare.
+
+Reproducible: `python scripts/screen_bedrock_ka.py`, which regenerates
+`data/processed/berggrunn_ka.md`. The matching logic it depends on lives in
+`src/ingest/berggrunn.py` and is guarded by `tests/test_berggrunn.py`, which
+plants a geographic confound in data holding no substrate preference at all and
+asserts the naive comparison reports one while the matched comparison does not.
+
+The first run said *Craterellus cornucopioides* - the species 27b nominated as
+the likely calcicole - sits on **less** lime-rich rock than fungi in general,
+by -0.248 KA units, the largest shift of any species and pointing the wrong way.
+
+It is an artefact, and an obvious one in hindsight. *C. cornucopioides* is a
+**southern** species; southern Norway is Precambrian gneiss and granite; the
+background spans a country whose calcareous ground is largely northern. The
+comparison was measuring latitude.
+
+Matching the background to each species' own fylke composition flips it to
+**+0.052**. Matching on 25 km blocks instead - a fylke spans acid basement and
+calcareous valley alike - gives +0.020. The entire original effect was geography.
+
+**This is section 25i's lesson arriving from a third direction.** A number
+computed over the whole country described no part of it. The project's standing
+habit says to check a national number again over the subsets a user occupies;
+here the subset that mattered was not the user's, but the species'.
+
+### 30d. What the layer actually shows
+
+Both sides matched on 25 km blocks, both restricted to AR50 forest so the shared
+signal cannot merely be "richer rock carries more forest", 600-sample block
+bootstrap:
+
+| Species | n | own KA | shift vs background | 95 % CI |
+|---|---|---|---|---|
+| *Boletus edulis* (steinsopp) | 2,154 | 2.089 | **+0.155** | [+0.091, +0.229] |
+| *Hydnum repandum* (blek piggsopp) | 619 | 2.005 | +0.134 | [+0.034, +0.232] |
+| *Amanita muscaria* (rød fluesopp) | 2,474 | 2.030 | +0.109 | [+0.061, +0.166] |
+| *Suillus luteus* (smørsopp) | 1,394 | 1.983 | +0.098 | [+0.032, +0.169] |
+| *Cantharellus cibarius* (kantarell) | 3,104 | 1.925 | +0.076 | [+0.042, +0.112] |
+| *Leccinum versipelle* (rødskrubb) | 1,928 | 2.082 | +0.075 | [+0.025, +0.122] |
+| ***Craterellus cornucopioides*** (svart trompetsopp) | 619 | 1.719 | **+0.057** | [-0.021, +0.139] |
+| *Craterellus tubaeformis* (traktkantarell) | 2,178 | 1.858 | +0.037 | [-0.021, +0.099] |
+
+Background SD is 1.23, so these are shifts of 0.03 to 0.13 standard deviations.
+
+**Two things follow, and they point opposite ways.**
+
+**The shared effect is real.** All eight are positive, six significantly so, and
+restricting both sides to forest *strengthens* rather than removes it. Our eight
+edible ectomycorrhizal species are found on modestly richer bedrock than the
+recorded fungal community around them, within the same 25 km, within forest.
+That is the closest thing to an answer the owner's question has: *yes, substrate
+does appear to have an overall effect, and it is small.*
+
+**It is also invisible to every model here, by construction.** That is section
+27's structural point restated with a number: a per-species fit against
+target-group background can only use what distinguishes one species from the
+fungal community, and the **spread across the eight species is 0.118 KA units** -
+0.10 of one standard deviation. That is what a model would have to work
+with, and it is nothing.
+
+### 30e. The registered guess was wrong, and it stays on the record
+
+27b named *C. cornucopioides* as the species most likely to show a lime
+preference, on the strength of its association with rich and often calcareous
+ground. It comes **seventh of eight**, with a confidence interval spanning zero.
+The largest shift belongs to *Boletus edulis*, which nobody nominated.
+
+So the calcicole hypothesis fails at national scale, tested against NGU's own
+chemistry classification rather than a proxy. Written here rather than quietly
+dropped, the same way the pre-registered ordering test was.
+
+### 30f. Not adopted, and what would change that
+
+The layer is **fetched, documented and not wired into the model**. Three reasons,
+in order of weight:
+
+1. The between-species spread is 0.118 KA units, a tenth of a standard
+   deviation. A univariate
+   screen this flat makes a meaningful gain unlikely, and the only way to be
+   certain is a national refit costing hours of compute.
+2. It is 1:250 000. Mean polygon area is about 20 km², or roughly two thousand
+   cells of the 32 m grid. It cannot express anything at the scale the map draws.
+3. The finer sheet is not national. `Berggrunn N50` returned bedrock at **60 %**
+   of 120 random fungal-record locations and nothing at the other 40 %. A mixed
+   N50/N250 feature would vary in effective resolution by published map sheet -
+   a mapping-effort surface, which is the artefact class this whole project is
+   built to defeat, arriving through a new door.
+
+What would justify revisiting it: a species added to the picker that is a
+genuine calcicole rather than one merely associated with rich ground, or NGU
+completing N50 coverage. Neither is on this project's path today.
+
+**The honest summary for anyone reading section 27 next.** The one open route it
+named has been taken. It did not open the question - it confirmed, with a
+national measurement instead of an argument, that the effect the owner asked
+about is shared across species and therefore sits exactly where this design
+cannot see it. Section 27's list of things that cannot be fixed by effort now
+has a measured number against it rather than a structural argument alone.
