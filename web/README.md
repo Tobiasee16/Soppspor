@@ -1,9 +1,21 @@
 # Deploying the hosted build
 
+**The deployed build is the national one.** `./deploy.sh --cloudflare` from the
+repository root does the whole sequence and then fetches the live site to check
+what actually arrived — `wrangler` has been seen to exit 0 having deployed
+nothing, so its exit code is not evidence.
+
+```
+./deploy.sh --cloudflare                  # build Norway, publish, verify
+```
+
+By hand, or for the Kristiansand-only build:
+
 ```
 python scripts/export_web_preview.py      # only if the model was refitted
 python scripts/fetch_recent_weather.py    # --if-new, safe on a timer
-python scripts/build_hosted.py            # writes dist/
+python scripts/build_hosted.py --national # writes dist_norge/  (204 MB)
+python scripts/build_hosted.py            # writes dist/        (Kristiansand)
 python scripts/serve_interface.py --dist  # check it locally first
 ```
 

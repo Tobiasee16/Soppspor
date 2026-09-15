@@ -40,6 +40,11 @@ possible. Commercial use is permitted.
   are derived from it
 - Turrutebasen, via `wfs.geonorge.no` — the marked routes drawn on the map
 - Administrative boundaries for Agder and Kristiansand
+- AR50 land cover, via NIBIO/Geonorge — decides which ground is scored at all,
+  and is drawn at 32 m as the habitat mask that cuts the zones
+- Sentralt stedsnavnregister, `api.kartverket.no/stedsnavn/v1/` — answers the
+  search field, called live from the browser
+- Adresse-API, `ws.geonorge.no/adresser/v1/` — the same, for street addresses
 
 ### Artsdatabanken and GBIF Norway — occurrence records
 

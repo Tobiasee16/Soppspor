@@ -4036,3 +4036,193 @@ occupies.
 - Can the exclusion buffer now be set by direct measurement rather than by the
   cost trade-off in section 3? Still open, and now cheaper: the null control
   runs on real geography in both the blocked and the transfer harness.
+
+### 25j. Three features were dead because an author rule beats a browser rule
+
+Reported from the phone as "the tursti function does not work". It did not. The
+national build ships no route geometry — Turrutebasen packs into the page at
+395 kB for one kommune and tens of megabytes for the mainland — so the settings
+row hides itself, and the comment above that line says why: a switch that
+silently governs nothing is worse than no switch.
+
+It did not hide. `[hidden]{display:none}` is a **user-agent** stylesheet rule,
+and author rules beat user-agent rules whatever their specificity. `.row` sets
+`display:flex`, so `rowTrails.hidden = true` did nothing at all.
+
+Auditing every `.hidden` in the interface the same way found two more, both
+silent:
+
+| element | kept visible by | what broke |
+|---|---|---|
+| `rowTrails` | `.row` | a switch for a feature that is not in this build |
+| `condPill` | `.condpill` | an empty weather pill when there is no conditions file |
+| `wipeShow` | `.ghost` | delete-everything stays visible under its own confirm box |
+
+One author-origin rule fixes all three. `!important` is load-bearing rather than
+decoration: `[hidden]` and `.row` have equal specificity and `.row` comes later,
+so a plain declaration still loses. `tests/test_hidden_elements.py` re-runs the
+audit and fails if the rule is removed while anything still depends on it.
+
+### 25k. The map and its legend disagreeing, three ways
+
+All three came back from the phone within a day of each other, and all three
+were the interface contradicting itself rather than the model being wrong.
+
+**The legend named a band the card would not.** The middle shade is drawn at
+the 85th percentile and was labelled "svært høy"; the card does not say "Svært
+høy" until the 90th. A reader could stand inside a ring marked *svært høy*, tap
+it, and be told *Høy*. The labels are now derived from the levels they are
+drawn at, so a threshold cannot move without the legend following, and the
+wording is the one Om already used: the top 30, 15 and 5 per cent. Dropping the
+evaluative words was the point rather than a side effect — the first thing this
+interface was ever told from a phone was that reading "høy" everywhere sounded
+like a claim about the chance of finding something, which is precisely what
+`ab_zonewarn` says the zones are not.
+
+**The outer boundary moved when a species was added.** One species drew three
+bands, 70th / 85th / 95th. Two or more dropped the outer one, so toggling a
+second species pulled the boundary in from the 70th to the 85th and the shading
+a reader had been studying collapsed to a thin ring — reported as "the zones
+turn singular again", with nothing on screen to say the threshold had changed.
+The argument for an outline-led overlay was sound and is kept; dropping a
+threshold was never part of it. Both modes cut at the same three percentiles
+now and differ only in how they are painted. The test that had asserted the old
+behaviour outright — "with several species up each shows fewer bands" — is how
+a deliberate choice becomes an invariant nobody revisits.
+
+**The legend promised a band that was not there.** With one species over
+Baneheia: "only two layers in the zone when 1 is toggled on?" Two is correct.
+Rebuilding the field the contours are cut from out of the shipped tiles —
+bytes → neighbourhood rank → the validity-weighted blur twice → the national
+CDF that ships beside the tiles — Baneheia reaches the 93rd percentile for
+kantarell and the 87th for traktkantarell. The top band is drawn at the 95th, so
+the tracer returns no segments and `paths[2]` is null. The legend now dims a
+band it found nothing for, which answers the question where it was asked: not
+"something failed to draw" but "there is none of this here".
+
+A fourth followed from the second. Outlines with nothing inside them read as
+lines rather than places — "it's difficult to see when the zones aren't filled
+in" — so the bands are filled again at an opacity that falls as `1/sqrt(n)`.
+The outlines deliberately do **not** thin with the count: where fills overlap
+they blend and stop saying whose ground it is, and the contour lines do not
+blend. Fill answers "is there a zone here", line answers "whose".
+
+### 25l. A 128 m grid cannot draw the edge of a 100 m tarn
+
+Reported as "the random squares look very weird ... it looks half done", and
+they did. The data was right and the geometry was not.
+
+Checking the blank cells against AR50 cell for cell over Baneheia: **100 %
+agreement, no offset**. Of the six blank patches in that screenshot, one was a
+275-cell city block and five were *single* 128 m cells — two tarns and three
+clusters of houses. A contour closing around one cell passes through the
+midpoints of its four edges, so a one-cell blank can only ever be drawn as a
+diamond.
+
+| enclosed blank patches, nationally | count | cells | area |
+|---|---|---|---|
+| all | 137,215 | 1,467,817 | 1.28 % of the grid |
+| exactly one cell | **63,011** | 63,011 | 1,032 km² |
+| two cells or fewer | 84,917 | 106,823 | 1,750 km² |
+
+So the grid stops being asked to draw that edge. `drawField` grows the field
+into its blanks twice before the tracer sees it, so a contour runs straight over
+a small blank while anything larger keeps a blank middle — two passes only reach
+two cells in. `scripts/export_mask_tiles.py` then writes AR50 at four times the
+zone resolution, one tile per zone tile position, 1024 px against 256, which
+makes level 0 the 32 m source itself and needs no index of its own. Habitat is
+transparent and everything else opaque, which is what `destination-out`
+consumes. **711 tiles, 8.6 MB for the whole country**, shared by every species
+because it describes the ground rather than a prediction about it.
+
+`smoothField` is untouched, so a tap over water still finds no zone and the card
+still says so. The drawing may be smoother than the grid; it may not make a
+claim the card would contradict.
+
+The alignment is the part that had to be tested rather than argued. A mask half
+a cell out would erase the wrong side of every shoreline in Norway and still
+look like a map. `tests/test_mask_tiles.py` decodes the shipped tiles and
+asserts every scored cell is habitat by the exporter's own rule; **a one-pixel
+(32 m) shift breaks it**, verified by shifting one.
+
+### 25m. Search, and a coordinate pair named two different ways
+
+Two open registers, both Kartverket's: `api.kartverket.no/stedsnavn/v1/navn`
+for place names and `ws.geonorge.no/adresser/v1/sok` for addresses. Both answer
+in EPSG:25833 when asked and both return `access-control-allow-origin: *` —
+checked rather than assumed, which is why the browser calls them directly and
+no proxy of ours ever sees a query. Recorded in `data/SOURCES.md` with the
+access date.
+
+**Server relevance is not the reader's relevance.** `fuzzy=true` on "Nordmarka"
+returns 1,325 matches and the one in Oslo is not reliably first, so the
+interface asks for 25 rows and sorts by distance from the middle of the screen
+before showing 8. A query with a digit is somebody typing a street number, so
+addresses lead; otherwise the place name was what was meant.
+
+**The dangerous part is the coordinate pair.** stedsnavn answers
+`{koordsys, nord, øst}`; adresser answers `{epsg, lat, lon}` where `lat` holds a
+*northing* and `lon` an *easting*. Read both in the same order and every address
+in Norway lands in the Norwegian Sea, silently, because nothing downstream knows
+what a plausible coordinate looks like. So the labels are a hint and the
+national bounds are the authority: whichever order lands in Norway is the
+answer, and a pair that lands nowhere is dropped rather than drawn.
+
+Nothing about a search is kept — no history, no last query — and the service
+worker does not cache those hosts. A cached map tile is harmless; a cached
+search response is a record of what somebody typed, sitting on their phone.
+
+The privacy policy already named Kartverket, for the basemap, so the check that
+every contacted host is named **stayed green when this was added** and could not
+have caught the omission on its own. A map tile reveals where you are looking; a
+search box reveals what you were looking for, in your own words.
+
+### 25n. What an installed copy was not picking up
+
+Asked plainly: does it keep up with later deployed updates? Mostly, and in two
+places it did not. The worker is the one piece of this app nothing else can see
+— it sits between a reader and the origin, only on an installed copy, and every
+check we have, the deployment check included, asks the origin instead.
+
+**The privacy policy was unreachable once installed.** Every navigation went to
+`shellFirst`, and `shellFirst` answered all of them with `./index.html`, so
+tapping "Personvern" in settings opened the map. The policy was precached,
+correctly, and never consulted.
+
+**Tiles could stay a year out of date.** They are served
+`Cache-Control: immutable` and kept cache-first with no revalidation, both
+resting on a comment claiming a rebuild writes a new tile rather than changing
+one in place. It does not: the exporter names a tile from its row and column, so
+a re-export puts different bytes at the same address. When the ranking changed
+from a national percentile to a rank within 25 km (25i), **every tile's contents
+changed and not one URL did.**
+
+Tile URLs now carry a stamp taken from the bytes that ship — a digest over every
+zone, mask and context tile, name and content both, so two tiles swapping places
+changes it. Because it follows the bytes and not the clock, a rebuild that
+changes only the page leaves every tile URL alone. Demonstrated on the next
+deploy: *"Uploaded 2 files (5,213 already uploaded)"*, stamp unchanged.
+
+What still holds, and is a trade rather than a defect: the shell is
+stale-while-revalidate, so a reader gets the previous version on launch and the
+new one on the launch after. Network-first would hold a multi-megabyte page
+hostage to a signal the woods do not have. A banner now says when the shell on
+screen has been replaced, and does no more than say so — nothing reloads on its
+own, because the reader may be halfway through writing a note.
+
+#### The method note
+
+Every defect in 25j to 25n was invisible to the test suite and visible on a
+phone within a minute. They share a shape: each lived in a place no check could
+reach. An author CSS rule beating a browser one; a legend and a card computing
+the same word from different thresholds; a contour tracer asked to draw
+something finer than its grid; a service worker that only exists on somebody
+else's device.
+
+The general form, and it is the same lesson as 25i from a different direction:
+**a check that runs where the code runs cannot see a problem that only exists
+where the code is used.** The suite grew from 764 to 790 across these, and every
+one of the new tests was written to run the real thing against stubs that can
+tell the wrong answer from the right one — the worker's routing, the erase
+geometry, the coordinate pair, the dimming — rather than to assert that the
+source contains a string.

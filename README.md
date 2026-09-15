@@ -1,22 +1,27 @@
 # Soppspor
 
-A map of where mushrooms **might** grow around Kristiansand, Norway, estimated
-from public geodata — and an honest account of how well that works, which is
+A map of where mushrooms **might** grow across mainland Norway, estimated from
+public geodata — and an honest account of how well that works, which is
 somewhere between "better than chance" and "far from reliable".
+
+Live at **https://soppspor.pages.dev**. Kristiansand is still the *validation*
+extent — the held-out ground the transferability test is judged on — but the
+shipped map covers the country.
 
 It is not a mushroom identifier. **It never tells anyone whether anything is
 safe to eat, and never identifies a species from a photograph.** Those two
 limits are permanent and structural, not settings.
 
 ```
-python scripts/build_hosted.py      # -> dist/, a static site
-./deploy.sh --cloudflare            # or upload dist/ anywhere with HTTPS
+./deploy.sh --cloudflare            # builds Norway, publishes, then checks what is live
+python scripts/build_hosted.py --national     # -> dist_norge/, 204 MB of static site
+python -m pytest -q                 # 790 tests: Python and the JS suites together
 ```
 
 ## What it actually does
 
 Takes fungal occurrence records from Artskart, learns what kind of terrain they
-sit in from 40-odd public map layers, and shades the rest of the kommune by how
+sit in from 40-odd public map layers, and shades the rest of the country by how
 well it matches. A rainfall layer from MET's seNorge grid is laid on top, so a
 place that is right but bone dry is ranked below one that is right and wet.
 
@@ -56,8 +61,15 @@ map that looks convincing and means nothing:
 
 | | |
 |---|---|
-| `scripts/build_hosted.py` | a static site, 4.5 MB, tiles from Kartverket at runtime. Works across Norway, refreshes the weather daily, installs to a home screen. |
+| `scripts/build_hosted.py --national` | `dist_norge/`, about 204 MB: one page plus 4,040 zone tiles, 711 habitat-mask tiles and the context layer. Basemap from Kartverket at runtime. Installs to a home screen and works offline over ground already walked. **This is what is deployed.** |
+| `scripts/build_hosted.py` | `dist/`, one page and no tiles — the Kristiansand-only build, which carries its whole surface inline. |
 | `scripts/build_interface.py` | one self-contained HTML file, 14.8 MB, everything inlined. Needs no server and cannot leave Kristiansand — the basemap alone would be a gigabyte nationally. See `EXPANSION.md`. |
+
+The national build also runs `scripts/export_zone_tiles.py` and
+`scripts/export_mask_tiles.py` upstream of it; those are slow (roughly ten
+minutes) and are not re-run on an ordinary deploy. Tile URLs carry a stamp
+taken from the tile bytes, so a deploy that changes only the page leaves every
+tile URL alone and costs a reader nothing.
 
 ## Working on a second machine
 
@@ -66,8 +78,13 @@ git clone https://github.com/Tobiasee16/SoppKompis
 cd SoppKompis
 uv sync                                    # or: pip install -e .
 python scripts/fetch_recent_weather.py     # ~2 min, the only missing input
-python scripts/build_hosted.py             # -> dist/
+python scripts/build_hosted.py             # -> dist/, the Kristiansand build
 ```
+
+The **national** build additionally needs the zone and mask tiles under
+`data/processed/zone_tiles/`, which are not committed — they are 180 MB and
+come from an overnight prediction run. A fresh clone builds the Kristiansand
+app; rebuilding the national one means re-running the pipeline.
 
 The model surface (`payload.js`) and the marked routes are committed, because
 regenerating the first one means 31 GB of rasters and an overnight pipeline
@@ -98,6 +115,38 @@ evidence for every number in FINDINGS.md.
 | [web/README.md](web/README.md) | deploying |
 | [ATTRIBUTION.md](ATTRIBUTION.md) | the data licences, and what they require of you |
 
+## Where it stands — September 2026
+
+**Deployed and verified live**: the national map, the 25 km neighbourhood
+ranking, the AR50 habitat mask cut at 32 m, place and address search, private
+saved spots with Supabase sync, and an update banner so a reader is told when
+the page they are looking at has been replaced.
+
+**Waiting on the owner**, and nothing else can move it:
+
+| | |
+|---|---|
+| `backend/migrations/004_schedule_tombstone_purge.sql` | not yet run. The privacy policy promises a deleted spot is gone within 30 days and nothing removes it until this is scheduled. |
+| Supabase → Redirect URLs | must contain `https://soppspor.pages.dev/`, trailing slash included, or magic links bounce to localhost. |
+| Custom SMTP | Supabase's built-in mailer does 2 messages an hour to team addresses only, so account recovery does not work for anyone else. See `backend/FIXING_SUPABASE.md` §4. |
+
+**Waiting on the owner's judgement**, deliberately not settled alone:
+
+- The neighbourhood radius is 25 km, chosen by a sweep on the real rasters
+  (FINDINGS 25i). 45 km left Kristiansand at a median of 72; 25 km fills all
+  five bands.
+- With several species drawn at once the band fills thin as `1/sqrt(n)`. Whether
+  that still reads clearly at four species is a question about how it looks in
+  the hand.
+- Om describes the rings as the top 30 / 15 / 5 % of the ground around you.
+  Measured over Kristiansand they are 37.8 / 11.9 / 1.0 %. The top ring is
+  rarer than advertised — conservative, but the copy states the numbers flatly.
+
+**Not started**: no native wrapper exists. There is no `ios/` directory and no
+Capacitor. Testers install it from the browser; the App Store is a separate
+piece of work needing macOS, an Apple Developer account and a guideline 4.2
+argument.
+
 ## Current state
 
 | | |
@@ -118,7 +167,7 @@ evidence for every number in FINDINGS.md.
 | Transferability | done — Agder → Kristiansand, [data/processed/transferability.md](data/processed/transferability.md) |
 | Boyce index | published implementation found biased; both reported — [data/processed/boyce_diagnosis.md](data/processed/boyce_diagnosis.md) |
 | Suitability maps | 16 m GeoTIFF + PNG — [data/processed/suitability_maps.md](data/processed/suitability_maps.md) |
-| Red-list suppression | wired into the export path, **sensitive set empty** |
+| Red-list suppression | **withdrawn as a requirement** in September 2026; `src/features/suppress.py` stays in the tree unused |
 | Land cover (AR5) | blocked — needs a Geonorge FKB login |
 
 ### Headline numbers
@@ -232,10 +281,12 @@ they are easy to erode one convenient exception at a time:
 - **No red-to-green colour ramps.** Single-hue sequential only. The maps use a
   blue light→dark ramp; red/green would read as danger/safe, which is exactly
   the wrong signal for a mushroom product.
-- **Suppression is not a later policy layer.** Every raster leaves through
-  `src/features/suppress.py`. It is currently screening against an empty
-  sensitive set and says so — the maps are not cleared for sharing until
-  Naturbase is fetched.
+- **Suppression is no longer a constraint.** This file used to require every
+  raster to leave through `src/features/suppress.py`, blurring output near
+  red-listed habitat. The owner withdrew that requirement in September 2026 and
+  called the in-app blur option "stupid". The module stays in the tree unused.
+  Do not reintroduce it or treat it as live — read the current `CLAUDE.md`
+  rather than assuming the constraint list is what it once was.
 - **Two Boyce columns, always.** The published equal-width implementation
   returns about −0.42 for a model with no skill on scores this skewed, so its
   sign cannot be read alone.

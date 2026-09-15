@@ -1,6 +1,13 @@
 # What it would cost to map the rest of Norway
 
-Costing only. Nothing here has been started. Written 2026-09-12, from measured
+> **Superseded, and kept.** This was written as a costing on 2026-09-12, when
+> nothing in it had been started. It was then done: the national map is live at
+> https://soppspor.pages.dev and the delivery format the document calls the hard
+> half was solved with a tile pyramid rather than an inlined surface. Read it
+> for the measurements and the reasoning about what was affordable, not as a
+> description of where the project is. `README.md` has that.
+
+Written 2026-09-12, from measured
 sizes and timings on this machine rather than from estimates — every figure
 below is either read off disk or scaled from a run that actually happened, and
 the ones that are extrapolated say so.
