@@ -27,8 +27,14 @@ case "$BUILD" in
     echo "SOPP_BUILD must be 'norge' or 'kommune', got: $BUILD" >&2; exit 2 ;;
 esac
 
+# The same FLAG as the build below, and that is the whole point. These are two
+# different files - conditions.json for Kristiansand, conditions_norge.json for
+# the mainland - and this step used to refresh the Kristiansand one whatever it
+# was about to build. A national deploy therefore announced "refreshing the
+# weather", refreshed a file it would not ship, and published whatever stale
+# national weather happened to be on disk.
 echo "==> refreshing the weather (skips if seNorge has not moved)"
-python scripts/fetch_recent_weather.py --if-new
+python scripts/fetch_recent_weather.py --if-new "${FLAG[@]}"
 
 echo "==> building $WHAT  ->  $OUT/"
 python scripts/build_hosted.py "${FLAG[@]}"

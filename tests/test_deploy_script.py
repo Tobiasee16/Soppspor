@@ -59,6 +59,21 @@ def test_the_bundle_check_runs_against_what_was_built(script):
         "the bundle check would validate a directory other than the one built"
 
 
+def test_the_weather_refresh_runs_against_what_will_be_built(script):
+    """Kristiansand and the mainland keep their conditions in two different
+    files. This step ran without the flag, so a national deploy refreshed
+    `conditions.json`, shipped `conditions_norge.json`, and said it had
+    refreshed the weather. Stale data is bad; stale data behind a line that
+    claims freshness is worse, because it stops anyone looking."""
+    line = next((l for l in script.splitlines()
+                 if "fetch_recent_weather.py" in l
+                 and not l.lstrip().startswith("#")), None)
+    assert line, "deploy.sh no longer refreshes the weather at all"
+    assert '"${FLAG[@]}"' in line, (
+        f"{line.strip()!r} refreshes the weather for a build it may not be "
+        "making - it must carry the same FLAG as build_hosted.py below")
+
+
 def test_it_says_which_ground_the_build_covers_before_publishing(script):
     """A build that says Kristiansand when you meant Norway announces itself
     nowhere else, so the script reads the area label out of the payload."""
