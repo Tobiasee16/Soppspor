@@ -50,6 +50,7 @@ const probe = js.slice(0, at) + `
 ;globalThis.__app = {
   SEL: () => SEL, D, toggleSpecies, setSel, repaint, draw, show,
   spColour, levelsFor, levelsForOverlay, ringLabel, BANDS,
+  renderLegend, bandsDrawn,
   legend: () => document.getElementById("legend").innerHTML,
   pill: () => document.getElementById("pillName").textContent,
   card: () => document.getElementById("cardBody").innerHTML,
@@ -103,6 +104,25 @@ check("the legend does not reuse the card's band words",
 check("zone geometry exists for the selected species",
       !!app.SEL()[0]._zones && app.SEL()[0]._zones.paths.length === 3,
       String(app.SEL()[0]._zones && app.SEL()[0]._zones.paths.length));
+
+/* A band the tracer found nothing for is dimmed, not promised. The mutation
+   below is the point of the check: without it this passes on a view that
+   happens to hold all three bands, whatever the legend does. */
+{
+  const sp = app.SEL()[0];
+  const offs = () => (app.legend().match(/class="off"/g) || []).length;
+  app.renderLegend();
+  const absent = sp._zones.paths.filter(p => !p).length;
+  check("the legend dims exactly the bands with no geometry", offs() === absent,
+        offs() + " dimmed, " + absent + " absent");
+  const saved = sp._zones.paths[0];
+  sp._zones.paths[0] = null;
+  app.renderLegend();
+  check("and it follows the geometry rather than being decorative",
+        offs() === absent + (saved ? 1 : 0), offs() + " after blanking a band");
+  sp._zones.paths[0] = saved;
+  app.renderLegend();
+}
 
 // ------------------------------------------------------- several species --
 const others = app.D.species.filter(s => s !== app.SEL()[0] && !s.is_null);

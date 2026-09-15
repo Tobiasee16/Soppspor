@@ -128,6 +128,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sf);
 .legend .bands i.ln{width:14px;height:1px;border-radius:1px;background:var(--ink-3)}
 .legend .bands i.ln.w1{height:2px}
 .legend .bands i.ln.w2{height:4px;border-radius:2px}
+.legend .bands span.off{opacity:.34}
 
 /* sheets that slide over the map */
 .card{position:absolute;left:0;right:0;bottom:0;z-index:8;background:var(--sheet);
@@ -1979,6 +1980,16 @@ function repaint(){
     sp._zones={paths:buildZones(sp,levels),levels:levels,overlay:overlay,
                cond:condStamp(),ox:OX,oy:OY,gw:GW,cell:CELL};
   });
+  syncLegend();
+}
+/* Only when it would say something different. repaint() runs on every window
+   commit, and rewriting the legend's markup each time would be work for
+   nothing and a reflow the reader can see. */
+var legendSig=null;
+function syncLegend(){
+  var sig=SEL.length+"|"+bandsDrawn().join("");
+  if(sig===legendSig)return;
+  legendSig=sig;renderLegend();
 }
 /* Conditions re-rank the field, so a newer weather file invalidates the
    cached contours as surely as changing species does. */
@@ -3127,17 +3138,39 @@ function toggleSpecies(sp){
    zones are not - Om says so in as many words. It already describes them as the
    top 30, 15 and 5 per cent of the ground around you; the legend now says the
    same thing in the same words. */
+/* A band with nothing on screen is dimmed rather than promised. Baneheia in
+   Kristiansand reaches the 93rd percentile for kantarell and the 87th for
+   traktkantarell, so the top ring is genuinely absent there and the legend
+   advertised a shade the reader could not find - "only two layers in the zone
+   when 1 is toggled on?". Dimming answers it on the spot: there is no top 5 %
+   ground here, rather than something failing to draw.
+
+   `paths[i]` is null when the tracer found no segments at that level in the
+   loaded window, so this reads the geometry that was actually built rather
+   than re-deriving anything. An empty array - nothing built yet - dims
+   nothing. */
+function bandsDrawn(){
+  var n=0,on=[],i;
+  SEL.forEach(function(sp){var z=sp&&sp._zones;
+    if(z&&z.paths.length>n)n=z.paths.length;});
+  for(i=0;i<n;i++)on.push(false);
+  SEL.forEach(function(sp){var z=sp&&sp._zones;if(!z)return;
+    for(var j=0;j<z.paths.length;j++) if(z.paths[j]) on[j]=true;});
+  return on;
+}
 function ringLabel(p){return "topp "+Math.round((1-p)*100)+" %";}
 function renderLegend(){
   var el=document.getElementById("legend");
   if(!el)return;
   var hex=spColour(SEL[0],D.species.indexOf(SEL[0]));
+  var on=bandsDrawn();
+  function dim(i){return (on.length&&!on[i])?' class="off"':'';}
   if(SEL.length===1){
     var c=rgbOf(hex),W=[255,255,255],K=[0,0,0];
     var swatch=[rgba(mix(c,W,.45),1),rgba(c,1),rgba(mix(c,K,.34),1)];
     el.innerHTML='<span class="bands">'
       +levelsFor(hex).map(function(lv,i){
-          return '<span><i style="background:'+swatch[i]+'"></i>'
+          return '<span'+dim(i)+'><i style="background:'+swatch[i]+'"></i>'
             +ringLabel(lv.p)+'</span>';}).join("")
       +'</span>';
   }else{
@@ -3153,7 +3186,7 @@ function renderLegend(){
             +'"></i>'+sp.no+'</span>';}).join("")
       +'</span><span class="bands">'
       +levelsForOverlay(hex).map(function(lv,i){
-          return '<span><i class="ln w'+i+'"></i>'
+          return '<span'+dim(i)+'><i class="ln w'+i+'"></i>'
             +ringLabel(lv.p)+'</span>';}).join("")
       +'</span>';
   }
