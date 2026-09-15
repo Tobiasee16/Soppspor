@@ -22,6 +22,15 @@
   --sheet:rgba(28,28,30,.94); --shadow:0 -1px 22px #00000059;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+/* [hidden]{display:none !important} lives in the user-agent stylesheet, and every
+   author rule that sets display beats it whatever the specificity, because
+   author origin outranks UA origin. So `el.hidden=true` silently did nothing
+   to anything carrying a display of its own: the marked-routes switch stayed
+   on screen in the national build, which ships no route geometry, and toggling
+   it governed nothing; the conditions pill could not be hidden when there was
+   no weather to show; the delete-everything button stayed under its own
+   confirmation box. One rule, in author origin, so hiding works everywhere. */
+[hidden]{display:none !important}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sf);
   font-size:17px;line-height:1.45;-webkit-font-smoothing:antialiased;overflow:hidden}
 
