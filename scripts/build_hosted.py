@@ -90,6 +90,8 @@ NAT_MAPS = ROOT / "data" / "processed" / "suitability_maps_norge.md"
 NAT_POOL = ROOT / "data" / "interim" / "target_group_pool_norge.json"
 NAT_CTX = ROOT / "data" / "processed" / "context_tiles"
 NAT_COND = ROOT / "data" / "processed" / "conditions_norge.json"
+NAT_TRAILS = ROOT / "data" / "processed" / "trails"
+NAT_TRAILS_INDEX = NAT_TRAILS / "index.json"
 
 # Where the national build's conditions layer comes from. "static" ships the
 # file inside the deployment, which is how this worked before there was
@@ -737,10 +739,36 @@ def main() -> int:
         cond_js = "window.SOPP_COND=" + json.dumps(cond, separators=(",", ":")) + ";"
         print(f"  conditions: {cond['last_day']} ({cond['lag_days']}d behind)")
 
-    trails_js = "window.SOPP_TRAILS=null;"
-    if TRAILS.exists() and not national:
+    trails_js = "window.SOPP_TRAILS=null;window.SOPP_TRAIL_INDEX=null;"
+    if national and NAT_TRAILS_INDEX.exists():
+        # Per fylke, copied out as files. Only the index rides in the page -
+        # about 2 kB of names and bounding boxes - and the interface fetches a
+        # fylke when the view reaches it and the switch is on. Inlining the
+        # geometry is what the Kristiansand build does and what the mainland
+        # cannot: 296 kB against roughly 8 MB, on a 0.27 MB page.
+        idx = json.loads(NAT_TRAILS_INDEX.read_text(encoding="utf-8"))
+        dst = out / "trails"
+        dst.mkdir(parents=True, exist_ok=True)
+        total = 0
+        for f in idx["fylker"]:
+            src = NAT_TRAILS / f["file"]
+            if not src.exists():
+                raise SystemExit(
+                    f"{src} is named in the trail index and is not on disk - "
+                    "run scripts/fetch_trails.py --national")
+            shutil.copyfile(src, dst / f["file"])
+            total += src.stat().st_size
+        trails_js = ("window.SOPP_TRAILS=null;window.SOPP_TRAIL_INDEX="
+                     + json.dumps(idx, separators=(",", ":")) + ";")
+        print(f"  trails: {len(idx['fylker'])} fylker, "
+              f"{sum(f['lines'] for f in idx['fylker']):,} routes, "
+              f"{total / 1e6:.1f} MB fetched per region on demand")
+    elif national:
+        print("  trails: none - run fetch_trails.py --national")
+    elif TRAILS.exists():
         tr = json.loads(TRAILS.read_text(encoding="utf-8"))
-        trails_js = "window.SOPP_TRAILS=" + json.dumps(tr, separators=(",", ":")) + ";"
+        trails_js = ("window.SOPP_TRAILS=" + json.dumps(tr, separators=(",", ":"))
+                     + ";window.SOPP_TRAIL_INDEX=null;")
         print(f"  trails: {tr['lines']} routes, {tr['vertices']} vertices")
 
     injected = ("<script>" + payload + "</script>\n"

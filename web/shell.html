@@ -1689,61 +1689,115 @@ function smoothField(sp){
    Split into buckets so only the paths near the viewport are stroked; the
    whole network is 61,000 vertices and re-stroking all of it every frame
    would be wasted work at any zoom past the whole kommune. */
-var TR=window.SOPP_TRAILS||null;
+/* Marked routes, Kartverket's Turrutebasen.
+ *
+ * Two shapes, one reader. The Kristiansand build inlines a single pack in the
+ * page: 5,804 lines, 296 kB, there before the first frame. Nationally that is
+ * 150,215 lines and about 8 MB, which is thirty times the page, so it ships as
+ * one file per fylke and the ones covering the view are fetched when the
+ * switch is on.
+ *
+ * Per fylke rather than per tile, deliberately. A fylke file is whole: no line
+ * is clipped at a boundary, there is no index of which tiles exist, and a
+ * reader who has loaded Agder has every marked route in Agder for good -
+ * including the ground they have never panned across. Tiles would trade that
+ * for proportionality, and this app is offline-first: the walk that matters is
+ * the one past the end of the signal. See FINDINGS 28.
+ */
+var TR=window.SOPP_TRAILS||null;            /* inline pack, single-region build */
+var TR_INDEX=window.SOPP_TRAIL_INDEX||null; /* national: which fylker exist */
+var TR_PACKS=[];                            /* what is loaded and drawable */
+var TR_STATE={};                            /* slug -> "load" | "ok" | "fail" */
 var TRAIL_PX=1.15;          // stroke width on screen, in CSS pixels
-var trBuckets=null;
 function typed(u8,Type){return new Type(u8.buffer,0,(u8.byteLength/Type.BYTES_PER_ELEMENT)|0);}
-function buildTrails(){
-  if(!TR||trBuckets)return;
-  var st=typed(b64(TR.starts),Int32Array),
-      dl=typed(b64(TR.deltas),Int16Array),
-      ct=typed(b64(TR.counts),Uint32Array),
-      bk=b64(TR.bucket);
-  var n=ct.length,B=TR.buckets;
-  trBuckets=[];
-  for(var i=0;i<B*B;i++)trBuckets.push({path:null,n:0});
+
+/* Decode one pack into Path2D per culling bucket. Done once per pack, not per
+   frame: the paths are in the pack's own quantised units and the transform
+   does the rest, so nothing here depends on the view. */
+function trailPack(d){
+  var st=typed(b64(d.starts),Int32Array),
+      dl=typed(b64(d.deltas),Int16Array),
+      ct=typed(b64(d.counts),Uint32Array),
+      bk=b64(d.bucket);
+  var n=ct.length,B=d.buckets,buckets=[],i;
+  for(i=0;i<B*B;i++)buckets.push({path:null,n:0});
   var di=0;
   for(var li=0;li<n;li++){
-    var cnt=ct[li],b=trBuckets[bk[li]]||trBuckets[0];
+    var cnt=ct[li],b=buckets[bk[li]]||buckets[0];
     if(!b.path)b.path=new Path2D();
     var x=st[li*2],y=st[li*2+1];
     b.path.moveTo(x,y);
     for(var k=1;k<cnt;k++){x+=dl[di*2];y+=dl[di*2+1];di++;b.path.lineTo(x,y);}
     b.n++;
   }
+  return {d:d,buckets:buckets};
 }
-function drawTrails(){
-  if(!TR)return;
-  buildTrails();
-  if(!trBuckets)return;
-  var u=TR.unit_m,ox=TR.origin[0],oy=TR.origin[1],ext=TR.extent,B=TR.buckets;
-  var k=u/view.mpp;
-  if(!(k>0)||!isFinite(k))return;
-  var offx=(ox-view.cx)/view.mpp+CW/2;
-  var offy=(view.cy-oy)/view.mpp+CH/2;
-  var bw=(ext[2]-ext[0])/B,bh=(ext[3]-ext[1])/B;
+
+/* Fetch the fylker the view touches. Guarded by TR_STATE rather than by a
+   timer, so a fylke is asked for once whatever happens afterwards - a failed
+   request included, because retrying every frame over a dead connection is how
+   a phone's battery disappears. */
+function ensureTrails(){
+  if(!TR_INDEX||!PREF.trails)return;
   var wl=view.cx-CW*view.mpp/2,wr=view.cx+CW*view.mpp/2;
   var wb=view.cy-CH*view.mpp/2,wt=view.cy+CH*view.mpp/2;
+  TR_INDEX.fylker.forEach(function(f){
+    if(TR_STATE[f.slug])return;
+    var b=f.bbox;
+    if(b[2]<wl||b[0]>wr||b[3]<wb||b[1]>wt)return;
+    TR_STATE[f.slug]="load";
+    fetch("trails/"+f.file)
+      .then(function(r){return r.ok?r.json():null;})
+      .then(function(d){
+        if(!d){TR_STATE[f.slug]="fail";return;}
+        TR_PACKS.push(trailPack(d));
+        TR_STATE[f.slug]="ok";
+        requestDraw();
+      })
+      .catch(function(){TR_STATE[f.slug]="fail";});
+  });
+}
+
+function drawTrails(){
+  ensureTrails();
+  if(!TR_PACKS.length)return;
   ctx.save();
   ctx.setTransform(DPR,0,0,DPR,0,0);
-  ctx.translate(offx,offy);
-  ctx.scale(k,-k);
   ctx.lineJoin="round";ctx.lineCap="round";
-  for(var pass=0;pass<2;pass++){
-    /* A pale halo first, then the line. Over the deep blue of a top zone a
-       bare red line loses its edge; the halo keeps the route legible without
-       making it thicker. */
-    ctx.strokeStyle=pass?"rgba(196,66,48,.92)":"rgba(255,255,255,.75)";
-    ctx.lineWidth=(pass?TRAIL_PX:TRAIL_PX+1.7)/k;
-    for(var by=0;by<B;by++)for(var bx=0;bx<B;bx++){
-      var x0=ext[0]+bx*bw,y0=ext[1]+by*bh;
-      if(x0+bw<wl||x0>wr||y0+bh<wb||y0>wt)continue;
-      var b=trBuckets[by*B+bx];
-      if(b&&b.path)ctx.stroke(b.path);
+  var wl=view.cx-CW*view.mpp/2,wr=view.cx+CW*view.mpp/2;
+  var wb=view.cy-CH*view.mpp/2,wt=view.cy+CH*view.mpp/2;
+  TR_PACKS.forEach(function(pk){
+    var d=pk.d,u=d.unit_m,ox=d.origin[0],oy=d.origin[1],ext=d.extent,B=d.buckets;
+    var k=u/view.mpp;
+    if(!(k>0)||!isFinite(k))return;
+    if(ext[2]<wl||ext[0]>wr||ext[3]<wb||ext[1]>wt)return;
+    var offx=(ox-view.cx)/view.mpp+CW/2;
+    var offy=(view.cy-oy)/view.mpp+CH/2;
+    var bw=(ext[2]-ext[0])/B,bh=(ext[3]-ext[1])/B;
+    ctx.save();
+    ctx.translate(offx,offy);
+    ctx.scale(k,-k);
+    for(var pass=0;pass<2;pass++){
+      /* A pale halo first, then the line. Over the deep blue of a top zone a
+         bare red line loses its edge; the halo keeps the route legible without
+         making it thicker. */
+      ctx.strokeStyle=pass?"rgba(196,66,48,.92)":"rgba(255,255,255,.75)";
+      ctx.lineWidth=(pass?TRAIL_PX:TRAIL_PX+1.7)/k;
+      for(var by=0;by<B;by++)for(var bx=0;bx<B;bx++){
+        var x0=ext[0]+bx*bw,y0=ext[1]+by*bh;
+        if(x0+bw<wl||x0>wr||y0+bh<wb||y0>wt)continue;
+        var b=pk.buckets[by*B+bx];
+        if(b&&b.path)ctx.stroke(b.path);
+      }
     }
-  }
+    ctx.restore();
+  });
   ctx.restore();
 }
+
+/* The inline pack, if this build has one, is just a pack that needed no
+   fetching. Treating it as one keeps a single draw path for both builds. */
+if(TR)TR_PACKS.push(trailPack(TR));
 
 /* ---------- the habitat mask ---------- */
 /* A zone tile holds 128 m cells and a cell that is mostly lake carries no
@@ -3907,18 +3961,18 @@ wireSeg("segBase",function(v){PREF.base=v;requestDraw();});
 document.getElementById("swTrails").addEventListener("change",function(e){
   PREF.trails=e.target.checked;savePrefs();requestDraw();});
 document.getElementById("swTrails").checked=!!PREF.trails;
-/* Hidden when this build carries no route geometry. Turrutebasen is packed
-   into the page, which works for one kommune - 5,804 lines in 395 kB - and
-   does not for the mainland, where the same packing is tens of megabytes and
-   would want tiling of its own. Until that exists the national build has no
-   vector routes, and a switch that silently governs nothing is worse than no
-   switch: it tells the reader the feature is there and broken.
+/* Hidden only when this build has no routes at all - neither an inline pack
+   nor an index of fylke files. That used to mean every national build: the
+   geometry was packed into the page, which works for one kommune at 296 kB
+   and does not for the mainland at 8 MB. It is now fetched per fylke instead,
+   so the switch governs something everywhere and stays visible.
 
-   Marked routes are still visible nationally, drawn into Kartverket's `topo`
-   sheet, which is the other option in the basemap picker directly above. */
+   The rule it still obeys: a switch that silently governs nothing is worse
+   than no switch, because it tells the reader a feature is there and broken.
+   And `hidden` needs the author-origin rule from 25j to beat `.row`. */
 (function(){
   var row=document.getElementById("rowTrails");
-  if(row) row.hidden=!TR;
+  if(row) row.hidden=!(TR||TR_INDEX);
 })();
 /* Papir is Kartverket's `toporaster`, fetched at runtime, so it only exists in
    a build that draws runtime tiles. The Kristiansand build carries its own

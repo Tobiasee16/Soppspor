@@ -178,6 +178,37 @@ published figure changes.
 | Licence | CC BY 4.0, Kartverket. Attribution shown in the interface. |
 | Script | `scripts/fetch_trails.py` |
 | Raw | `data/raw/turrutebasen/*.gml` (17.4 MB) |
+
+**The WFS does not scale to the mainland, and this was measured rather than
+assumed.** On 2026-09-15 a single 50 km bounding box returned 15 MB of GML in
+**98 seconds**. Covering Norway that way is roughly 130 requests, two gigabytes
+and several hours, and the 600 s client timeout starts refusing the larger
+boxes well before that. The WFS stays correct for one kommune and is what
+`fetch_trails.py` still uses without `--national`.
+
+### National — Geonorge download API
+
+| | |
+|---|---|
+| Dataset | Turrutebasen, uuid `d1422d17-6d95-4ef1-96ab-8af31744dd63` |
+| Areas | `https://nedlasting.geonorge.no/api/codelists/area/<uuid>` |
+| Order | `POST https://nedlasting.geonorge.no/api/order` |
+| Accessed | **2026-09-15** |
+| Auth | none. Open data; the order carries an email because the schema asks for one, and `deliveryNotificationByEmail` is false for this dataset so nothing is sent to it |
+| Script | `scripts/fetch_trails.py --national` |
+| Raw | `data/raw/turrutebasen/<fylke>_25833.zip` |
+
+The API offers this dataset **already split by fylke**, in EPSG:25833, as GML —
+which is the shape the app wanted anyway. One request per fylke instead of 130
+bbox queries, and Geonorge decides which routes belong to which fylke, so there
+is no point-in-polygon pass here and no second opinion about where a boundary
+runs. A fylke arrives in about a second.
+
+Measured over all 15: **165,593 routes, 17.9 MB of packed JSON, 9.2 MB
+gzipped.** Median fylke 0.87 MB raw and roughly 0.45 MB over the wire; the
+largest is Innlandet at 3.13 MB (1.64 MB gzipped) and the smallest Oslo at
+0.22 MB. That per-region figure is the one that matters: a reader downloads
+their own fylke, not the country.
 | Product | `data/interim/trails.json`, 5804 routes, 60,986 vertices, 395 kB |
 
 Used for display only. Nothing from this layer is a model feature, and it must

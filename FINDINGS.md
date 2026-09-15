@@ -4704,3 +4704,90 @@ Worth keeping as a method note: this sat in the README for days as a judgement
 call about a constant, because the measurement was taken over one kommune and
 compared against a claim about a different denominator. **When a number
 disagrees with a document, check what each is counting before changing either.**
+
+## 28. Marked routes, nationally - 2026-09-15
+
+Asked for directly: "is it possible to add turistier from kartverket?" Partly
+it already was, in two senses that needed separating before anything was built.
+
+**They were already on screen.** Kartverket's `topo` sheet draws marked routes
+into the raster, and topo became the default basemap the same afternoon. What
+that gives is pixels: thickness fixed at fetch time, no switch, no tap, and at
+deep zoom the two-pixel line becomes a band rather than a path - which is the
+bug `fetch_trails.py` was written to escape in the first place.
+
+**Kristiansand already had the good version** - Turrutebasen's real line
+geometry, 5,804 routes in a 296 kB pack inlined in the page, stroked in screen
+pixels so it is sharp at every zoom. The national build shipped none of it, and
+the settings row hid itself accordingly.
+
+### 28a. The WFS does not scale, and that was measured
+
+The obvious plan was the existing fetcher over a grid of 300 km cells. Before
+running it for hours, one cell was timed: **a 50 km bounding box returns 15 MB
+of GML in 98 seconds.** Norway is roughly 130 such boxes - two gigabytes and
+several hours - and the 600 s client timeout would have started refusing the
+300 km cells long before the run finished. The first cell never completed.
+
+Geonorge's **download API** serves this dataset already split by fylke, in
+EPSG:25833, as GML, with no account:
+
+```
+POST https://nedlasting.geonorge.no/api/order
+     uuid d1422d17-6d95-4ef1-96ab-8af31744dd63
+```
+
+One request per fylke, about a second each. It also removes work rather than
+moving it: Geonorge decides which routes belong to which fylke, so there is no
+point-in-polygon pass here and no second opinion about where a boundary runs.
+The existing parser read the bundles unchanged.
+
+### 28b. What it costs, per reader
+
+| | |
+|---|---|
+| routes | **165,593** across 15 fylker |
+| packed | 17.9 MB on disk, **9.2 MB gzipped** |
+| median fylke | 0.87 MB, about **0.45 MB over the wire** |
+| largest | Innlandet, 3.13 MB (1.64 MB gzipped) |
+| smallest | Oslo, 0.22 MB |
+
+The national total is the wrong number to look at and the per-fylke one is the
+right one. Nobody downloads Norway; somebody in Agder downloads 0.75 MB.
+
+### 28c. Why per fylke and not per tile
+
+Tiles are how every other layer here is delivered, so not using them needs a
+reason. Three, and the third decides it:
+
+1. **A line is not a pixel.** A route crossing a tile boundary must either be
+   clipped into both - duplicating vertices, inflating the total - or kept
+   whole in one, in which case it vanishes when you pan off the tile that owns
+   it. Rasters never have this problem.
+2. **A pyramid would need per-level simplification**, so a path can change
+   shape as you cross a zoom boundary, and an index of which tiles hold
+   anything, since most hold nothing.
+3. **Tiles would make the app worse offline.** With tiles you have routes only
+   for ground you have already looked at on a connection. A fylke file is
+   whole: load Agder once and every marked route in Agder is yours for good,
+   including the ground you have never panned across. For an app whose point is
+   the walk past the end of the signal, that is the trade the wrong way round.
+
+So the service worker keeps trail files cache-first and does not revalidate.
+Turrutebasen changes a few times a year, and a route that has moved is a much
+smaller problem than a map with no paths on it - which is the opposite of the
+call made for the weather, for the opposite reason.
+
+### 28d. What the tests pin
+
+Every way `ensureTrails` can be wrong is silent. Too eager and switching the
+layer on pulls all of Norway onto a phone, which is what splitting per fylke
+was for; too shy and the paths simply stop at a border with nothing on screen
+to say a file was never asked for; no once-only guard and a fylke is
+re-requested every animation frame, sixty times a second over a bad connection.
+None of those throws. `tests/test_trails_fylke.js` drives the real function
+against a stubbed fetch and a movable view over four synthetic fylker and
+asserts which files were asked for and how many times - including that a failed
+request is remembered rather than retried forever.
+
+Suite: **810 -> 811** pytest cases.

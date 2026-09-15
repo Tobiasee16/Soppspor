@@ -213,6 +213,16 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(networkFirst(request, DATA));
     return;
   }
+  /* A fylke's marked routes. Cache-first and kept, which is the whole point of
+     splitting them per region: a reader downloads Agder once, on a connection,
+     and has every marked route in Agder from then on with no signal at all.
+     Turrutebasen changes a few times a year and a route that moved is a far
+     smaller problem than a map with no paths on it, so staleness is the right
+     trade here in a way it was not for the weather above. */
+  if (url.pathname.indexOf("/trails/") >= 0 && url.pathname.endsWith(".json")) {
+    event.respondWith(zoneFirst(request));
+    return;
+  }
   if (request.mode === "navigate" || url.pathname.endsWith("/index.html")
       || url.pathname === "/") {
     event.respondWith(shellFirst(request));

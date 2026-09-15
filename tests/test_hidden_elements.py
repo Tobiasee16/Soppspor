@@ -96,10 +96,19 @@ class TestHidingWorks:
         assert risky, "no element needs the rule any more - check this test still bites"
 
     def test_the_switch_that_started_it(self):
-        """The national build hides the marked-routes switch. It must obey."""
+        """A build with no routes hides the marked-routes switch. It must obey.
+
+        The condition widened when routes went national: it used to be `!TR`,
+        the inline pack, because the mainland build carried no geometry at all.
+        It now also has `TR_INDEX`, the list of per-fylke files, and the switch
+        is hidden only when neither exists. What is being tested is unchanged -
+        a switch that governs nothing must not be on screen - and the element
+        still needs the author-origin `[hidden]` rule to beat `.row`.
+        """
         html = SHELL.read_text(encoding="utf-8")
         assert "rowTrails" in at_risk(html), (
             "rowTrails no longer carries a display rule; if the settings row "
             "markup changed, this test is watching the wrong element")
-        assert re.search(r"row\.hidden\s*=\s*!TR", html), (
-            "the switch is no longer hidden when the build has no route geometry")
+        assert re.search(r"row\.hidden\s*=\s*!\(\s*TR\s*\|\|\s*TR_INDEX\s*\)", html), (
+            "the switch is no longer hidden when the build has neither an "
+            "inline pack nor an index of fylke route files")

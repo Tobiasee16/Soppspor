@@ -27,6 +27,7 @@ Kartverket, Turrutebasen, CC BY 4.0. Attribution is in the interface footer.
 from __future__ import annotations
 
 import base64
+import io
 import json
 import pathlib
 import re
@@ -34,6 +35,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+import zipfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
@@ -73,10 +75,15 @@ def extent() -> tuple[float, float, float, float]:
             max(b[2] for b in bb), max(b[3] for b in bb))
 
 
-def fetch(type_name: str, ext) -> str:
-    """GML for one feature type, cached - the footpath query takes minutes."""
+def fetch(type_name: str, ext, tag: str = "") -> str:
+    """GML for one feature type, cached - the footpath query takes minutes.
+
+    `tag` goes in the cache name so the national run, which asks for the
+    same three types once per fylke, does not keep handing back Agder.
+    """
     RAW_DIR.mkdir(parents=True, exist_ok=True)
-    cache = RAW_DIR / (type_name.replace(":", "_") + ".gml")
+    cache = RAW_DIR / ((tag + "_" if tag else "")
+                       + type_name.replace(":", "_") + ".gml")
     if cache.exists():
         print(f"  {type_name}: cached ({cache.stat().st_size / 1e6:.1f} MB)", flush=True)
         return cache.read_text(encoding="utf-8", errors="replace")
@@ -141,34 +148,15 @@ def simplify(pts: np.ndarray, tol: float) -> np.ndarray:
     return pts[keep]
 
 
-def main() -> int:
-    ext = extent()
-    print(f"extent {ext[0]:.0f} {ext[1]:.0f} {ext[2]:.0f} {ext[3]:.0f}", flush=True)
+def pack(simp, ext):
+    """The wire format, as one dict ready to be JSON-encoded.
 
-    raw_lines, per_type = [], {}
-    for t in TYPES:
-        gml = fetch(t, ext)
-        ls = lines_from(gml)
-        per_type[t] = {"lines": len(ls), "vertices": int(sum(len(x) for x in ls))}
-        raw_lines.extend(ls)
-
-    if not raw_lines:
-        raise SystemExit("no trail geometry returned - refusing to write an empty layer")
-
-    allpts = np.vstack(raw_lines)
-    if not (ext[0] - 5000 < allpts[:, 0].mean() < ext[2] + 5000
-            and ext[1] - 5000 < allpts[:, 1].mean() < ext[3] + 5000):
-        raise SystemExit(
-            f"coordinates are not inside the extent (mean {allpts.mean(axis=0)}). "
-            "The WFS axis order is probably northing-first; do not ship this.")
-
-    before = int(sum(len(x) for x in raw_lines))
-    simp = [simplify(p, TOLERANCE_M) for p in raw_lines]
-    simp = [p for p in simp if len(p) >= 2]
+    Lifted out of main() when the national build started writing one of
+    these per fylke. Both paths must produce identical structures or the
+    interface needs two readers, so there is one producer and the caller
+    supplies only the extent the coordinates are measured against.
+    """
     after = int(sum(len(x) for x in simp))
-    print(f"\n{len(simp)} lines, {before} -> {after} vertices "
-          f"({100 * (1 - after / before):.0f} % removed at {TOLERANCE_M} m)", flush=True)
-
     ox, oy = float(ext[0]), float(ext[1])
     starts, deltas, counts, bucket_of = [], [], [], []
     bw = (ext[2] - ext[0]) / BUCKETS
@@ -201,7 +189,7 @@ def main() -> int:
     def b64(a):
         return base64.b64encode(a.tobytes()).decode("ascii")
 
-    payload = {
+    return {
         "crs": "EPSG:25833", "origin": [ox, oy], "unit_m": UNIT_M,
         "buckets": BUCKETS, "extent": [round(v, 1) for v in ext],
         "lines": len(counts), "vertices": after,
@@ -210,7 +198,208 @@ def main() -> int:
         "source": "Kartverket Turrutebasen (WFS), CC BY 4.0",
         "simplified_m": TOLERANCE_M,
     }
-    OUT_JSON.parent.mkdir(parents=True, exist_ok=True)
+OUT_JSON.parent.mkdir(parents=True, exist_ok=True)
+
+
+FYLKER_DIR = ROOT / "data" / "interim" / "fylker"
+NAT_DIR = ROOT / "data" / "processed" / "trails"
+
+
+def fylker():
+    """(slug, name, geometry, bbox, fylkesnummer) per fylke.
+
+    Reuses the boundaries the national pipeline already pulls from Kartverket's
+    kommuneinfo API, so there is no second definition of where a fylke is.
+    """
+    from shapely.geometry import shape
+    out = []
+    for f in sorted(FYLKER_DIR.glob("boundary_*_25833.geojson")):
+        d = json.loads(f.read_text(encoding="utf-8"))
+        feat = d["features"][0]
+        geom = shape(feat["geometry"])
+        name = feat.get("properties", {}).get("fylkesnavn", f.stem)
+        slug = f.stem.replace("boundary_", "").replace("_25833", "")
+        code = feat.get("properties", {}).get("fylkesnummer", "")
+        out.append((slug, name, geom, tuple(geom.bounds), code))
+    return out
+
+
+UUID = "d1422d17-6d95-4ef1-96ab-8af31744dd63"     # Turrutebasen, Geonorge
+AREA_API = "https://nedlasting.geonorge.no/api/codelists/area/" + UUID
+ORDER_API = "https://nedlasting.geonorge.no/api/order"
+
+
+def order_fylke(code: str, name: str) -> bytes:
+    """The whole of one fylke, as a zip, from Geonorge's download API.
+
+    Not the WFS. Measured on 2026-09-15: a 50 km bbox takes 98 seconds and
+    returns 15 MB of GML, so covering the mainland that way is about 130
+    requests, two gigabytes and several hours - and the 600 s timeout starts
+    refusing the bigger cells long before that. The download API hands over a
+    fylke at a time, already clipped and already in EPSG:25833, in one request.
+
+    It also removes work rather than moving it: Geonorge decides which routes
+    belong to which fylke, so there is no point-in-polygon pass here and no
+    second opinion about where a boundary is.
+
+    Open data, no account, no key. The email goes in the order because the API
+    asks for one; nothing is sent to it - deliveryNotificationByEmail is false
+    on this dataset.
+    """
+    body = json.dumps({
+        "email": "support@soppspor.no",
+        "orderLines": [{
+            "metadataUuid": UUID,
+            "areas": [{"code": code, "type": "fylke", "name": name}],
+            "projections": [{"code": "25833", "name": "EUREF89 UTM sone 33, 2d",
+                             "codespace": "http://www.opengis.net/def/crs/EPSG/0/25833"}],
+            "formats": [{"name": "GML"}],
+        }],
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        ORDER_API, data=body,
+        headers={**UA, "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=300) as r:
+        order = json.loads(r.read().decode("utf-8"))
+    files = order.get("files") or []
+    if not files:
+        raise SystemExit(f"{name}: the order came back with no files: "
+                         f"{json.dumps(order)[:400]}")
+    url = files[0]["downloadUrl"]
+    with urllib.request.urlopen(urllib.request.Request(url, headers=UA),
+                                timeout=900) as r:
+        return r.read()
+
+
+def gml_from_zip(blob: bytes) -> str:
+    z = zipfile.ZipFile(io.BytesIO(blob))
+    names = [n for n in z.namelist() if n.lower().endswith(".gml")]
+    if not names:
+        raise SystemExit(f"no .gml inside the bundle, only {z.namelist()[:5]}")
+    return z.read(names[0]).decode("utf-8", "replace")
+
+
+def national() -> int:
+    """One packed file per fylke, so a reader downloads their own region.
+
+    Nationally Turrutebasen is about 150,000 lines - some 26 times Kristiansand
+    rather than the 500 times the area ratio would suggest, because trails
+    follow people and not ground. Small enough to ship whole, far too large to
+    put inside a 0.27 MB page, so it becomes files fetched when the switch is
+    on and the view reaches them.
+
+    Split per fylke rather than per tile. A fylke file is whole: no line is
+    clipped at a boundary, nothing needs an index of which tiles exist, and a
+    reader who has loaded Agder has every marked route in Agder for good,
+    offline, including ground they have never panned across. Tiles would buy
+    proportionality and sell exactly that, which is the wrong trade for an app
+    whose point is the walk past the end of the signal. See FINDINGS 28.
+    """
+    fy = fylker()
+    if not fy:
+        raise SystemExit(f"no fylke boundaries in {FYLKER_DIR} - run the "
+                         "national pipeline first")
+
+    with urllib.request.urlopen(
+            urllib.request.Request(AREA_API, headers=UA), timeout=120) as r:
+        areas = json.loads(r.read().decode("utf-8"))
+    by_code = {a["code"]: a["name"] for a in areas if a.get("type") == "fylke"}
+
+    RAW_DIR.mkdir(parents=True, exist_ok=True)
+    NAT_DIR.mkdir(parents=True, exist_ok=True)
+    index, total_kb, total_lines = [], 0.0, 0
+
+    for slug, name, _geom, bb, code in fy:
+        if code not in by_code:
+            raise SystemExit(f"{name} (code {code}) is not an area Geonorge "
+                             f"offers for this dataset: {sorted(by_code)[:8]}")
+        cache = RAW_DIR / f"{slug}_25833.zip"
+        if cache.exists():
+            print(f"{name}: cached ({cache.stat().st_size / 1e6:.1f} MB)", flush=True)
+            blob = cache.read_bytes()
+        else:
+            t0 = time.time()
+            blob = order_fylke(code, by_code[code])
+            cache.write_bytes(blob)
+            print(f"{name}: {len(blob) / 1e6:.1f} MB in {time.time() - t0:.0f}s",
+                  flush=True)
+
+        raw = lines_from(gml_from_zip(blob))
+        if not raw:
+            print(f"  no routes", flush=True)
+            continue
+        pts = np.vstack(raw)
+        mx, my = float(pts[:, 0].mean()), float(pts[:, 1].mean())
+        if not (-100000 < mx < 1200000 and 6400000 < my < 8000000):
+            raise SystemExit(f"{name}: coordinates are not inside Norway "
+                             f"(mean {mx:.0f} {my:.0f}). Axis order is probably "
+                             "northing-first; do not ship this.")
+
+        simp = [q for q in (simplify(x, TOLERANCE_M) for x in raw) if len(q) >= 2]
+        if not simp:
+            continue
+        # Packed against the fylke's own bounds, so the int16 deltas and the
+        # 6x6 culling grid are both measured on the region the file covers.
+        payload = pack(simp, bb)
+        payload["fylke"] = name
+        out = NAT_DIR / f"{slug}.json"
+        out.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+        kb = out.stat().st_size / 1e3
+        total_kb += kb
+        total_lines += len(simp)
+        index.append({"slug": slug, "fylke": name,
+                      "bbox": [round(v, 1) for v in bb],
+                      "file": f"{slug}.json", "lines": len(simp),
+                      "kb": round(kb, 1)})
+        print(f"  {len(raw)} lines -> {len(simp)} kept, {kb:.0f} kB", flush=True)
+
+    if not index:
+        raise SystemExit("no fylke produced any routes - refusing to write an "
+                         "empty layer")
+    (NAT_DIR / "index.json").write_text(
+        json.dumps({"crs": "EPSG:25833",
+                    "source": "Kartverket Turrutebasen via Geonorge, CC BY 4.0",
+                    "simplified_m": TOLERANCE_M,
+                    "fylker": index}, separators=(",", ":")),
+        encoding="utf-8")
+    print()
+    print(f"{len(index)} fylker, {total_lines:,} routes, "
+          f"{total_kb / 1e3:.1f} MB total")
+    print(f"largest: {max(index, key=lambda f: f['kb'])['fylke']} "
+          f"{max(f['kb'] for f in index):.0f} kB")
+    print(f"written: {NAT_DIR.relative_to(ROOT)}")
+    return 0
+
+
+def main() -> int:
+    ext = extent()
+    print(f"extent {ext[0]:.0f} {ext[1]:.0f} {ext[2]:.0f} {ext[3]:.0f}", flush=True)
+
+    raw_lines, per_type = [], {}
+    for t in TYPES:
+        gml = fetch(t, ext)
+        ls = lines_from(gml)
+        per_type[t] = {"lines": len(ls), "vertices": int(sum(len(x) for x in ls))}
+        raw_lines.extend(ls)
+
+    if not raw_lines:
+        raise SystemExit("no trail geometry returned - refusing to write an empty layer")
+
+    allpts = np.vstack(raw_lines)
+    if not (ext[0] - 5000 < allpts[:, 0].mean() < ext[2] + 5000
+            and ext[1] - 5000 < allpts[:, 1].mean() < ext[3] + 5000):
+        raise SystemExit(
+            f"coordinates are not inside the extent (mean {allpts.mean(axis=0)}). "
+            "The WFS axis order is probably northing-first; do not ship this.")
+
+    before = int(sum(len(x) for x in raw_lines))
+    simp = [simplify(p, TOLERANCE_M) for p in raw_lines]
+    simp = [p for p in simp if len(p) >= 2]
+    after = int(sum(len(x) for x in simp))
+    print(f"\n{len(simp)} lines, {before} -> {after} vertices "
+          f"({100 * (1 - after / before):.0f} % removed at {TOLERANCE_M} m)", flush=True)
+
+    payload = pack(simp, ext)
     OUT_JSON.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
 
     raw_bytes = starts_a.nbytes + deltas_a.nbytes + counts_a.nbytes + buckets_a.nbytes
@@ -263,4 +452,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(national() if "--national" in sys.argv else main())
