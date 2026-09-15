@@ -74,8 +74,8 @@ tile URL alone and costs a reader nothing.
 ## Working on a second machine
 
 ```
-git clone https://github.com/Tobiasee16/SoppKompis
-cd SoppKompis
+git clone https://github.com/Tobiasee16/Soppspor
+cd Soppspor
 uv sync                                    # or: pip install -e .
 python scripts/fetch_recent_weather.py     # ~2 min, the only missing input
 python scripts/build_hosted.py             # -> dist/, the Kristiansand build
