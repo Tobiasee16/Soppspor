@@ -15,7 +15,7 @@ limits are permanent and structural, not settings.
 ```
 ./deploy.sh --cloudflare            # builds Norway, publishes, then checks what is live
 python scripts/build_hosted.py --national     # -> dist_norge/, 204 MB of static site
-python -m pytest -q                 # 807 tests: Python and the JS suites together
+python -m pytest -q                 # 808 tests: Python and the JS suites together
 ```
 
 ## What it actually does
@@ -157,6 +157,10 @@ npx wrangler kv namespace create CONDITIONS          # note the id it prints
 4. Optionally set `SOPP_CONDITIONS=kv` in `deploy.sh`, which stops the build
    shipping a 1.19 MB file that KV now overrides anyway. Purely a size
    question; the app behaves the same either way.
+
+Until step 2 the scheduled job **skips the write and says so in its summary**
+rather than failing. A workflow that went red twice a day for a feature nobody
+had turned on yet would only teach us to ignore it.
 
 **Anything touching this route gets a preview deploy first.** Pages routes a
 request to the Function before the static asset — the reverse of what section

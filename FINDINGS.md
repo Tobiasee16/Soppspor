@@ -4391,8 +4391,17 @@ deployed on an assumption about a platform rule rather than a measurement of
 one. The assumption was one sentence long, load-bearing, and wrong, and the
 cost of checking it first was a preview deployment that takes nine seconds.
 
-Suite: **790 -> 807** pytest cases; the two new suites add 15 Python
-assertions and 20 JavaScript ones, the latter counting as a single case.
+One more thing follows from the fall-through, and it is the same argument in
+a different place. If the route works without KV, then a repository without
+the KV secrets is a working repository - so the scheduled job **skips the
+write and says so** rather than failing. A workflow that went red twice a day
+for a feature nobody had turned on yet would train us to ignore it, which is
+precisely how the two JS suites in `test_js_suites.py`'s docstring rotted
+through six consecutive commits. The skip is loud rather than silent, which is
+the distinction that keeps it from being the other failure mode.
+
+Suite: **790 -> 808** pytest cases; the new suites add 16 Python assertions
+and 20 JavaScript ones, the latter counting as a single case.
 
 ### 26d. Two things checked rather than assumed
 

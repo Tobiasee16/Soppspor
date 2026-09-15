@@ -131,12 +131,13 @@ jobs:
           fi
 
       - name: Write it to KV
-        if: steps.live.outputs.write == 'yes'
+        if: steps.live.outputs.write == 'yes' && secrets.CONDITIONS_KV_ID != '' && secrets.CLOUDFLARE_API_TOKEN != ''
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           KV_ID: ${{ secrets.CONDITIONS_KV_ID }}
           LAST_DAY: ${{ steps.fetch.outputs.last_day }}
+          CONFIGURED: ${{ secrets.CONDITIONS_KV_ID != '' }}
         run: |
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "CLOUDFLARE_API_TOKEN is not set"; exit 1; }
           test -n "$KV_ID" || { echo "CONDITIONS_KV_ID is not set"; exit 1; }
@@ -152,7 +153,7 @@ jobs:
       # a short edge cache, so this waits for the change to actually appear
       # rather than reporting the write itself as the outcome.
       - name: Check it is really being served
-        if: steps.live.outputs.write == 'yes'
+        if: steps.live.outputs.write == 'yes' && secrets.CONDITIONS_KV_ID != '' && secrets.CLOUDFLARE_API_TOKEN != ''
         env:
           WANT: ${{ steps.fetch.outputs.last_day }}
         run: |
@@ -172,6 +173,16 @@ jobs:
           echo "KV was written but the route is still not serving it"
           exit 1
 
+      # Not a failure. The route falls through to the file the build shipped
+      # when there is no KV, so an unconfigured project is a working one - and
+      # a job that went red twice a day for an optional feature nobody had set
+      # up yet would train everyone to ignore this workflow. It is loud in the
+      # summary instead. See README, "The conditions layer".
+      - name: Note that KV is not configured
+        if: steps.live.outputs.write == 'yes' && (secrets.CONDITIONS_KV_ID == '' || secrets.CLOUDFLARE_API_TOKEN == '')
+        run: |
+          echo "::notice::KV is not configured, so nothing was written. The site is"               "serving the conditions file from the build. Add CLOUDFLARE_API_TOKEN,"               "CLOUDFLARE_ACCOUNT_ID and CONDITIONS_KV_ID to turn this on."
+
       - name: Say what happened
         if: always()
         env:
@@ -179,6 +190,7 @@ jobs:
           LAG: ${{ steps.fetch.outputs.lag_days }}
           SERVED: ${{ steps.live.outputs.served }}
           WROTE: ${{ steps.live.outputs.write }}
+          HAVE_KV: ${{ secrets.CONDITIONS_KV_ID != '' }}
         run: |
           {
             echo "### conditions"
@@ -188,5 +200,6 @@ jobs:
             echo "| seNorge last day | ${LAST_DAY:-(not fetched)} |"
             echo "| lag | ${LAG:-?} day(s) |"
             echo "| was serving | ${SERVED:-(not checked)} |"
+            echo "| KV configured | ${HAVE_KV} |"
             echo "| wrote KV | ${WROTE:-no} |"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -186,6 +186,22 @@ def test_the_write_is_verified_against_what_is_served(workflow):
         "nothing checks that the write actually reached a reader"
 
 
+def test_an_unconfigured_repo_does_not_fail_twice_a_day(workflow):
+    """The route falls through to the shipped file when there is no KV, so a
+    project without the secrets is a working project. If the write step ran
+    anyway it would fail on every schedule, and a job that is red twice a day
+    for an optional feature teaches everyone to ignore this workflow - which is
+    how the two rotting JS suites in test_js_suites.py happened."""
+    steps = {s.get("name", ""): s for s in workflow["jobs"]["refresh"]["steps"]}
+    write = next((s for n, s in steps.items() if n.startswith("Write it to KV")), None)
+    assert write, "the workflow no longer writes to KV"
+    cond = str(write.get("if", ""))
+    assert "CONDITIONS_KV_ID != ''" in cond and "CLOUDFLARE_API_TOKEN != ''" in cond, (
+        f"the KV write runs regardless of whether KV is configured ({cond!r}), "
+        "so an unconfigured repo fails on every scheduled run")
+    assert any(n.startswith("Note that KV is not configured") for n in steps),         "nothing says why the write was skipped, which is the silent-no-op failure"
+
+
 def test_it_runs_on_a_schedule(workflow):
     on = workflow.get("on") or workflow.get(True)   # YAML reads bare `on` as True
     assert "schedule" in on, "the conditions refresh is no longer scheduled"
