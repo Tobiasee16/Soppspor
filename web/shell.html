@@ -1041,7 +1041,7 @@ function drawLiveTiles(name){
 }
 
 var canvas=document.getElementById("map"),ctx=canvas.getContext("2d");
-var view={cx:(GRID[0]+GRID[2])/2,cy:(GRID[1]+GRID[3])/2,mpp:30};
+var view={cx:(GRID[0]+GRID[2])/2,cy:(GRID[1]+GRID[3])/2,mpp:30,rot:0};
 var DPR=Math.min(window.devicePixelRatio||1,2),CW=1,CH=1;
 /* How far in you can go depends on where the map is coming from. Live tiles
    render at whatever scale is asked for, so the floor is a metre or so; the
@@ -1068,8 +1068,28 @@ function clampView(){
   lo=BOUNDS[1]+hh; hi=BOUNDS[3]-hh;
   view.cy = lo>hi ? (BOUNDS[1]+BOUNDS[3])/2 : Math.min(Math.max(view.cy,lo),hi);
 }
-function w2s(e,n){return[(e-view.cx)/view.mpp+CW/2,(view.cy-n)/view.mpp+CH/2];}
-function s2w(x,y){return[(x-CW/2)*view.mpp+view.cx,view.cy-(y-CH/2)*view.mpp];}
+/* World <-> screen. `view.rot` turns the map counterclockwise on screen, so at
+   +90 degrees a point due north of the centre draws to the right of it.
+
+   These two must be exact inverses, and the reason is not aesthetic. A long
+   press runs s2w and hands the result to addSpot, so an inverse that is even
+   slightly wrong writes somebody's mushroom spot at the wrong place, silently,
+   as a plausible pin in the wrong wood. tests/test_projection.js asserts the
+   round trip across rotations, zooms and a grid of points.
+
+   It also asserts known answers, and that is not belt-and-braces. Written
+   against the pre-rotation version, the round trip passed at every angle: both
+   functions ignored `rot` identically, so they were consistent inverses of
+   each other while both being wrong. Self-consistency cannot tell that from
+   correct. The geometry needs answers worked out by hand. */
+function w2s(e,n){
+  var dx=(e-view.cx)/view.mpp,dy=(view.cy-n)/view.mpp,r=view.rot;
+  if(r){var c=Math.cos(r),s=Math.sin(r),rx=dx*c-dy*s;dy=dx*s+dy*c;dx=rx;}
+  return[dx+CW/2,dy+CH/2];}
+function s2w(x,y){
+  var dx=x-CW/2,dy=y-CH/2,r=view.rot;
+  if(r){var c=Math.cos(r),s=Math.sin(r),rx=dx*c+dy*s;dy=-dx*s+dy*c;dx=rx;}
+  return[dx*view.mpp+view.cx,view.cy-dy*view.mpp];}
 
 /* ---------- the estimate, fetched as you move ---------- */
 /* Kristiansand ships its whole suitability surface inside the page: 3.78 MB of
