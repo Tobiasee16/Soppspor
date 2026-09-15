@@ -131,9 +131,28 @@ async function zoneFirst(request) {
   return res;
 }
 
+/* Pages that are precached as themselves. Everything else that navigates is
+   the single-page app, including any deep path a magic link or a bookmark
+   produced - those resolve to index.html the same way the host's own fallback
+   does.
+
+   This list is the fix for a bug worth remembering. Every navigation went to
+   shellFirst and shellFirst answered every one of them with `./index.html`, so
+   once the worker was installed, tapping "Personvern" in settings opened the
+   map. The policy was precached, correctly, and never consulted. Nothing
+   noticed because the deployment check asks the origin, which serves the
+   policy perfectly well - the worker sits between the reader and the origin
+   and only on an installed copy. */
+const PAGES = ["/personvern.html"];
+
 async function shellFirst(request) {
   const cache = await caches.open(SHELL);
-  const key = "./index.html";
+  let own = null;
+  try {
+    const p = new URL(request.url).pathname;
+    own = PAGES.find((page) => p.endsWith(page)) || null;
+  } catch (e) { own = null; }
+  const key = own ? "." + own : "./index.html";
   const hit = await cache.match(key);
   const fresh = fetch(request)
     .then((res) => {

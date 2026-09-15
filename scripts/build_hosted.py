@@ -47,6 +47,7 @@ Netlify, GitHub Pages - and none of them need a build step of their own.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import pathlib
 import re
@@ -379,7 +380,37 @@ def national_about(f: dict, null_auc: float | None, excluded: list,
     return about
 
 
-def mask_meta(meta: dict) -> dict | None:
+def tiles_stamp() -> str:
+    """A short digest of every tile byte that is about to ship.
+
+    Tiles are served with `Cache-Control: immutable` for a year and the service
+    worker keeps them cache-first with no revalidation, both of which rest on
+    the claim that a rebuild writes a new tile rather than changing one in
+    place. That claim was false: the exporter writes
+    `zones/<species>/<z>/<row>_<col>.png` from the row and column, so a
+    re-export puts different bytes at exactly the same address. When the
+    ranking changed from a national percentile to a 25 km neighbourhood, every
+    tile's contents changed and not one URL did - so anybody who had opened the
+    app before that could have gone on being shown the old estimate, under a
+    page whose own text described the new one, for up to a year.
+
+    Stamping the URL with this makes the claim true. The digest is over the
+    bytes rather than over the clock, so a rebuild that changes only the page -
+    which is most of them - leaves every tile URL alone and costs a reader
+    nothing.
+    """
+    h = hashlib.sha256()
+    roots = [(NAT_TILES, "zones"), (NAT_CTX, "context")]
+    for root, label in roots:
+        if not root.is_dir():
+            continue
+        for p in sorted(root.rglob("*.png"), key=lambda q: q.as_posix()):
+            h.update(f"{label}/{p.relative_to(root).as_posix()}".encode())
+            h.update(p.read_bytes())
+    return h.hexdigest()[:12]
+
+
+def mask_meta(meta: dict, stamp: str) -> dict | None:
     """The mask block for the payload, with the tile url made page-relative.
 
     The exporter writes ids under `mask/`; the build puts them under `zones/`
@@ -390,7 +421,8 @@ def mask_meta(meta: dict) -> dict | None:
     if not m:
         return None
     out = dict(m)
-    out["url"] = "zones/" + str(m.get("url", "mask/{z}/{row}_{col}.png"))
+    out["url"] = ("zones/" + str(m.get("url", "mask/{z}/{row}_{col}.png"))
+                  + "?v=" + stamp)
     return out
 
 
@@ -399,6 +431,7 @@ def national_payload() -> tuple[str, dict, list[str]]:
     meta = json.loads(NAT_META.read_text(encoding="utf-8"))
     facts = national_facts()
     null_auc = meta.get("null_transfer_auc")
+    stamp = tiles_stamp()
 
     payload = {
         "meta": {
@@ -418,14 +451,16 @@ def national_payload() -> tuple[str, dict, list[str]]:
             # Where the tiles live, relative to the page. The app substitutes
             # {sp}, {row} and {col}; a CDN or a levelled layout is a change to
             # this string and to nothing in the interface.
-            "tiles": {"url": "zones/{sp}/{z}/{row}_{col}.png",
+            "tiles": {"url": "zones/{sp}/{z}/{row}_{col}.png?v=" + stamp,
                       "cols": meta["tiles"]["cols"], "rows": meta["tiles"]["rows"]},
+            # What the stamp above is, so the shipped artefact can say it.
+            "tiles_build": stamp,
             # The habitat mask, four times finer than the zone tiles, which
             # the interface erases with so that a lake keeps its own shape
             # instead of the 128 m diamond the grid would otherwise draw
             # around it. Absent from a build that has not exported one, and
             # the interface then falls back to leaving blank cells as holes.
-            "mask": mask_meta(meta),
+            "mask": mask_meta(meta, stamp),
             # One entry per pyramid level, coarsest last. Without these the app
             # holds a single resolution and the zones stop when a screenful of
             # them stops fitting in its cell budget.
@@ -448,7 +483,7 @@ def national_payload() -> tuple[str, dict, list[str]]:
         # The tile index is deliberately not shipped. A card only opens on a
         # cell that has a score, and a scored cell always has context, so
         # there is nothing for the app to check against.
-        payload["ctx"] = {"url": "context/{row}_{col}.png",
+        payload["ctx"] = {"url": "context/{row}_{col}.png?v=" + stamp,
                           "cell_m": cm["cell_m"], "tile_px": cm["tile_px"],
                           "origin_x": cm["origin_x"], "origin_y": cm["origin_y"],
                           "grid": cm["grid"], "layers": cm["layers"]}

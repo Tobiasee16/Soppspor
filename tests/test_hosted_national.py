@@ -93,7 +93,9 @@ def built():
 class TestThePayload:
     def test_it_declares_tiles_rather_than_carrying_surfaces(self, built):
         payload, meta, _ = built
-        assert meta["tiles"]["url"].endswith(".png")
+        # The url carries a cache-busting stamp after the path; see
+        # tests/test_tile_stamp.py for why it has to.
+        assert meta["tiles"]["url"].split("?")[0].endswith(".png")
         assert "{sp}" in meta["tiles"]["url"] and "{row}" in meta["tiles"]["url"]
         assert meta["percentile_bytes"] is True
         assert all("data" not in sp for sp in payload["species"])
@@ -243,7 +245,7 @@ class TestTheProse:
         assert "ctx" in payload, (
             "context tiles were exported but the payload does not declare them "
             "- the build ships them and the app never asks")
-        assert payload["ctx"]["url"].endswith(".png")
+        assert payload["ctx"]["url"].split("?")[0].endswith(".png")
         keys = [L["key"] for L in payload["ctx"]["layers"]]
         assert "elevation" in keys and "ar50" in keys
         # The national model has no TWI, so neither can the card.
