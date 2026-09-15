@@ -108,11 +108,34 @@ for (const hex of colours) {
   check("several species are drawn at the same thresholds as one",
         over.map(l => l.p).join(",") === one.map(l => l.p).join(","),
         over.map(l => l.p).join(",") + " vs " + one.map(l => l.p).join(","));
-  check("but as outlines rather than stacked fills",
-        over.filter(l => l.fill === "rgba(0,0,0,0)").length >= one.length - 1,
-        over.map(l => l.fill).join(" "));
-  check("the overlay's lower band is an outline, not a fill",
-        over[0].fill === "rgba(0,0,0,0)");
+  /* Outlines with nothing inside them read as lines on a map rather than as
+     places, which is how this came back from the phone a second time. Every
+     band carries a fill now, and the fill thins as species are added so four
+     washes do not stack into mud. */
+  const alphaOf = l => +l.fill.match(/([\d.]+)\)$/)[1];
+  check("every overlay band is filled, not just outlined",
+        over.every(l => alphaOf(l) > 0.05), over.map(alphaOf).join(" "));
+
+  const four = pal.levelsForOverlay("#0072B2", 4);
+  check("the fill thins as species are added",
+        four.every((l, i) => alphaOf(l) < alphaOf(over[i])),
+        over.map(alphaOf).map(v => v.toFixed(3)).join(" ") + "  ->  " +
+        four.map(alphaOf).map(v => v.toFixed(3)).join(" "));
+
+  check("but never below what a reader can see",
+        four.every(l => alphaOf(l) > 0.1), four.map(alphaOf).join(" "));
+
+  /* The lines are what still say whose ground it is where fills overlap and
+     blend, so they must not thin with the count as well. */
+  const lineAlpha = l => +l.line.match(/([\d.]+)\)$/)[1];
+  check("the outlines keep their weight however many species are up",
+        four.every((l, i) => lineAlpha(l) === lineAlpha(over[i]) &&
+                             l.w === over[i].w),
+        four.map(lineAlpha).join(" "));
+
+  check("the overlay ramp still darkens upward",
+        alphaOf(over[0]) < alphaOf(over[1]) && alphaOf(over[1]) < alphaOf(over[2]),
+        over.map(alphaOf).join(" < "));
   check("an unknown species key still gets a colour",
         /^#[0-9A-F]{6}$/i.test(pal.spColour({ key: "nothing_known" }, 3)));
 }

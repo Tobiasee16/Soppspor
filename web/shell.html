@@ -76,8 +76,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sf);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .speciespill .cv{color:var(--ink-3);font-size:13px;flex:0 0 auto}
 
-.scalepill{position:absolute;left:max(12px, env(safe-area-inset-left));
-  bottom:14px;background:var(--sheet);
+.scalepill{background:var(--sheet);
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-radius:7px;
   padding:4px 8px;font-family:var(--mono);font-size:10px;color:var(--ink-2);
   display:flex;align-items:center;gap:6px;pointer-events:none;z-index:5}
@@ -107,13 +106,25 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sf);
 .rain .bars span.last{opacity:1}
 .rain .ax{display:flex;justify-content:space-between;margin-top:5px;
   font-size:11px;color:var(--ink-3)}
-.credit{position:absolute;left:max(12px, env(safe-area-inset-left));bottom:74px;font-size:9.5px;color:var(--ink-3);
+/* Bottom-left corner: credit, legend and scale bar in one column, anchored
+   at the bottom and growing upward. They used to be positioned separately with
+   offsets that only worked while the legend was a single row; a legend tall
+   enough to reach the next offset put the credit through the middle of it.
+   Stacking them means the layout keeps them apart whatever any of them does.
+
+   No bottom safe-area inset here: the stage already ends above the tab bar,
+   and adding it again floated all of this off the edge on every phone with a
+   home indicator. */
+.botleft{position:absolute;left:max(12px, env(safe-area-inset-left));
+  bottom:14px;z-index:5;display:flex;flex-direction:column;
+  align-items:flex-start;gap:6px;pointer-events:none;
+  max-width:calc(100% - 78px)}
+.credit{font-size:9.5px;color:var(--ink-3);
   background:var(--sheet);border-radius:6px;padding:3px 6px;pointer-events:none;z-index:5;
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
 
 /* legend, bottom centre, tells you what the blue means */
-.legend{position:absolute;left:max(12px, env(safe-area-inset-left));
-  bottom:40px;z-index:5;
+.legend{
   background:var(--sheet);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
   border-radius:8px;padding:5px 9px 6px;box-shadow:0 1px 6px #0000001f;pointer-events:none;
   display:flex;flex-direction:column;gap:3px;align-items:center}
@@ -387,9 +398,11 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
     <div class="banner" id="banner"><span id="bannerTxt"></span>
       <button type="button" id="bannerX">Avbryt</button></div>
 
-    <div class="scalepill"><i id="sbar"></i><span id="sbtxt">—</span></div>
-    <div class="legend" id="legend"></div>
-    <div class="credit">Kartverket CC BY 4.0</div>
+    <div class="botleft">
+      <div class="credit">Kartverket CC BY 4.0</div>
+      <div class="legend" id="legend"></div>
+      <div class="scalepill"><i id="sbar"></i><span id="sbtxt">—</span></div>
+    </div>
     <div class="covernote" id="coverNote" hidden>
       <b>Ingen soner her ennå.</b> Anslaget er foreløpig regnet ut for
       Kristiansand. Kart, stier, nedbør og dine egne steder virker over hele
@@ -1838,12 +1851,25 @@ function levelsFor(hex){
    what it looks like, and there was nothing on screen to say the threshold had
    moved. Same three thresholds in both modes now; only the rendering differs,
    fills for one species and nested outlines for several. */
-function levelsForOverlay(hex){
+function levelsForOverlay(hex,n){
   var c=rgbOf(hex),K=[0,0,0];
+  /* Outlines alone left the interiors empty, and an empty ring reads as a line
+     on a map rather than as a place - "it's difficult to see when the zones
+     aren't filled in". So the bands are filled here too, at an opacity that
+     falls as species are added, which keeps the total ink on any one patch of
+     ground roughly where it is with a single species instead of stacking four
+     washes into mud. Two species keep about seven tenths of the single-species
+     alpha each, four keep half.
+
+     The outlines stay heavy on purpose. Where fills do overlap the colours
+     blend and stop saying whose ground it is; the contour lines do not blend,
+     so they go on carrying that. Fill answers "is there a zone here", line
+     answers "whose". */
+  var k=1/Math.sqrt(Math.max(1,n||2));
   return [
-    {p:0.70, fill:"rgba(0,0,0,0)",  line:rgba(c,.50),            w:1.0},
-    {p:0.85, fill:"rgba(0,0,0,0)",  line:rgba(c,.85),            w:1.5},
-    {p:0.95, fill:rgba(c,.12),      line:rgba(mix(c,K,.30),1),   w:2.3}
+    {p:0.70, fill:rgba(mix(c,[255,255,255],.45),.30*k), line:rgba(c,.55),          w:1.0},
+    {p:0.85, fill:rgba(c,.32*k),                        line:rgba(c,.88),          w:1.5},
+    {p:0.95, fill:rgba(mix(c,K,.34),.42*k),             line:rgba(mix(c,K,.30),1), w:2.3}
   ];
 }
 
@@ -2120,13 +2146,15 @@ function repaint(){
        deliberate: it is still correct for the ground it covers, and it keeps
        the map from blinking empty on every pan. */
     if(TILED&&sp._win!==ZT.key)return;
-    var levels=overlay?levelsForOverlay(spColour(sp,n)):levelsFor(spColour(sp,n));
+    var levels=overlay?levelsForOverlay(spColour(sp,n),SEL.length)
+                      :levelsFor(spColour(sp,n));
     if(sp._zones&&sp._zones.overlay===overlay&&sp._zones.cond===condStamp()&&
+       sp._zones.nsel===SEL.length&&
        sp._zones.ox===OX&&sp._zones.oy===OY&&sp._zones.gw===GW&&
        sp._zones.cell===CELL){
       sp._zones.levels=levels;return;}
     sp._zones={paths:buildZones(sp,levels),levels:levels,overlay:overlay,
-               cond:condStamp(),ox:OX,oy:OY,gw:GW,cell:CELL};
+               nsel:SEL.length,cond:condStamp(),ox:OX,oy:OY,gw:GW,cell:CELL};
   });
   syncLegend();
 }
@@ -3333,7 +3361,7 @@ function renderLegend(){
           return '<span><i style="background:'+spColour(sp,D.species.indexOf(sp))
             +'"></i>'+sp.no+'</span>';}).join("")
       +'</span><span class="bands">'
-      +levelsForOverlay(hex).map(function(lv,i){
+      +levelsForOverlay(hex,SEL.length).map(function(lv,i){
           return '<span'+dim(i)+'><i class="ln w'+i+'"></i>'
             +ringLabel(lv.p)+'</span>';}).join("")
       +'</span>';

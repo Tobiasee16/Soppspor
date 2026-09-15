@@ -35,8 +35,10 @@ for (const sel of [".speciespill", ".condpill", ".banner", ".panel", ".ob"]) {
 }
 
 // Anything pinned to a side must clear it in landscape, where the cutout moves.
-for (const sel of [".speciespill", ".condpill", ".scalepill", ".legend",
-                   ".credit", ".banner", ".covernote"]) {
+// The bottom-left three - credit, legend, scale bar - are in one column now
+// and clear the cutout through it rather than each on their own.
+for (const sel of [".speciespill", ".condpill", ".botleft",
+                   ".banner", ".covernote"]) {
   const r = rule(sel);
   check(`${sel} clears a side cutout`, !!r && /safe-area-inset-left/.test(r),
         r ? "" : "rule not found");
@@ -53,7 +55,8 @@ check("the tab bar clears the home indicator",
 // the bottom inset to them as well counted it twice and floated them off the
 // edge on every phone with a home indicator.
 {
-  const stageOverlays = [".scalepill", ".legend", ".credit", ".covernote", ".fabs"];
+  const stageOverlays = [".botleft", ".scalepill", ".legend", ".credit",
+                         ".covernote", ".fabs"];
   const doubled = stageOverlays.filter(
     s => /safe-area-inset-bottom/.test(rule(s) || ""));
   check("no overlay inside the stage counts the bottom inset twice",
@@ -61,6 +64,17 @@ check("the tab bar clears the home indicator",
 }
 
 // Sheets and panels hold text, which must not run under a cutout in landscape.
+/* And they must not go back to holding themselves apart with hand-set
+   offsets. That is what broke: scale at 14, legend at 40, credit at 74, which
+   was correct only while the legend was one row tall. Four species wrapped it
+   to three and the credit landed across the first one. */
+for (const sel of [".scalepill", ".legend", ".credit"]) {
+  const r = rule(sel) || "";
+  check(`${sel} is stacked by layout, not by a bottom offset`,
+        !/position:absolute/.test(r) && !/bottom:/.test(r),
+        r.slice(0, 70));
+}
+
 check("the bottom sheet pads for side cutouts",
       /safe-area-inset-left/.test(rule(".card") || ""));
 check("full-screen panels pad for side cutouts",
