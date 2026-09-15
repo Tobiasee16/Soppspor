@@ -145,6 +145,22 @@ async function zoneFirst(request) {
    and only on an installed copy. */
 const PAGES = ["/personvern.html"];
 
+/* Stale-while-revalidate means the reader is looking at the previous version
+   and the current one arrives in the background for next launch. That is the
+   right trade - network-first would hold a multi-megabyte page hostage to a
+   signal the woods do not have - but it leaves somebody reading a version that
+   has been replaced with no way to know.
+
+   So when the copy that comes back differs from the copy that was served, the
+   windows are told. Comparing the text is exact, where an etag or a length is
+   a guess, and it costs one string comparison per launch. Nothing is reloaded
+   from here: the page decides what to do about it, because the reader may be
+   halfway through writing a note. */
+async function announce(msg) {
+  const windows = await self.clients.matchAll({ type: "window" });
+  for (const w of windows) w.postMessage(msg);
+}
+
 async function shellFirst(request) {
   const cache = await caches.open(SHELL);
   let own = null;
@@ -154,9 +170,22 @@ async function shellFirst(request) {
   } catch (e) { own = null; }
   const key = own ? "." + own : "./index.html";
   const hit = await cache.match(key);
+  /* Cloned before anything can consume either body: `hit` is about to be
+     returned to the page, and a Response can only be read once. */
+  const prev = hit ? hit.clone() : null;
   const fresh = fetch(request)
-    .then((res) => {
-      if (res && res.ok) cache.put(key, res.clone());
+    .then(async (res) => {
+      if (!res || !res.ok) return res;
+      const store = res.clone();
+      /* Only the app, and only when there was something to replace - a first
+         install has nothing to announce. */
+      if (prev && !own) {
+        try {
+          const [before, after] = await Promise.all([prev.text(), res.clone().text()]);
+          if (before !== after) announce({ type: "shell-updated" });
+        } catch (e) { /* a body that cannot be read is not worth a banner */ }
+      }
+      cache.put(key, store);
       return res;
     })
     .catch(() => null);

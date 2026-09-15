@@ -75,39 +75,95 @@ check("stamping a tile url does not change how it is cached",
 {
   const body = SW.slice(SW.indexOf("const PAGES"),
                         SW.indexOf('self.addEventListener("fetch"'));
-  const cache = {
-    store: { "./index.html": "THE APP", "./personvern.html": "THE POLICY" },
-    async match(k) { return this.store[k]; },
-    put() { },
-  };
-  const shellFirst = new Function("caches", "SHELL", "fetch", "URL",
-    body + "; return shellFirst;")(
-    { async open() { return cache; } }, "shell", async () => null, URL);
 
-  const want = [
-    ["the privacy policy is served as itself",
-     "https://soppspor.pages.dev/personvern.html", "THE POLICY"],
-    ["the app is served for the root",
-     "https://soppspor.pages.dev/", "THE APP"],
-    ["and for a deep path the host would fall back on",
-     "https://soppspor.pages.dev/steder", "THE APP"],
-    ["and for index.html itself",
-     "https://soppspor.pages.dev/index.html", "THE APP"],
-  ];
+  /* Enough of a Response to be cloned and read twice, which is what shellFirst
+     does to decide whether the shell has moved under the reader. */
+  const res = (text, ok = true) => ({
+    ok, text: async () => text, clone() { return res(text, ok); }, __text: text,
+  });
+
+  function build(store, network) {
+    const posted = [];
+    const cache = {
+      store,
+      async match(k) { return this.store[k]; },
+      put(k, v) { this.store[k] = v; },
+    };
+    const self_ = { clients: { async matchAll() {
+      return [{ postMessage: (m) => posted.push(m) }]; } } };
+    const fn = new Function("caches", "SHELL", "fetch", "URL", "self",
+      body + "; return shellFirst;")(
+      { async open() { return cache; } }, "shell",
+      async () => (network === null ? null : res(network)), URL, self_);
+    return { fn, posted, cache };
+  }
+
+  const pages = () => ({ "./index.html": res("THE APP"),
+                         "./personvern.html": res("THE POLICY") });
+
   (async () => {
-    for (const [name, url, expect] of want) {
-      const got = await shellFirst({ url });
-      check(name, got === expect, got === expect ? "" : "got " + got);
+    for (const [name, url, expect] of [
+      ["the privacy policy is served as itself",
+       "https://soppspor.pages.dev/personvern.html", "THE POLICY"],
+      ["the app is served for the root",
+       "https://soppspor.pages.dev/", "THE APP"],
+      ["and for a deep path the host would fall back on",
+       "https://soppspor.pages.dev/steder", "THE APP"],
+      ["and for index.html itself",
+       "https://soppspor.pages.dev/index.html", "THE APP"],
+    ]) {
+      const { fn } = build(pages(), "THE APP");
+      const got = await fn({ url });
+      check(name, got && got.__text === expect, got ? got.__text : String(got));
+    }
+
+    /* The banner exists because the reader is looking at the previous version
+       while the current one arrives behind them. It must fire on exactly that
+       and on nothing else. */
+    {
+      const { fn, posted } = build(pages(), "A NEWER APP");
+      const served = await fn({ url: "https://soppspor.pages.dev/" });
+      await new Promise((r) => setTimeout(r, 0));
+      check("the page served is still the cached one", served.__text === "THE APP");
+      check("but a changed shell is announced",
+            posted.length === 1 && posted[0].type === "shell-updated",
+            JSON.stringify(posted));
+    }
+    {
+      const { fn, posted } = build(pages(), "THE APP");
+      await fn({ url: "https://soppspor.pages.dev/" });
+      await new Promise((r) => setTimeout(r, 0));
+      check("an unchanged shell says nothing", posted.length === 0,
+            JSON.stringify(posted));
+    }
+    {
+      const { fn, posted } = build({}, "THE APP");
+      await fn({ url: "https://soppspor.pages.dev/" });
+      await new Promise((r) => setTimeout(r, 0));
+      check("a first install has nothing to announce", posted.length === 0,
+            JSON.stringify(posted));
+    }
+    {
+      const { fn, posted } = build(pages(), "A NEWER POLICY");
+      await fn({ url: "https://soppspor.pages.dev/personvern.html" });
+      await new Promise((r) => setTimeout(r, 0));
+      check("a changed policy page does not offer to reload the map",
+            posted.length === 0, JSON.stringify(posted));
+    }
+    {
+      const { fn, cache } = build(pages(), "A NEWER APP");
+      await fn({ url: "https://soppspor.pages.dev/" });
+      await new Promise((r) => setTimeout(r, 0));
+      check("and the fresh copy is kept for next launch",
+            cache.store["./index.html"].__text === "A NEWER APP",
+            cache.store["./index.html"].__text);
     }
 
     /* Offline with nothing cached must not hang or throw. */
-    const empty = { async match() { return undefined; }, put() { } };
-    const off = new Function("caches", "SHELL", "fetch", "URL",
-      body + "; return shellFirst;")(
-      { async open() { return empty; } }, "shell", async () => null, URL);
-    const res = await off({ url: "https://soppspor.pages.dev/" });
+    const { fn: off } = build({}, null);
+    const r = await off({ url: "https://soppspor.pages.dev/" });
     check("with nothing cached and no network it returns an error, not a hang",
-          !!res && res.type === "error", res ? res.type : String(res));
+          !!r && r.type === "error", r ? r.type : String(r));
 
     console.log(fails ? `\n${fails} FAILED` : "\nall service-worker routing checks passed");
     process.exit(fails ? 1 : 0);

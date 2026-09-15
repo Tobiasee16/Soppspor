@@ -248,6 +248,10 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sf);
   font-size:13.5px;line-height:1.35;box-shadow:0 3px 14px #0000002e;display:none;
   align-items:center;gap:10px}
 .banner.on{display:flex}
+/* The update banner sits below the manual-placement one, because both can be
+   up at once and one covering the other would hide a control the reader is in
+   the middle of using. */
+.banner.upd{top:calc(152px + env(safe-area-inset-top))}
 .banner button{margin-left:auto;border:none;background:#ffffff2e;color:#fff;
   border-radius:9px;padding:5px 10px;font-family:var(--sf);font-size:13px;cursor:pointer}
 
@@ -406,6 +410,8 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
 
     <div class="banner" id="banner"><span id="bannerTxt"></span>
       <button type="button" id="bannerX">Avbryt</button></div>
+    <div class="banner upd" id="updBanner"><span>Ny versjon av kartet er klar.</span>
+      <button type="button" id="updGo">Oppdater</button></div>
 
     <div class="botleft">
       <div class="credit">Kartverket CC BY 4.0</div>
@@ -2466,6 +2472,30 @@ function fromUTM33(east,north){
   return [lat*180/Math.PI, lon*180/Math.PI];
 }
 var gpsPos=null,gpsAcc=0,placing=false;
+/* The worker fetches a fresh shell in the background on every launch and
+   keeps it for next time, so a reader can be looking at a version that has
+   already been replaced. When the worker says the copy it just fetched differs
+   from the one it served, say so - and do no more than say so. Reloading out
+   from under somebody halfway through a note is worse than the staleness.
+
+   Only offered once per launch: the worker revalidates each time the page
+   loads, so without the guard a reader who ignored it would be told again by
+   every background fetch. */
+function wireUpdateBanner(){
+  var el=document.getElementById("updBanner");
+  if(!el||!navigator.serviceWorker)return;
+  var shown=false;
+  navigator.serviceWorker.addEventListener("message",function(e){
+    if(!e.data||e.data.type!=="shell-updated"||shown)return;
+    shown=true;
+    el.classList.add("on");
+  });
+  document.getElementById("updGo").addEventListener("click",function(){
+    el.classList.remove("on");
+    location.reload();
+  });
+}
+wireUpdateBanner();
 var banner=document.getElementById("banner"),bannerTxt=document.getElementById("bannerTxt");
 var gpsBtn=document.getElementById("gps");
 function setPlacing(on,msg){
