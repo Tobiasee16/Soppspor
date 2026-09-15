@@ -100,8 +100,17 @@ for (const hex of colours) {
         alpha(one[0]) < alpha(one[1]) && alpha(one[1]) < alpha(one[2]),
         one.map(l => alpha(l)).join(" < "));
   const over = pal.levelsForOverlay("#0072B2");
-  check("with several species up each shows fewer bands", over.length < one.length,
-        over.length + " vs " + one.length);
+  /* The thresholds must not move when a species is added. They used to: the
+     overlay drew only the 85th and 95th, so toggling a second species pulled
+     the outer boundary in from the 70th and the shading a reader was looking
+     at collapsed to a thin ring, with nothing on screen to say why. Only the
+     rendering may differ between the two modes. */
+  check("several species are drawn at the same thresholds as one",
+        over.map(l => l.p).join(",") === one.map(l => l.p).join(","),
+        over.map(l => l.p).join(",") + " vs " + one.map(l => l.p).join(","));
+  check("but as outlines rather than stacked fills",
+        over.filter(l => l.fill === "rgba(0,0,0,0)").length >= one.length - 1,
+        over.map(l => l.fill).join(" "));
   check("the overlay's lower band is an outline, not a fill",
         over[0].fill === "rgba(0,0,0,0)");
   check("an unknown species key still gets a colour",

@@ -118,7 +118,7 @@ check("three species are selected", app.SEL().length === 3,
       app.SEL().map(s => s.no).join(", "));
 check("each has its own geometry, rebuilt for the overlay bands",
       app.SEL().every(s => s._zones && s._zones.overlay === true &&
-                           s._zones.paths.length === 2),
+                           s._zones.paths.length === 3),
       app.SEL().map(s => s._zones && s._zones.paths.length).join(","));
 check("no two selected species share a colour",
       new Set(app.SEL().map(s => app.spColour(s, app.D.species.indexOf(s)))).size === 3,

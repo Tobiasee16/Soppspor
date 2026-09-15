@@ -125,8 +125,9 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sf);
   max-width:min(62vw,260px)}
 .legend .bands span{display:flex;align-items:center;gap:4px;font-size:9px;color:var(--ink-3)}
 .legend .bands i{width:11px;height:9px;border-radius:2px;display:block}
-.legend .bands i.ln{width:14px;height:2px;border-radius:1px;background:var(--ink-3)}
-.legend .bands i.ln.thick{height:4px;border-radius:2px}
+.legend .bands i.ln{width:14px;height:1px;border-radius:1px;background:var(--ink-3)}
+.legend .bands i.ln.w1{height:2px}
+.legend .bands i.ln.w2{height:4px;border-radius:2px}
 
 /* sheets that slide over the map */
 .card{position:absolute;left:0;right:0;bottom:0;z-index:8;background:var(--sheet);
@@ -1750,12 +1751,22 @@ function levelsFor(hex){
    band. Overlapping contours nest visibly instead of blending, which is the
    property that actually survives three species on one wood. The question
    changes from "how good is this ground" to "whose ground is this", and that is
-   the right question to be answering when several species are selected. */
+   the right question to be answering when several species are selected.
+
+   What did not follow was dropping the outer band. This used to draw only the
+   85th and 95th, so adding a second species moved the outer boundary from the
+   70th to the 85th and the shading a reader had been looking at shrank to a
+   thin ring around its own middle. Reported from the phone as "when two or more
+   species are toggled on, the zones turn singular again" - which is exactly
+   what it looks like, and there was nothing on screen to say the threshold had
+   moved. Same three thresholds in both modes now; only the rendering differs,
+   fills for one species and nested outlines for several. */
 function levelsForOverlay(hex){
   var c=rgbOf(hex),K=[0,0,0];
   return [
-    {p:0.85, fill:"rgba(0,0,0,0)",  line:rgba(c,.80),            w:1.2},
-    {p:0.95, fill:rgba(c,.12),      line:rgba(mix(c,K,.30),1),   w:2.2}
+    {p:0.70, fill:"rgba(0,0,0,0)",  line:rgba(c,.50),            w:1.0},
+    {p:0.85, fill:"rgba(0,0,0,0)",  line:rgba(c,.85),            w:1.5},
+    {p:0.95, fill:rgba(c,.12),      line:rgba(mix(c,K,.30),1),   w:2.3}
   ];
 }
 
@@ -3142,7 +3153,7 @@ function renderLegend(){
             +'"></i>'+sp.no+'</span>';}).join("")
       +'</span><span class="bands">'
       +levelsForOverlay(hex).map(function(lv,i){
-          return '<span><i class="ln'+(i?" thick":"")+'"></i>'
+          return '<span><i class="ln w'+i+'"></i>'
             +ringLabel(lv.p)+'</span>';}).join("")
       +'</span>';
   }
