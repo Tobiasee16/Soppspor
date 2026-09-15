@@ -390,6 +390,14 @@ def national_payload() -> tuple[str, dict, list[str]]:
             "crs": meta["crs"], "cell_m": meta["cell_m"],
             "origin_x": meta["origin_x"], "origin_y": meta["origin_y"],
             "tile_px": meta["tile_px"], "percentile_bytes": True,
+            # Carried through from the exporter so the shipped payload says
+            # what its own bytes mean. The interface reads none of these - it
+            # goes by `percentile_bytes` - but an artefact that cannot describe
+            # itself is how "national percentile" stayed written in three
+            # places after it had stopped being true.
+            "encoding": meta.get("encoding"),
+            "neighbourhood_m": meta.get("neighbourhood_m"),
+            "habitat_ar50": meta.get("habitat_ar50"),
             "null_transfer_auc": null_auc,
             "excluded_species": [],
             # Where the tiles live, relative to the page. The app substitutes
