@@ -49,7 +49,7 @@ if (at < 0) throw new Error("could not find the end of the shell IIFE");
 const probe = js.slice(0, at) + `
 ;globalThis.__app = {
   SEL: () => SEL, D, toggleSpecies, setSel, repaint, draw, show,
-  spColour, levelsFor, levelsForOverlay,
+  spColour, levelsFor, levelsForOverlay, ringLabel, BANDS,
   legend: () => document.getElementById("legend").innerHTML,
   pill: () => document.getElementById("pillName").textContent,
   card: () => document.getElementById("cardBody").innerHTML,
@@ -85,8 +85,19 @@ check("blek piggsopp is not among them",
 check("the pill names the one species", app.pill() === app.SEL()[0].no, app.pill());
 // The inline build carries Turrutebasen, so the switch has something to govern.
 check("the marked-routes switch is offered", !app.trailsRowHidden());
-check("the legend explains the three shades",
-      /høy/.test(app.legend()) && /topp/.test(app.legend()));
+/* The label is derived from the threshold, so this checks they agree rather
+   than that some particular words are present. A ring drawn at one percentile
+   and labelled with another is the defect it is here for. */
+const legendText = () => app.legend().replace(/<[^>]+>/g, " ").replace(/ /g, " ");
+check("every shade is labelled with the percentile it is drawn at",
+      app.levelsFor("#0072B2").every(lv =>
+        legendText().includes(app.ringLabel(lv.p).replace(/ /g, " "))),
+      legendText());
+/* "Svært høy" on the card starts at .90 and the middle ring is drawn at .85,
+   so the legend must not borrow the card's words for it. */
+check("the legend does not reuse the card's band words",
+      !app.BANDS.some(b => new RegExp(b[1], "i").test(legendText())),
+      legendText());
 
 // zones actually got built for it
 check("zone geometry exists for the selected species",
@@ -114,7 +125,14 @@ check("no two selected species share a colour",
       app.SEL().map(s => app.spColour(s, app.D.species.indexOf(s))).join(" "));
 check("the pill stops naming one species", /3 arter/.test(app.pill()), app.pill());
 check("the legend names each species instead of the shades",
-      app.SEL().every(s => app.legend().includes(s.no)), app.legend().replace(/<[^>]+>/g, " "));
+      app.SEL().every(s => app.legend().includes(s.no)), legendText());
+/* Two contours per species, and a wood that clears the outer one but not the
+   inner draws a single ring - the ordinary case. Without this row the reader
+   cannot tell which ring that is. */
+check("the legend also says which contour is which",
+      app.levelsForOverlay("#0072B2").every(lv =>
+        legendText().includes(app.ringLabel(lv.p).replace(/ /g, " "))),
+      legendText());
 
 // a repaint and a draw with three species up must be uneventful
 threw = null;

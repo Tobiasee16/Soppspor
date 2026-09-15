@@ -125,6 +125,8 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sf);
   max-width:min(62vw,260px)}
 .legend .bands span{display:flex;align-items:center;gap:4px;font-size:9px;color:var(--ink-3)}
 .legend .bands i{width:11px;height:9px;border-radius:2px;display:block}
+.legend .bands i.ln{width:14px;height:2px;border-radius:1px;background:var(--ink-3)}
+.legend .bands i.ln.thick{height:4px;border-radius:2px}
 
 /* sheets that slide over the map */
 .card{position:absolute;left:0;right:0;bottom:0;z-index:8;background:var(--sheet);
@@ -3102,21 +3104,46 @@ function toggleSpecies(sp){
    up: with one it explains the three shades, with several it says which colour
    is which mushroom. Showing the shade key for four species at once would be
    twelve swatches, which is not a legend, it is a table. */
+/* A ring is a threshold, so it is named by the threshold. The label is derived
+   from the level it belongs to rather than written out beside it, because the
+   two drifted: the chip that said "svært høy" started at the 85th percentile
+   while the card does not say "Svært høy" until the 90th, so a tap inside that
+   ring answered "Høy" and the map contradicted itself.
+
+   The evaluative words are gone from the legend for a second reason. The first
+   thing this interface was told from a phone was that "høy" everywhere read as
+   a claim about the chance of finding something, which is exactly what the
+   zones are not - Om says so in as many words. It already describes them as the
+   top 30, 15 and 5 per cent of the ground around you; the legend now says the
+   same thing in the same words. */
+function ringLabel(p){return "topp "+Math.round((1-p)*100)+" %";}
 function renderLegend(){
   var el=document.getElementById("legend");
   if(!el)return;
+  var hex=spColour(SEL[0],D.species.indexOf(SEL[0]));
   if(SEL.length===1){
-    var c=rgbOf(spColour(SEL[0],D.species.indexOf(SEL[0]))),W=[255,255,255],K=[0,0,0];
+    var c=rgbOf(hex),W=[255,255,255],K=[0,0,0];
+    var swatch=[rgba(mix(c,W,.45),1),rgba(c,1),rgba(mix(c,K,.34),1)];
     el.innerHTML='<span class="bands">'
-      +'<span><i style="background:'+rgba(mix(c,W,.45),1)+'"></i>høy</span>'
-      +'<span><i style="background:'+rgba(c,1)+'"></i>svært høy</span>'
-      +'<span><i style="background:'+rgba(mix(c,K,.34),1)+'"></i>topp</span>'
+      +levelsFor(hex).map(function(lv,i){
+          return '<span><i style="background:'+swatch[i]+'"></i>'
+            +ringLabel(lv.p)+'</span>';}).join("")
       +'</span>';
   }else{
+    /* Colour says which species. Nothing said which of a species' two contours
+       was which - and a wood that clears the 85th percentile but not the 95th
+       draws exactly one ring, which is the ordinary case rather than a corner
+       one. Reported from Baneheia in Kristiansand: two species, one ring each,
+       and no way to tell whether that was the good ring or the best one. Line
+       weight carries it on the map; this row says so. */
     el.innerHTML='<span class="bands">'
       +SEL.map(function(sp){
           return '<span><i style="background:'+spColour(sp,D.species.indexOf(sp))
             +'"></i>'+sp.no+'</span>';}).join("")
+      +'</span><span class="bands">'
+      +levelsForOverlay(hex).map(function(lv,i){
+          return '<span><i class="ln'+(i?" thick":"")+'"></i>'
+            +ringLabel(lv.p)+'</span>';}).join("")
       +'</span>';
   }
 }
