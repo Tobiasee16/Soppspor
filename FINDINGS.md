@@ -3955,19 +3955,37 @@ occupies.
 
 ## Open questions
 
-- **Should the maps still be blurred at all?** `build_maps.py` applies a 500 m
-  blur around 1857 Naturbase sensitive sites, affecting **12.62%** of scored
-  cells in Kristiansand. That was a CLAUDE.md requirement; the requirement was
-  removed in September 2026 and the in-app blur toggle was dropped with it, but
-  the pipeline still applies the blur and **the interface no longer says
-  anywhere that it does**. That is the one combination that is clearly wrong:
-  `export_web_preview.py`'s own docstring argues that "a blurred area that does
-  not admit it is blurred is worse than no suppression at all, because the
-  reader trusts detail that is not there." Three ways out - remove the
-  suppression, or restore the disclosure, or keep both and say so in Om - and
-  the choice is the team's, not something to settle by editing a constant.
-  Related: the 236 kB suppression mask is still shipped in the payload and
-  nothing in the interface reads it.
+- **Should the maps still be blurred at all?** Narrowed on 2026-09-15, after
+  the claim was checked against both builds rather than against the pipeline
+  alone. It was written when Kristiansand was the only build there was, and it
+  read as though it described the app. It does not.
+
+  **The deployed national map applies no suppression at all**, and that is
+  measured, not inferred: `build_maps_national.py` records
+  `suppression="none - not a live constraint"`, `export_zone_tiles.py` has no
+  suppression pass, and the shipped `dist_norge/index.html` contains neither a
+  `suppressed` mask nor any `meta.suppression` string. Every `blur` in
+  `web/shell.html` is either a CSS backdrop filter or the two-pass contour
+  smoothing of section 25l. Nothing a reader of soppspor.pages.dev sees has
+  been blurred for habitat reasons.
+
+  **The Kristiansand build is where the question is still live**, and there the
+  original finding stands unchanged. `build_maps.py` applies a 500 m blur
+  around 1857 Naturbase sensitive sites, affecting **12.62%** of scored cells;
+  `data/processed/web_preview/payload.js` carries both the resulting surfaces
+  and a 236 kB base64 `suppressed` mask, and `shell.html` reads that key
+  nowhere. So the combination `export_web_preview.py`'s own docstring calls
+  worse than no suppression - "a blurred area that does not admit it is
+  blurred ... because the reader trusts detail that is not there" - is exactly
+  what `SOPP_BUILD=kommune` still produces. It is not deployed and has not been
+  since the national map shipped, but it is one environment variable away.
+
+  The three ways out are unchanged and the choice is still the team's: remove
+  the suppression from `build_maps.py`, restore the disclosure in the
+  interface, or keep both and say so in Om. What has changed is the urgency and
+  the blast radius. Note that the Phase 0 suitability GeoTIFFs are themselves
+  suppressed artefacts, so removing the blur means regenerating the published
+  Phase 0 deliverable, not editing a constant.
 
 - ~~Does 7.5 km blocking leave enough presences per fold at the Agder extent?~~
   Answered in section 2: yes, 46–83 per fold, insensitive to block size.
@@ -4226,3 +4244,185 @@ one of the new tests was written to run the real thing against stubs that can
 tell the wrong answer from the right one — the worker's routing, the erase
 geometry, the coordinate pair, the dimming — rather than to assert that the
 source contains a string.
+
+## 26. The weather stopped being part of the build - 2026-09-15
+
+CLAUDE.md allows this map to improve in exactly two ways, and the second is
+"fresher data on the same predictors - the conditions layer tracks seNorge on
+a schedule rather than being baked in at build time." It was baked in at build
+time, and the schedule did not exist. Looking for where to put one found that
+the layer was worse than stale: it was stale behind a line of output that said
+it had just been refreshed.
+
+### 26a. A deploy that refreshed a file it would not ship
+
+`deploy.sh` builds Norway by default. Its weather step ran
+
+```
+python scripts/fetch_recent_weather.py --if-new
+```
+
+with no `--national`, two lines above a build that passes `--national`. Those
+are two different files, and the fetcher chooses between them on that flag
+alone:
+
+| | written by | shipped by |
+|---|---|---|
+| `data/processed/conditions.json` | `--if-new` | the Kristiansand build |
+| `data/processed/conditions_norge.json` | `--if-new --national` | **the national build** |
+
+So every national deploy printed `==> refreshing the weather`, refreshed
+Kristiansand, and published whatever national weather happened to be on disk.
+Caught by three timestamps that could not all be true at once:
+
+| | modified | `last_day` |
+|---|---|---|
+| `conditions.json` (69 kB) | 2026-09-15 14:22 | 2026-09-14 |
+| `conditions_norge.json` (1.19 MB) | 2026-09-14 22:37 | 2026-09-13 |
+| what soppspor.pages.dev served | | **2026-09-13** |
+
+A day behind, on a layer whose entire purpose is to be current, with a deploy
+script reporting success. The fix is `"${FLAG[@]}"` - the same array the build
+two lines below already uses, so the two can no longer disagree. What is worth
+keeping is the shape rather than the fix: **a step that refreshes an input and
+a step that consumes one were parameterised separately**, which is the same
+defect as the ranking bug in 25i and the legend in 25k, and it was invisible
+for the same reason. Every check ran on one of the two files.
+
+`tests/test_deploy_script.py` now asserts the weather step carries the build's
+flag, next to the existing assertions that the bundle check and the publish
+step run against what was built. Verified by reintroducing the old line and
+watching it fail.
+
+### 26b. Why the schedule could not simply redeploy
+
+The obvious job - fetch the weather, rebuild, publish - is not available here,
+and the reason is worth recording because it is a property of the hosting
+rather than of this code.
+
+**A Cloudflare Pages deployment is an immutable, whole-directory snapshot.**
+There is no partial update: a deployment made from a directory containing only
+`conditions.json` contains only `conditions.json`, and everything else 404s.
+This site is 4,751 files and about 204 MB, of which roughly 196 MB is zone,
+mask and context tiles that come from an overnight prediction run and are
+deliberately not in the repository. CI cannot rebuild them.
+
+That leaves a daily job that would have to reconstruct 196 MB it does not have
+- from a cache, or by mirroring the live site - and then republish all of it to
+change one 1.19 MB file. The steady state is absurd and the failure mode is
+worse: a partial or corrupt directory deploys cleanly and takes the map off the
+internet. Weighed against a layer the app already treats as optional, that is
+the wrong risk to accept twice a day.
+
+So the file left the deployment instead. `functions/conditions.json.js` serves
+it from Workers KV; `.github/workflows/conditions.yml` writes only that key and
+**never deploys**. The worst a broken run can do is leave yesterday's reading
+in place, which is a state the app has always handled - `refreshConditions`
+reads `r.ok ? r.json() : null` and draws the map without a conditions layer.
+
+The choice was put to the team rather than made here, because it adds a
+dependency and CLAUDE.md requires asking. The alternative on the table was the
+cache-and-republish job above.
+
+### 26c. A function beats a real file, and it went out the other way round
+
+This was written on the assumption that a static asset at a path wins over a
+function at the same path, so shipping both would be safe and the file would
+simply keep serving until KV existed. That is **backwards**, and it was
+deployed before it was measured.
+
+Cloudflare Pages routes a request to the Function first. `wrangler pages
+deploy` picked up the new `functions/` directory - printing `Uploading
+Functions bundle`, which is the only notice anyone gets - and from that moment
+`/conditions.json` was answered by a route whose "no KV binding" case returned
+**HTTP 503**. There was no KV binding. The live conditions layer was down until
+it was checked by hand.
+
+Two things kept it from being worse and one thing hid it:
+
+- **The app degrades correctly.** `refreshConditions` reads
+  `r.ok ? r.json() : null`, so the map drew with no weather rather than
+  breaking. The zones, tiles and mask were untouched throughout.
+- **The deployment check passed anyway**, reporting `the weather is served
+  HTTP 200` and `it carries a last day 2026-09-13`. It was reading an
+  edge-cached copy of the *previous* deployment, and its only assertion was
+  that some day existed - and the day that was already live is still a day.
+  Both are now fixed: the fetch carries a cache-buster, and the served day is
+  compared against the built one. Had that comparison existed, the mismatch
+  would have been the first line to fail.
+
+**The fix is better than the design it replaces.** The route now falls through
+to the asset server with `context.next()` whenever KV cannot answer - no
+binding, or a bound namespace with nothing written yet. So the function is
+*additive*: with KV it serves KV, without it serves whatever the build shipped.
+The ordering hazard this section used to describe is gone, `SOPP_CONDITIONS`
+drops from a correctness requirement to a question of what to ship, and a KV
+outage falls back to a stale file rather than to an error.
+
+The fall-through has one sharp edge of its own, which is tested: `_redirects`
+ends with `/*  /index.html  200`, so a path with no file behind it returns the
+app with status 200 and a body of HTML. `passThrough` therefore checks the
+content type rather than the status, and turns anything that is not JSON into a
+clean 404.
+
+Verified on a preview branch before production, which is the step whose absence
+caused this: `conditions-check.soppspor.pages.dev/conditions.json` returned 200,
+`application/json`, 1,191,631 bytes, GET and HEAD agreeing, on three consecutive
+requests. Production then returned the same, with `last_day` 2026-09-14.
+
+`tests/test_conditions_route.js` runs the real module against stubs for both
+KV and `next()`, over every state: populated, bound-but-empty, unbound with a
+file, unbound with no file, and HEAD against GET for each. The last assertion
+in the file exists only because of this incident - *an absent binding is never
+a 5xx* - because that is the exact line that took the layer down.
+
+The cross-file invariants are pinned too, in `tests/test_conditions_kv.py`,
+because nothing at runtime complains when they drift: the key the workflow
+writes is the key the route reads, and the header the route sets is the header
+the workflow reads to decide whether to write at all. Rename either and the job
+rewrites KV twice a day forever while every run reports success.
+
+**The method note, and it is 25n's lesson arriving from a third direction.**
+A service worker could not be seen by any check because it only exists on
+somebody else's device. A Pages Function cannot be seen by any check because it
+only exists on Cloudflare's edge, and its behaviour depends on runtime state -
+a binding - that reading the built directory can never reveal. Both were
+deployed on an assumption about a platform rule rather than a measurement of
+one. The assumption was one sentence long, load-bearing, and wrong, and the
+cost of checking it first was a preview deployment that takes nine seconds.
+
+Suite: **790 -> 807** pytest cases; the two new suites add 15 Python
+assertions and 20 JavaScript ones, the latter counting as a single case.
+
+### 26d. Two things checked rather than assumed
+
+**The national weather is current again.** Fetched directly: `last_day`
+2026-09-14, one day behind, 0.94x normal rainfall against a 54% median
+percentile. Those last two are the consistency check from 25a - a country at
+0.94x normal should have a median percentile near a half, and it does - so the
+sea-as-drought bug has not returned. **Deployed and verified live**: the whole
+deployment check passes against `dist_norge/`, including the new assertion that
+the day being served is the day that was built.
+
+**Account recovery still does not work, but it has moved.** The failure is no
+longer the built-in mailer's HTTP 429; `scripts/check_auth_email.py` now
+returns **HTTP 500, "Error sending confirmation email"**. That is custom SMTP
+configured and the provider rejecting the message, which in practice means
+credentials or an unverified sending domain rather than anything in this
+repository. The distinction matters: 429 was a platform limit no setting could
+raise, 500 is a configuration that is nearly right.
+
+### 26e. The suppression question was narrower than it read
+
+Checked against both builds rather than against the pipeline alone, and
+corrected in Open questions above. The short version: **the deployed national
+map applies no suppression at all** - no pass in `build_maps_national.py` or
+`export_zone_tiles.py`, and no `suppressed` mask or `meta.suppression` string
+in the shipped `dist_norge/index.html`. Every `blur` in `web/shell.html` is a
+CSS backdrop filter or the contour smoothing of 25l.
+
+The finding as originally written was true of the Kristiansand build and was
+read as a statement about the app. It is not one, and it has not been since the
+national map shipped. It remains true of `SOPP_BUILD=kommune`, which is one
+environment variable away and still ships both a blurred surface and a 236 kB
+mask nothing reads.

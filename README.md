@@ -15,7 +15,7 @@ limits are permanent and structural, not settings.
 ```
 ./deploy.sh --cloudflare            # builds Norway, publishes, then checks what is live
 python scripts/build_hosted.py --national     # -> dist_norge/, 204 MB of static site
-python -m pytest -q                 # 790 tests: Python and the JS suites together
+python -m pytest -q                 # 807 tests: Python and the JS suites together
 ```
 
 ## What it actually does
@@ -126,9 +126,43 @@ the page they are looking at has been replaced.
 
 | | |
 |---|---|
-| `backend/migrations/004_schedule_tombstone_purge.sql` | not yet run. The privacy policy promises a deleted spot is gone within 30 days and nothing removes it until this is scheduled. |
-| Supabase → Redirect URLs | must contain `https://soppspor.pages.dev/`, trailing slash included, or magic links bounce to localhost. |
-| Custom SMTP | Supabase's built-in mailer does 2 messages an hour to team addresses only, so account recovery does not work for anyone else. See `backend/FIXING_SUPABASE.md` §4. |
+| Custom SMTP | **still broken, but it has moved.** `python scripts/check_auth_email.py you@example.no` now returns HTTP 500, *"Error sending confirmation email"* — not the old 429. That is SMTP configured and the provider rejecting the message, so it is credentials or an unverified sending domain. See `backend/FIXING_SUPABASE.md` §4. |
+| Workers KV for the conditions layer | the scheduled refresh cannot run until this exists — see *The conditions layer* below. |
+| `backend/migrations/004_schedule_tombstone_purge.sql` | reported run on 2026-09-15. **Not verifiable from here**: `purge_tombstones()` is revoked from anon and authenticated, which is correct, so nothing with the anon key can see whether the job is scheduled. The verification SQL is in the migration's own comments — run the three queries at the bottom and read them. |
+| Supabase → Redirect URLs | reported set. Confirm by opening a magic link and checking it lands on `soppspor.pages.dev` rather than localhost; nothing here can check it for you. |
+
+### The conditions layer
+
+The weather is no longer part of the deployment. `functions/conditions.json.js`
+serves it, and `.github/workflows/conditions.yml` refreshes it twice a day
+**without ever deploying the site** — see [FINDINGS.md](FINDINGS.md) section 26
+for why redeploying 196 MB of tiles to change one 1.19 MB file was the wrong
+trade.
+
+The route is additive, so the order below does not matter and nothing breaks
+half-done: with a KV namespace it serves KV, without one it falls through to
+whatever the build shipped. That is the state it is in right now — live,
+serving the file, waiting for a namespace.
+
+```
+npx wrangler kv namespace create CONDITIONS          # note the id it prints
+```
+
+1. Bind it: Cloudflare → Pages → soppspor → Settings → Bindings → KV, variable
+   name `CONDITIONS`, the namespace above. Production **and** preview.
+2. Add three repository secrets: `CLOUDFLARE_API_TOKEN` (scoped to *Workers KV
+   Storage: Edit*), `CLOUDFLARE_ACCOUNT_ID`, `CONDITIONS_KV_ID`.
+3. Run the workflow by hand once (Actions → conditions → Run workflow). It
+   writes the key, then waits until the live site is really serving it.
+4. Optionally set `SOPP_CONDITIONS=kv` in `deploy.sh`, which stops the build
+   shipping a 1.19 MB file that KV now overrides anyway. Purely a size
+   question; the app behaves the same either way.
+
+**Anything touching this route gets a preview deploy first.** Pages routes a
+request to the Function before the static asset — the reverse of what section
+26c was first written on — and `wrangler pages deploy` picks up `functions/`
+with no announcement beyond one line of output. `wrangler pages deploy
+dist_norge --branch check` gives a preview URL in about nine seconds.
 
 **Waiting on the owner's judgement**, deliberately not settled alone:
 
