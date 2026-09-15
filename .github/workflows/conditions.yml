@@ -1,0 +1,192 @@
+# The conditions layer, tracking seNorge on a schedule.
+#
+# CLAUDE.md allows the map to improve in exactly two ways, and this is the
+# second: "fresher data on the same predictors - the conditions layer tracks
+# seNorge on a schedule rather than being baked in at build time."
+#
+# It was baked in at build time. Worse, `deploy.sh` refreshed the *Kristiansand*
+# conditions file and then shipped the national one, so a national deploy
+# announced "refreshing the weather", refreshed a file it would not publish,
+# and published whatever happened to be on disk. That is fixed in deploy.sh;
+# this is the part that makes the layer independent of the build at all.
+#
+# **This job never deploys the site.** A Cloudflare Pages deployment is an
+# immutable whole-directory snapshot, and this site is ~196 MB of tiles that
+# come from an overnight prediction run and are not in the repository. A daily
+# job that rebuilt and republished all of it to change one 1.19 MB file could,
+# on a bad run, take the map off the internet. So the file moved out of the
+# deployment instead: functions/conditions.json.js serves it from Workers KV
+# and this job writes only that key. The worst a broken run can do is leave
+# yesterday's reading in place, which is a case the app already handles.
+#
+# Needs three repository secrets:
+#   CLOUDFLARE_API_TOKEN   scoped to Workers KV Storage:Edit on this account
+#   CLOUDFLARE_ACCOUNT_ID
+#   CONDITIONS_KV_ID       the namespace id, also bound to the Pages project
+#                          under the name CONDITIONS
+#
+# Until those exist and the Pages project carries the binding, this job fails
+# at the write step rather than quietly doing nothing.
+name: conditions
+
+on:
+  schedule:
+    # Twice, because seNorge lags real time by a day or two and MET does not
+    # publish to a clock we control. `--if-new` makes a run where nothing has
+    # moved cost one small request, so the second attempt is nearly free and
+    # saves being a whole day behind when the morning one runs too early.
+    - cron: "40 5 * * *"
+    - cron: "40 11 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Write KV even if seNorge has not moved"
+        type: boolean
+        default: false
+
+# Two runs writing the same key would race for no benefit.
+concurrency:
+  group: conditions
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # The national fetch is numpy, PyYAML and the standard library. It reads
+      # seNorge over OPeNDAP with urllib and needs no geospatial stack, and the
+      # --national window is the whole grid, so it needs no boundary file
+      # either. Installing all of pyproject.toml here would be minutes of
+      # building rasterio for nothing.
+      - name: Install what the fetcher needs
+        run: pip install --disable-pip-version-check numpy pyyaml
+
+      # `--if-new` compares the day in the file on disk against the newest day
+      # seNorge offers. On a fresh checkout there is no file - conditions are
+      # gitignored because they change daily - so seeding it from what is
+      # already live makes that check mean the same thing here as on a laptop.
+      # A 404 is the expected answer before the first write, not a failure.
+      - name: Seed from what is already live
+        run: |
+          mkdir -p data/processed
+          if curl -fsS --max-time 60 -o data/processed/conditions_norge.json \
+                  https://soppspor.pages.dev/conditions.json; then
+            python -c "import json; print('live last_day:', json.load(open('data/processed/conditions_norge.json'))['last_day'])"
+          else
+            echo "nothing live to seed from - first run, or KV is empty"
+            rm -f data/processed/conditions_norge.json
+          fi
+
+      - name: Fetch seNorge
+        id: fetch
+        env:
+          FORCE: ${{ inputs.force }}
+        run: |
+          if [ "$FORCE" = "true" ]; then
+            python scripts/fetch_recent_weather.py --national
+          else
+            python scripts/fetch_recent_weather.py --national --if-new
+          fi
+          # `--if-new` exits 0 without writing when nothing moved, so the day
+          # in the file is what decides from here, never the exit code.
+          python - >> "$GITHUB_OUTPUT" <<'PY'
+          import json, pathlib
+          p = pathlib.Path("data/processed/conditions_norge.json")
+          d = json.loads(p.read_text(encoding="utf-8"))
+          print("last_day=" + d["last_day"])
+          print("lag_days=" + str(d["lag_days"]))
+          print("bytes=" + str(p.stat().st_size))
+          PY
+
+      # Whether to write is decided against what is actually being served, not
+      # against the repository or the runner's disk. Same habit the deployment
+      # check exists for: status carried forward is not evidence.
+      - name: Is that newer than what is being served?
+        id: live
+        env:
+          FORCE: ${{ inputs.force }}
+          FETCHED: ${{ steps.fetch.outputs.last_day }}
+        run: |
+          served="$(curl -fsSI --max-time 60 https://soppspor.pages.dev/conditions.json \
+                    | tr -d '\r' \
+                    | awk 'tolower($1) == "x-conditions-last-day:" { print $2 }')"
+          echo "served=${served:-none}" >> "$GITHUB_OUTPUT"
+          fetched="$FETCHED"
+          if [ "$FORCE" = "true" ]; then
+            echo "write=yes" >> "$GITHUB_OUTPUT"
+            echo "forced: writing $fetched regardless"
+          elif [ -z "$served" ] || [ "$served" != "$fetched" ]; then
+            echo "write=yes" >> "$GITHUB_OUTPUT"
+            echo "serving ${served:-nothing}, fetched $fetched"
+          else
+            echo "write=no" >> "$GITHUB_OUTPUT"
+            echo "already serving $fetched; nothing to do"
+          fi
+
+      - name: Write it to KV
+        if: steps.live.outputs.write == 'yes'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          KV_ID: ${{ secrets.CONDITIONS_KV_ID }}
+          LAST_DAY: ${{ steps.fetch.outputs.last_day }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "CLOUDFLARE_API_TOKEN is not set"; exit 1; }
+          test -n "$KV_ID" || { echo "CONDITIONS_KV_ID is not set"; exit 1; }
+          # The metadata rides along so the route can answer "how old is this"
+          # in a header, and nothing has to pull 1.19 MB to find out.
+          npx --yes wrangler@4 kv key put norge \
+            --path data/processed/conditions_norge.json \
+            --namespace-id "$KV_ID" \
+            --remote \
+            --metadata "{\"last_day\":\"$LAST_DAY\",\"written\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+
+      # Written is not served. KV is eventually consistent and the route keeps
+      # a short edge cache, so this waits for the change to actually appear
+      # rather than reporting the write itself as the outcome.
+      - name: Check it is really being served
+        if: steps.live.outputs.write == 'yes'
+        env:
+          WANT: ${{ steps.fetch.outputs.last_day }}
+        run: |
+          for i in $(seq 1 12); do
+            got="$(curl -fsSI --max-time 30 https://soppspor.pages.dev/conditions.json \
+                   | tr -d '\r' \
+                   | awk 'tolower($1) == "x-conditions-last-day:" { print $2 }')"
+            if [ "$got" = "$WANT" ]; then
+              echo "serving $got after $i attempt(s)"
+              curl -fsS --max-time 60 https://soppspor.pages.dev/conditions.json \
+                | python -c "import json,sys; d=json.load(sys.stdin); print('body agrees:', d['last_day'], '-', d['lag_days'], 'day(s) behind')"
+              exit 0
+            fi
+            echo "attempt $i: serving ${got:-nothing}, want $WANT"
+            sleep 10
+          done
+          echo "KV was written but the route is still not serving it"
+          exit 1
+
+      - name: Say what happened
+        if: always()
+        env:
+          LAST_DAY: ${{ steps.fetch.outputs.last_day }}
+          LAG: ${{ steps.fetch.outputs.lag_days }}
+          SERVED: ${{ steps.live.outputs.served }}
+          WROTE: ${{ steps.live.outputs.write }}
+        run: |
+          {
+            echo "### conditions"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| seNorge last day | ${LAST_DAY:-(not fetched)} |"
+            echo "| lag | ${LAG:-?} day(s) |"
+            echo "| was serving | ${SERVED:-(not checked)} |"
+            echo "| wrote KV | ${WROTE:-no} |"
+          } >> "$GITHUB_STEP_SUMMARY"

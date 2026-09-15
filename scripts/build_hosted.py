@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -89,6 +90,17 @@ NAT_MAPS = ROOT / "data" / "processed" / "suitability_maps_norge.md"
 NAT_POOL = ROOT / "data" / "interim" / "target_group_pool_norge.json"
 NAT_CTX = ROOT / "data" / "processed" / "context_tiles"
 NAT_COND = ROOT / "data" / "processed" / "conditions_norge.json"
+
+# Where the national build's conditions layer comes from. "static" ships the
+# file inside the deployment, which is how this worked before there was
+# anywhere else to put it; "kv" leaves the path to the Pages Function.
+#
+# It is an environment variable rather than a constant because the switch has
+# an order to it and is reversible: the KV namespace has to exist, be bound to
+# the Pages project as CONDITIONS, and have something written to it *before*
+# the build stops shipping the file, or the app loses its conditions layer
+# between one deploy and the next. Flip it in deploy.sh once that is true.
+CONDITIONS_FROM_KV = os.environ.get("SOPP_CONDITIONS", "static").lower() == "kv"
 
 
 def nb(n: int) -> str:
@@ -688,7 +700,17 @@ def main() -> int:
     # Weather is on a daily clock and the app refetches it on launch; making it
     # a file means a weather update is a one-file upload, not a rebuild.
     cond_js = "window.SOPP_COND=null;"
-    if national and NAT_COND.exists():
+    if national and CONDITIONS_FROM_KV:
+        # The route is functions/conditions.json.js, served out of Workers KV
+        # and refreshed by .github/workflows/conditions.yml. Writing the file
+        # here as well would silently win: a real file beats a function at the
+        # same path, so the daily refresh would keep working, keep reporting
+        # success, and never reach a single reader.
+        cond = (json.loads(NAT_COND.read_text(encoding="utf-8"))
+                if NAT_COND.exists() else None)
+        print("  conditions: from KV at /conditions.json, not shipped as a file"
+              + (f" (last built locally: {cond['last_day']})" if cond else ""))
+    elif national and NAT_COND.exists():
         shutil.copyfile(NAT_COND, out / "conditions.json")
         cond = json.loads(NAT_COND.read_text(encoding="utf-8"))
         g = cond["grid"]
