@@ -4435,3 +4435,36 @@ read as a statement about the app. It is not one, and it has not been since the
 national map shipped. It remains true of `SOPP_BUILD=kommune`, which is one
 environment variable away and still ships both a blurred surface and a 236 kB
 mask nothing reads.
+
+### 26f. The tombstone purge is scheduled, and was verified rather than reported
+
+2026-09-15. `backend/migrations/004_schedule_tombstone_purge.sql` had existed
+unrun since the privacy policy was published, which made *"fjernet permanent
+innen 30 dager"* a sentence nothing enforced. It is now applied, and the check
+is the point of this entry rather than the migration:
+
+```
+jobid | schedule    | command                             | active
+    4 | 17 3 * * *  | select public.purge_tombstones()    | true
+```
+
+**Scheduling it does not clear what was already overdue.** `pg_cron` fires
+forward, so the first query after applying the migration returned **4 spots**
+deleted more than thirty days earlier whose rows were still in the table, notes
+and coordinates included. Nobody could see them - `deleted_at` is what the sync
+protocol reads, so they had vanished from every device at deletion, and RLS put
+them out of every other user's reach regardless - but the published sentence
+was false for those four until `purge_tombstones()` was run by hand.
+
+Worth keeping as a shape: **turning on a recurring cleanup does not clean up.**
+A schedule starts a clock; it does not settle the debt that accrued before it
+existed. Any future job of this kind wants the same two steps, and the second
+is the one that gets forgotten because the dashboard looks correct after the
+first.
+
+This is also the one guarantee in the project that **cannot** be added to
+`check_backend.py`. That script runs with the anon key, and
+`purge_tombstones()` is revoked from anon and authenticated - correctly, since
+a user being able to trigger a global purge would be far worse than the check
+being manual. So the verification is three SQL queries run by the owner, and
+the README now records the answer rather than the intention.

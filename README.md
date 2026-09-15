@@ -122,13 +122,21 @@ ranking, the AR50 habitat mask cut at 32 m, place and address search, private
 saved spots with Supabase sync, and an update banner so a reader is told when
 the page they are looking at has been replaced.
 
+**The tombstone purge is scheduled and verified**, 2026-09-15. `cron.job`
+returns one row — jobid 4, schedule `17 3 * * *`, command
+`select public.purge_tombstones()`, active. So the privacy policy's promise
+that a deleted spot is *"fjernet permanent innen 30 dager"* is now kept by
+something that runs, rather than by a function nothing called. Checking it
+needs the SQL editor: `purge_tombstones()` is revoked from anon and
+authenticated, so nothing holding the anon key can see the schedule — which is
+correct, and is why this cannot be added to `check_backend.py`.
+
 **Waiting on the owner**, and nothing else can move it:
 
 | | |
 |---|---|
 | Custom SMTP | **still broken, but it has moved.** `python scripts/check_auth_email.py you@example.no` now returns HTTP 500, *"Error sending confirmation email"* — not the old 429. That is SMTP configured and the provider rejecting the message, so it is credentials or an unverified sending domain. See `backend/FIXING_SUPABASE.md` §4. |
 | Workers KV for the conditions layer | the scheduled refresh cannot run until this exists — see *The conditions layer* below. |
-| `backend/migrations/004_schedule_tombstone_purge.sql` | reported run on 2026-09-15. **Not verifiable from here**: `purge_tombstones()` is revoked from anon and authenticated, which is correct, so nothing with the anon key can see whether the job is scheduled. The verification SQL is in the migration's own comments — run the three queries at the bottom and read them. |
 | Supabase → Redirect URLs | reported set. Confirm by opening a magic link and checking it lands on `soppspor.pages.dev` rather than localhost; nothing here can check it for you. |
 
 ### The conditions layer
