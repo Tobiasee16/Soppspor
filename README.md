@@ -126,8 +126,10 @@ evidence for every number in FINDINGS.md.
 
 **Deployed and verified live**: the national map, the 25 km neighbourhood
 ranking, the AR50 habitat mask cut at 32 m, place and address search, private
-saved spots with Supabase sync, and an update banner so a reader is told when
-the page they are looking at has been replaced.
+saved spots with Supabase sync, an update banner so a reader is told when the
+page they are looking at has been replaced, marked routes for the whole country
+fetched a fylke at a time, three Kartverket basemaps with the topographic sheet
+as the default, and two-finger rotation with a compass that taps back to north.
 
 **The tombstone purge is scheduled and verified**, 2026-09-15. `cron.job`
 returns one row — jobid 4, schedule `17 3 * * *`, command
