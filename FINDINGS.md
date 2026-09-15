@@ -4026,7 +4026,9 @@ occupies.
   +0.001), marginally on lightgbm. But see the transfer result below before
   reading much into it.
 - ~~Does NGU losmasser separate the three species?~~ Answered in section 9a:
-  no. Every substrate column sits at or below +0.012 importance, and the
+  no. But see **section 27**: that answers species *separation* only, and the
+  broader question - whether substrate raises the chance of fungi at all - is
+  invisible to a target-group design and remains open. Every substrate column sits at or below +0.012 importance, and the
   registered "moves everything by less than 0.02" prediction held exactly.
 - ~~Is the Boyce index measuring the models or itself?~~ Answered in section
   9b: itself, on scores this skewed. The published implementation returns
@@ -4584,3 +4586,76 @@ stood, and both were found by a person looking at the product and saying
 something was not there. `tests/test_conditions_kv.py` now fails if any step
 condition reads `secrets`, which is the narrow version of the lesson; the wide
 version is 25n's, arriving for the third time.
+
+## 27. What the target-group background cannot see - 2026-09-15
+
+Raised by the owner, in a question section 9a had implicitly answered wrongly:
+
+> "For losmasser, even tho it doesnt seperate species does it not have an
+> overall effect on the likelyhood of there growing mushrooms?"
+
+It might, and **this design cannot tell.** That is a structural limitation
+rather than a null result, and section 9a has been read as the stronger claim
+for months.
+
+### 27a. The comparison that is actually being made
+
+Every species is fitted as its own presences against **target-group
+background** - points drawn from the distribution of all 82,129 fungal records
+in Agder. That exists to defeat the effort bias, and it works: without it a
+model scores well by learning visited ground from unvisited ground.
+
+The consequence nobody wrote down is that it also subtracts anything the whole
+fungal community shares. If a substrate makes *every* fungus more likely, it is
+present in the presences and equally present in the background, and the
+difference is zero by construction.
+
+So the question each model answers is:
+
+> what distinguishes *this species'* locations from **where fungi in general get
+> recorded**?
+
+and never:
+
+> where are mushrooms more likely **at all**?
+
+Section 9a's eleven substrate columns at or below +0.012 are sound evidence for
+the first question. They are **not** evidence for the second, and the sentence
+"substrate, as NGU maps it, does not separate these three species" is exactly
+true while being easy to read as something much broader.
+
+### 27b. Two reasons the test was also aimed away from it
+
+**The layer measures the wrong quantity.** NGU losmasser classifies by
+depositional origin - morene, breelv, marin leire, torv, bart fjell. The
+ecological literature that motivated it is about calcareous versus acidic
+chemistry. Origin is a loose proxy for chemistry at best, and 9a said so at the
+time without drawing the consequence.
+
+**The species were the ones least likely to show it.** None of *C.
+tubaeformis*, *C. cibarius* or *A. muscaria* is a calcicole; they were chosen
+to test recording bias, not substrate. *Craterellus cornucopioides*, which is
+associated with rich and often calcareous ground, joined in September 2026 for
+the product and has never been part of a substrate test.
+
+### 27c. Why it stays open
+
+Answering the owner's question means comparing fungal records against a
+**uniform** background rather than a target-group one - and that reintroduces
+precisely the effort bias the target-group background exists to remove. The
+result would be "substrate plus where people walk", with no way to separate the
+two. Separating them wants absence data, and CLAUDE.md closes that permanently:
+no field logging, and user spots are never model input.
+
+So this is a third item for the short list of things that cannot be fixed by
+effort, alongside the unresolved ordering test and the conditions weight. It is
+recorded here so that the next person to read section 9a does not conclude more
+from it than it says.
+
+The one thing that would move it without absences is a **better predictor**,
+which CLAUDE.md does allow: NGU's bedrock map rather than superficial deposits,
+since bedrock chemistry is what the ecology is actually about. That has never
+been fetched. Probing on 2026-09-15 found `geo.ngu.no/mapserver/BerggrunnWMS2`
+answers HTTP 200 with a MapServer error - *CGI variable "map" is not set* - so
+the service address is wrong rather than the service absent, and resolving it
+against the Geonorge catalogue is an unstarted hour of work.
