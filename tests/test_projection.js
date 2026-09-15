@@ -55,7 +55,7 @@ function make(rotDeg, mpp) {
     view: { cx: 440000, cy: 6450000, mpp: mpp, rot: rotDeg * Math.PI / 180 },
   };
   const fn = new Function("env",
-    "with(env){" + grab("w2s") + "\n" + grab("s2w") + "\nreturn {w2s:w2s,s2w:s2w,env:env};}");
+    "with(env){" + grab("w2s") + grab("w2screen") + "\n" + grab("s2w") + "\nreturn {w2s:w2screen,s2w:s2w,env:env};}");
   return fn(env);
 }
 
@@ -167,7 +167,7 @@ function halves(rotDeg, mpp) {
     view: { cx: 440000, cy: 6450000, mpp: mpp, rot: rotDeg * Math.PI / 180 },
   };
   return new Function("env", "with(env){" + grab("vhw") + grab("vhh")
-    + grab("s2w") + "\n"
+    + grab("w2s") + grab("w2screen") + grab("s2w") + "\n"
     + "return {vhw:vhw,vhh:vhh,s2w:s2w,env:env};}")(env);
 }
 
@@ -195,6 +195,88 @@ function halves(rotDeg, mpp) {
   const d = halves(45, 64);
   check("at 45° the box is wider than the screen", d.vhw() > a.vhw(),
     d.vhw().toFixed(0) + " m against " + a.vhw().toFixed(0) + " m");
+}
+
+/* ---- the bug this file did not catch the first time ----
+ *
+ * Rotation was put inside w2s. Every assertion above passed, because w2s and
+ * s2w still agreed and the geometry was still right. What broke was drawing: a
+ * raster tile goes to ctx.drawImage(img, x, y, w, h), an axis-aligned
+ * rectangle, so each tile moved to its rotated position and stayed square-on.
+ * From the phone: "all the tiles rotate individually".
+ *
+ * So the split itself is now the thing asserted. w2s must be FLAT - it feeds
+ * drawImage - and the turn must live in mapTransform, which the canvas
+ * applies. Put rotation back in the arithmetic and these fail.
+ */
+function flat(rotDeg, mpp) {
+  const env = {
+    CW: 412, CH: 780, DPR: 2,
+    view: { cx: 440000, cy: 6450000, mpp: mpp, rot: rotDeg * Math.PI / 180 },
+  };
+  return new Function("env", "with(env){" + grab("w2s") + grab("w2screen")
+    + "return {w2s:w2s,w2screen:w2screen,env:env};}")(env);
+}
+
+{
+  const at0 = flat(0, 64), at90 = flat(90, 64), at37 = flat(37, 64);
+  const e = 440000 + 3000, n = 6450000 + 2000;
+  const a = at0.w2s(e, n), b = at90.w2s(e, n), c = at37.w2s(e, n);
+  check("w2s is flat: drawing coordinates do not turn",
+    Math.abs(a[0] - b[0]) < 1e-9 && Math.abs(a[1] - b[1]) < 1e-9
+    && Math.abs(a[0] - c[0]) < 1e-9 && Math.abs(a[1] - c[1]) < 1e-9,
+    "0° " + a.map(Math.round) + " / 90° " + b.map(Math.round));
+
+  check("w2screen does turn, so hit-testing follows the picture",
+    Math.hypot(a[0] - at90.w2screen(e, n)[0], a[1] - at90.w2screen(e, n)[1]) > 1,
+    "moved " + Math.hypot(a[0] - at90.w2screen(e, n)[0],
+                          a[1] - at90.w2screen(e, n)[1]).toFixed(1) + " px");
+}
+
+/* A tile is drawn from two opposite corners as a width and a height. Under the
+   old arrangement those corners rotated independently, so at 90 degrees the
+   rectangle collapsed or inverted. Any rotation must leave it a rectangle. */
+[0, 15, 45, 90, 137, -30].forEach(function (rot) {
+  const P = flat(rot, 64);
+  const b = [440000, 6450000, 440000 + 8192, 6450000 + 8192];   // a 128 m tile grid step
+  const tl = P.w2s(b[0], b[3]), br = P.w2s(b[2], b[1]);
+  const w = br[0] - tl[0], h = br[1] - tl[1];
+  check("a tile stays a positive rectangle at " + rot + "°",
+    w > 0 && h > 0 && Math.abs(w - h) < 1e-6,
+    w.toFixed(1) + " x " + h.toFixed(1) + " px");
+});
+
+/* ---- screen effects must not be drawn in the map's frame ----
+ *
+ * The second thing this got wrong. The dark-mode knock-back is a full-screen
+ * fillRect, and it sat inside the rotated block, so it covered a TURNED
+ * rectangle and left the screen's real corners bright: "a lighter frame
+ * appears when rotating as the darker square pointing north stays the same
+ * direction".
+ *
+ * Anything that covers the whole display - the dimming, the veil composite -
+ * dims the display and not the ground, so it belongs outside the transform.
+ * This reads draw() and checks nothing full-screen happens between
+ * mapTransform and the restore that ends it.
+ */
+{
+  const body = (function () {
+    const i = shell.indexOf("function draw(){");
+    return shell.slice(i, shell.indexOf("\nfunction ", i + 10));
+  })();
+  const open = body.indexOf("mapTransform(ctx)");
+  const close = body.indexOf("ctx.restore()", open);
+  check("draw() opens and closes a rotated block", open > 0 && close > open,
+    "mapTransform at " + open + ", restore at " + close);
+  const inside = body.slice(open, close);
+  const fullScreen = /fillRect\(0\s*,\s*0\s*,\s*CW\s*,\s*CH\)|drawImage\([^)]*,\s*0\s*,\s*0\s*,\s*CW\s*,\s*CH\)/;
+  check("nothing full-screen is drawn inside the rotated block",
+    !fullScreen.test(inside),
+    (inside.match(fullScreen) || ["none"])[0]);
+  check("the rotated block is only the raster sheets",
+    /drawTiles\(/.test(inside) && /drawLiveTiles\(/.test(inside)
+    && !/drawSpots\(/.test(inside),
+    inside.replace(/\s+/g, " ").slice(0, 70) + "...");
 }
 
 /* ---- north stays north at zero ---- */

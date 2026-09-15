@@ -136,7 +136,7 @@ function run(withMask) {
                 "NOX", "NOY", "DPR", "w2s", "requestDraw", "Image", "g"];
   /* vhw/vhh ride along: the erase window follows the rotated viewport now,
      so stubbing them would test a viewport the app no longer has. */
-  const SRC = grab("vhw") + grab("vhh")
+  const SRC = grab("vhw") + grab("vhh") + grab("mapTransform")
             + grab("mkURL") + grab("mkTile") + grab("mkErase") + "mkErase(g);";
   new Function(...ARGS, SRC)(
     MSK, MK, true, { z: 0, tile: 256 }, 128, view, CW, CH, NOX, NOY,

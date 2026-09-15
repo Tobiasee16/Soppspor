@@ -1073,38 +1073,48 @@ function clampView(){
   lo=BOUNDS[1]+hh; hi=BOUNDS[3]-hh;
   view.cy = lo>hi ? (BOUNDS[1]+BOUNDS[3])/2 : Math.min(Math.max(view.cy,lo),hi);
 }
-/* World <-> screen. `view.rot` turns the map counterclockwise on screen, so at
-   +90 degrees a point due north of the centre draws to the right of it.
-
-   These two must be exact inverses, and the reason is not aesthetic. A long
-   press runs s2w and hands the result to addSpot, so an inverse that is even
-   slightly wrong writes somebody's mushroom spot at the wrong place, silently,
-   as a plausible pin in the wrong wood. tests/test_projection.js asserts the
-   round trip across rotations, zooms and a grid of points.
-
-   It also asserts known answers, and that is not belt-and-braces. Written
-   against the pre-rotation version, the round trip passed at every angle: both
-   functions ignored `rot` identically, so they were consistent inverses of
-   each other while both being wrong. Self-consistency cannot tell that from
-   correct. The geometry needs answers worked out by hand. */
-function w2s(e,n){
-  var dx=(e-view.cx)/view.mpp,dy=(view.cy-n)/view.mpp,r=view.rot;
-  if(r){var c=Math.cos(r),s=Math.sin(r),rx=dx*c-dy*s;dy=dx*s+dy*c;dx=rx;}
-  return[dx+CW/2,dy+CH/2];}
+/* World <-> screen, in three parts, because rotation belongs in the canvas
+   transform and not in the arithmetic.
+ *
+ * The first version of this put the rotation inside w2s, which looked right
+ * and was not: a raster tile is drawn with ctx.drawImage(img, x, y, w, h), an
+ * axis-aligned rectangle, so every tile moved to its rotated position while
+ * staying square-on - and at large angles the computed width went wrong too.
+ * Reported from the phone as "all the tiles rotate individually". Ground is
+ * drawn under a rotated canvas transform instead; the arithmetic stays flat.
+ *
+ *   w2s      flat, pre-rotation. What every drawing path uses, inside
+ *            mapTransform, where the canvas supplies the rotation.
+ *   w2screen the true pixel a world point occupies. For hit-testing and for
+ *            the overlays that must stay upright for the reader.
+ *   s2w      the inverse of w2screen. This is the one that matters most: a
+ *            long press hands its result to addSpot, so an inverse that is
+ *            wrong under rotation saves somebody's mushroom spot in the wrong
+ *            wood, silently, as a perfectly plausible pin. */
+function w2s(e,n){return[(e-view.cx)/view.mpp+CW/2,(view.cy-n)/view.mpp+CH/2];}
+function w2screen(e,n){
+  var p=w2s(e,n),r=view.rot;
+  if(!r)return p;
+  var dx=p[0]-CW/2,dy=p[1]-CH/2,c=Math.cos(r),sn=Math.sin(r);
+  return[dx*c-dy*sn+CW/2,dx*sn+dy*c+CH/2];}
 function s2w(x,y){
   var dx=x-CW/2,dy=y-CH/2,r=view.rot;
-  if(r){var c=Math.cos(r),s=Math.sin(r),rx=dx*c+dy*s;dy=-dx*s+dy*c;dx=rx;}
+  if(r){var c=Math.cos(r),sn=Math.sin(r),rx=dx*c+dy*sn;dy=-dx*sn+dy*c;dx=rx;}
   return[dx*view.mpp+view.cx,view.cy-dy*view.mpp];}
-/* Half the width and height of the smallest north-aligned world rectangle that
-   contains the viewport.
 
-   At rot 0 these are exactly CW*mpp/2 and CH*mpp/2, which is what every tile
-   window and cull test used directly before the map could turn. Rotated they
-   are not: at 45 degrees the bounding box of a 412x780 screen is about twice
-   as wide, and at 90 degrees the two simply swap. Anything still computing
-   from the screen dimensions loses tiles at the corners the moment the map
-   comes off north - visibly, but only diagonally, which is the kind of thing
-   that looks like a loading glitch. */
+/* The canvas transform for anything that depicts ground: device pixels, then
+   the map's own rotation about the middle of the screen. Everything drawn
+   through this may use the flat w2s and comes out turned; everything drawn
+   after it is reset stays upright, which is what a pin, the GPS dot and the
+   scale bar need. */
+function mapTransform(g){
+  g.setTransform(DPR,0,0,DPR,0,0);
+  if(view.rot){
+    g.translate(CW/2,CH/2);
+    g.rotate(view.rot);
+    g.translate(-CW/2,-CH/2);
+  }
+}
 function vhw(){var c=Math.abs(Math.cos(view.rot)),s=Math.abs(Math.sin(view.rot));
   return (CW*c+CH*s)*view.mpp/2;}
 function vhh(){var c=Math.abs(Math.cos(view.rot)),s=Math.abs(Math.sin(view.rot));
@@ -1802,7 +1812,7 @@ function drawTrails(){
   ensureTrails();
   if(!TR_PACKS.length)return;
   ctx.save();
-  ctx.setTransform(DPR,0,0,DPR,0,0);
+  mapTransform(ctx);
   ctx.lineJoin="round";ctx.lineCap="round";
   var wl=view.cx-vhw(),wr=view.cx+vhw();
   var wb=view.cy-vhh(),wt=view.cy+vhh();
@@ -1900,7 +1910,9 @@ function mkErase(g){
   var c0=Math.floor((wl-NOX)/side),c1=Math.floor((wr-NOX)/side);
   var r0=Math.floor((NOY-wt)/side),r1=Math.floor((NOY-wb)/side);
   g.save();
-  g.setTransform(DPR,0,0,DPR,0,0);
+  /* The same rotation the zones were drawn under, or the mask erases the wrong
+     side of every shoreline as soon as the map turns. */
+  mapTransform(g);
   g.globalCompositeOperation="destination-out";
   for(var r=r0;r<=r1;r++)for(var c=c0;c<=c1;c++){
     if(r<0||c<0)continue;
@@ -2223,7 +2235,7 @@ function drawZones(){
        settles. Scaling both by the current one would stretch the older. */
     var C=z.cell,k2=C/view.mpp;
     if(!(k2>0)||!isFinite(k2))continue;
-    g.setTransform(DPR,0,0,DPR,0,0);
+    mapTransform(g);
     g.translate((z.ox+0.5*C-view.cx)/view.mpp+CW/2,
                 (view.cy-z.oy+0.5*C)/view.mpp+CH/2);
     g.scale(k2,k2);
@@ -2327,12 +2339,26 @@ function draw(){
   ctx.fillStyle="#e9eef2";
   ctx.fillRect(0,0,CW,CH);
   ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";
+  /* Only the raster sheets need wrapping: a tile is an axis-aligned image, so
+     the turn has to be in the canvas rather than in the arithmetic, or each
+     one lands rotated-into-place and still square-on. drawZones and drawTrails
+     set the same transform for themselves, and everything between is either a
+     screen effect or already in the map's frame. */
+  ctx.save();
+  mapTransform(ctx);
   drawTiles(activeTiles());
   drawLiveTiles(PREF.base);
+  ctx.restore();
+  ctx.setTransform(DPR,0,0,DPR,0,0);
 
   /* The basemap is a light sheet in both themes - there is no dark Kartverket
      product available anonymously - so in dark mode it is knocked back rather
-     than left glaring. */
+     than left glaring.
+
+     In screen space, deliberately. Drawn under the map's rotation this covers a
+     turned rectangle and leaves the screen's real corners bright - reported
+     from the phone as "a lighter frame appears when rotating". It dims the
+     display, not the ground, so it does not turn with it. */
   if(isDark()){ctx.fillStyle="rgba(10,12,16,.42)";ctx.fillRect(0,0,CW,CH);}
 
   /* The veil dims everything the model did not score, which is the right thing
@@ -2354,7 +2380,17 @@ function draw(){
     veilCtx.fillRect(0,0,veil.width,veil.height);
     veilCtx.globalCompositeOperation="destination-out";
     veilCtx.imageSmoothingEnabled=true;veilCtx.imageSmoothingQuality="high";
+    /* The dimming is filled in screen space, so it covers the corners whatever
+       the rotation; the hole is punched in the map's own frame, so it stays
+       over the ground the model actually scored. Doing both in one frame would
+       either leave undimmed triangles at the corners or slide the hole off the
+       data. */
+    veilCtx.save();
+    if(view.rot){veilCtx.translate(veil.width/2,veil.height/2);
+                 veilCtx.rotate(view.rot);
+                 veilCtx.translate(-veil.width/2,-veil.height/2);}
     veilCtx.drawImage(maskC,t2[0],t2[1],b2[0]-t2[0],b2[1]-t2[1]);
+    veilCtx.restore();
     veilCtx.globalCompositeOperation="source-over";
     ctx.drawImage(veil,0,0,CW,CH);
   }
@@ -2366,13 +2402,19 @@ function draw(){
      translucent blue fill is a route you cannot follow. */
   if(PREF.trails) drawTrails();
 
+  /* Everything below is for the reader rather than of the land - a pin, the
+     fix, the ring round the selected cell - and stays upright however the map
+     is turned, so these use the true screen position rather than the flat one
+     the ground is drawn with. */
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+
   if(selected>=0){var x=selected%GW,y=Math.floor(selected/GW);
-    var p=w2s(OX+(x+.5)*CELL,OY-(y+.5)*CELL);
+    var p=w2screen(OX+(x+.5)*CELL,OY-(y+.5)*CELL);
     ctx.lineWidth=3;ctx.strokeStyle="#fff";
     ctx.beginPath();ctx.arc(p[0],p[1],8,0,6.2832);ctx.stroke();
     ctx.lineWidth=1.6;ctx.strokeStyle="#1b1f26";
     ctx.beginPath();ctx.arc(p[0],p[1],8,0,6.2832);ctx.stroke();}
-  if(gpsPos){var g=w2s(gpsPos[0],gpsPos[1]);
+  if(gpsPos){var g=w2screen(gpsPos[0],gpsPos[1]);
     /* The accuracy circle is drawn to scale rather than as decoration: a 40 m
        fix that looks like a 5 m fix invites you to trust a position you do not
        have. Below a few pixels it is dropped rather than drawn misleadingly
@@ -2771,7 +2813,7 @@ function faceNorth(){
 }
 function drawSpots(){
   for(var i=0;i<SPOTS.length;i++){
-    var s=SPOTS[i],p=w2s(s.e,s.n);
+    var s=SPOTS[i],p=w2screen(s.e,s.n);
     if(p[0]<-20||p[1]<-20||p[0]>CW+20||p[1]>CH+20)continue;
     ctx.beginPath();ctx.arc(p[0],p[1],7,0,6.2832);
     ctx.fillStyle="#c8791a";ctx.fill();
@@ -2781,7 +2823,7 @@ function drawSpots(){
 function spotAt(sx,sy){
   var best=null,bd=18;
   for(var i=0;i<SPOTS.length;i++){
-    var p=w2s(SPOTS[i].e,SPOTS[i].n),d=Math.hypot(p[0]-sx,p[1]-sy);
+    var p=w2screen(SPOTS[i].e,SPOTS[i].n),d=Math.hypot(p[0]-sx,p[1]-sy);
     if(d<bd){bd=d;best=SPOTS[i];}
   }
   return best;

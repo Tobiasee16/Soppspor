@@ -4873,3 +4873,47 @@ environments, and `Math.cos(undefined)` is `NaN`. They now take the real
 viewport this app no longer has - and their views carry `rot: 0`.
 
 Suite: **811 -> 812** pytest cases, 42 assertions in the projection file alone.
+
+### 29e. Two rotation bugs, neither of them in the arithmetic
+
+29a through 29d shipped a preview with 42 green assertions about the
+projection. Both defects that followed were found from a phone in about a
+second each, and neither was a coordinate error.
+
+**"All the tiles rotate individually."** The rotation had been put inside
+`w2s`. Every assertion still passed - `w2s` and `s2w` agreed, the geometry was
+right, north was where the known answers said it should be. What broke was
+painting: a raster tile goes to `ctx.drawImage(img, x, y, w, h)`, an
+axis-aligned rectangle, so each tile moved to its rotated position and stayed
+square-on. At larger angles `br[0] - tl[0]` stops being the tile's width at
+all, so the rectangles went degenerate as well.
+
+The turn belongs in the canvas transform. The projection is now three things
+with one responsibility each: `w2s` flat, for drawing inside the transform;
+`w2screen` the true pixel, for hit-testing and for overlays that stay upright;
+`s2w` the inverse of `w2screen`, which is the one that protects a saved spot.
+
+**"A lighter frame appears when rotating as the darker square pointing north
+stays the same direction."** The dark-mode knock-back is a full-screen
+`fillRect(0,0,CW,CH)`, and it was inside the rotated block - so it filled a
+turned rectangle and left the display's real corners bright. It dims the
+screen, not the ground. The rotated block now wraps the raster sheets and
+nothing else, 77 characters of it; `drawZones` and `drawTrails` set the same
+transform for themselves, and the veil punches its hole in its own offscreen
+canvas so its composite stays flat.
+
+Three things had to be moved into the map's frame rather than the screen's for
+the same reason in reverse: the mask erase, which would otherwise cut the wrong
+side of every shoreline once turned, the veil's hole, and `spotAt`.
+
+**The lesson, and it is the third time this project has met it.** A green suite
+said the coordinates agreed with each other. It could not say what got painted,
+because nothing in it ever painted anything. 25n put it as *a check that runs
+where the code runs cannot see a problem that only exists where the code is
+used*; for a canvas app the sharper form is that **testing the geometry is not
+testing the picture.** The two guards that now exist are both structural rather
+than numeric - `w2s` must be rotation-free because its output feeds
+`drawImage`, and nothing full-screen may sit inside the rotated block - and
+both fail outright on the versions that went to the phone.
+
+Suite: **812** pytest cases, 48 assertions in the projection file.
