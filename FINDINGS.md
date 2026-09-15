@@ -4513,3 +4513,43 @@ from here and the artefacts on disk are not. That is a real inconsistency and
 it is recorded rather than glossed: anything re-exported from now on is
 unscreened, anything already in `data/processed/maps/` was screened, and their
 metadata tags are how you tell which.
+
+### 26h. The mail was never broken; the recipient was
+
+2026-09-15. Account recovery had been failing with HTTP 500, *"Error sending
+confirmation email"*, which reads like a mail outage and is why it sat on the
+blocked list for days. The Supabase auth log named the actual cause, and it was
+none of the three things the checker guesses at:
+
+```
+550 "You can only send testing emails to your own email address
+(engedaltobias@icloud.com). To send emails to other recipients, please
+verify a domain at resend.com/domains ..."
+```
+
+So the credentials were right, the connection was right, and Resend
+authenticated the sender and accepted the message. It refused the **recipient**.
+On an unverified sending domain Resend delivers only to the address on its own
+account, and every test until then had been aimed at a different address - which
+turned a recipient restriction into what looked like a server fault.
+
+Retested against the account address: **sent, and delivered.** The whole chain -
+Supabase to Resend to inbox - works and always did.
+
+Two method notes, because this cost days rather than minutes:
+
+**The checker's guesses were all wrong and all plausible.** It prints
+"credentials, unverified domain, or spam", and the truth was a fourth thing
+that none of those would have led to. A 500 with a generic string is where you
+stop guessing and read the provider's own log; that is one click in Supabase and
+it was not tried until the error had been reported twice.
+
+**A negative test needs the right input to be negative about.** Every failed run
+used `engedaltobias@gmail.com` because that is the git author address and it was
+to hand. Resend's restriction is specifically about *which* recipient, so the
+one variable that decided the outcome was the one nobody varied.
+
+What remains is a real limit rather than a fault: until `soppspor.no` is
+verified, nobody but the account holder can recover an account. The domain is
+registered and its DNS is at Norsk Hosting, so it is a records-and-wait job, not
+a blocker.

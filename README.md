@@ -135,7 +135,7 @@ correct, and is why this cannot be added to `check_backend.py`.
 
 | | |
 |---|---|
-| Custom SMTP | **still broken, but it has moved.** `python scripts/check_auth_email.py you@example.no` now returns HTTP 500, *"Error sending confirmation email"* — not the old 429. That is SMTP configured and the provider rejecting the message, so it is credentials or an unverified sending domain. See `backend/FIXING_SUPABASE.md` §4. |
+| Verify `soppspor.no` with Resend | **SMTP works.** A magic link sends and arrives — verified 2026-09-15. The only remaining limit is Resend's unverified-domain rule: mail reaches **the Resend account address alone**, so account recovery still works for nobody else. Verify the domain at resend.com/domains, add the DNS records at Norsk Hosting, then set the Supabase sender to `support@soppspor.no`. |
 | Workers KV for the conditions layer | the scheduled refresh cannot run until this exists — see *The conditions layer* below. |
 | Supabase → Redirect URLs | reported set. Confirm by opening a magic link and checking it lands on `soppspor.pages.dev` rather than localhost; nothing here can check it for you. |
 
