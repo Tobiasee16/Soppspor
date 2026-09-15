@@ -683,8 +683,10 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
       <div class="group">
         <div class="row"><span class="lbl">Bakgrunn</span>
           <div class="seg" id="segBase">
-            <button type="button" data-v="plain" aria-pressed="true">Enkelt</button>
-            <button type="button" data-v="topo" aria-pressed="false">Topo</button>
+            <button type="button" data-v="plain" aria-pressed="false">Enkelt</button>
+            <button type="button" data-v="topo" aria-pressed="true">Topo</button>
+            <button type="button" data-v="paper" id="basePaper"
+                    aria-pressed="false">Papir</button>
           </div></div>
         <div class="row" id="rowTrails"><span class="lbl">Merkede stier
             <span class="sub">turruter fra Kartverket, Turrutebasen</span></span>
@@ -800,7 +802,13 @@ var D=window.SOPP, B=window.SOPP_BASE;
 if(!D) return;
 
 /* ---------- preferences ---------- */
-var PREF={theme:"auto",species:"",sel:null,base:"plain",trails:true,sync:true};
+/* Opens on `topo`. "Enkelt" was the default until 2026-09-15, chosen so the
+   grey ground let the blue zones carry all the colour; the owner asked for
+   the topographic sheet instead, because a beginner standing in a wood is
+   reading contours and paths, not admiring the palette. Anyone who has
+   already opened the app keeps whatever they had - this is the default for
+   a fresh install, not an override. */
+var PREF={theme:"auto",species:"",sel:null,base:"topo",trails:true,sync:true};
 try{ var raw=localStorage.getItem("soppkart.prefs");
   if(raw){ var p=JSON.parse(raw); for(var k in PREF) if(k in p) PREF[k]=p[k]; }
 }catch(e){}
@@ -937,7 +945,7 @@ var RT_BASE="https://cache.kartverket.no/v1/wmts/1.0.0/";
 /* "Enkelt" maps to the grey topo rather than to a colour sheet: the design
    direction asks for something that reads like a topographic map, and grey
    ground is also what lets the blue zones carry the colour. */
-var RT_LAYER={plain:"topograatone",topo:"topo"};
+var RT_LAYER={plain:"topograatone",topo:"topo",paper:"toporaster"};
 var RT_OX=-2500000.0, RT_OY=9045984.0, RT_RES0=21664.0, RT_TILE=256, RT_ZMAX=18;
 function rtResOf(z){return RT_RES0/Math.pow(2,z);}
 /* How many tiles one screen may ask for. This is a real limit, not a safety
@@ -3911,6 +3919,21 @@ document.getElementById("swTrails").checked=!!PREF.trails;
 (function(){
   var row=document.getElementById("rowTrails");
   if(row) row.hidden=!TR;
+})();
+/* Papir is Kartverket's `toporaster`, fetched at runtime, so it only exists in
+   a build that draws runtime tiles. The Kristiansand build carries its own
+   sheets and has no paper one; offering the button there would switch to a
+   layer that silently falls back to the first embedded sheet. Same rule as the
+   row above - a control that governs nothing is worse than no control - and
+   the same `[hidden]` trap as 25j, which is why the author rule exists. */
+(function(){
+  var b=document.getElementById("basePaper");
+  if(!b)return;
+  var embedded=LAYER_NAMES.length>0;
+  if(embedded&&!layers.paper){
+    b.hidden=true;
+    if(PREF.base==="paper"){PREF.base="topo";savePrefs();}
+  }
 })();
 markSeg("segTheme",PREF.theme);markSeg("segBase",PREF.base);
 renderPill();renderLegend();

@@ -606,3 +606,35 @@ screen before showing 8.
   are published with restricted precision. Records are heavily effort-biased
   toward roads, trails and settlements — this is the single largest threat to
   the hypothesis and the reason target-group background sampling is mandatory.
+
+## Basemap sheets — Kartverket open tile cache (WMTS)
+
+| | |
+|---|---|
+| Endpoint | `https://cache.kartverket.no/v1/wmts/1.0.0/{layer}/default/utm33n/{z}/{row}/{col}.png` |
+| Capabilities | `https://cache.kartverket.no/v1/wmts/1.0.0/WMTSCapabilities.xml` |
+| Verified | **2026-09-15** |
+| Licence | CC BY 4.0, Kartverket. Attribution shown in the interface. Commercial use permitted. |
+| Limit | 10,000 tiles per IP per 24 h on the open cache. Carrier-grade NAT means a mobile operator's users can share one — see EXPANSION.md. |
+
+Layers offered by the capabilities document, all open, all in EPSG:25833 on the
+`utm33n` matrix set, zoom 0–18:
+
+| layer | what it is | in the app |
+|---|---|---|
+| `topo` | the standard topographic sheet | **"Topo" — the default since 2026-09-15** |
+| `topograatone` | the same, greyscale | "Enkelt" |
+| `toporaster` | the classic paper-map raster | "Papir", added 2026-09-15 |
+| `sjokartraster` | nautical chart | not offered — no reason to yet |
+
+Checked by fetching a tile from each: all return `image/png`, 256×256. Note
+that a tile over open sea or outside Norway is a legitimate near-blank PNG of
+about 850 bytes, which looks like an error response and is not — worth knowing
+before anyone concludes the service is down.
+
+**Satellite imagery is not available here and is not open.** Norway's
+orthophoto is *Norge i bilder*. `https://wms.geonorge.no/skwms1/wms.nib`
+answers a `ServiceExceptionReport` reading `*** HTTP TCP/IP AUT ***`, i.e. it
+requires authentication, and the older `opencache.statkart.no` host no longer
+resolves at all. So an in-app satellite layer needs a Geonorge agreement of the
+same kind AR5 is blocked on. Checked 2026-09-15.

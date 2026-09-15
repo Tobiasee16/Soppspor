@@ -4659,3 +4659,48 @@ been fetched. Probing on 2026-09-15 found `geo.ngu.no/mapserver/BerggrunnWMS2`
 answers HTTP 200 with a MapServer error - *CGI variable "map" is not set* - so
 the service address is wrong rather than the service absent, and resolving it
 against the Geonorge catalogue is an unstarted hour of work.
+
+### 27b. The round numbers were already round; the sentence was wrong
+
+The owner asked for round numbers in the zone rings, after the README had
+carried this as an open judgement call: Om said the top 30 / 15 / 5 %, and the
+realised areas measured **37.8 / 11.9 / 1.0 %**. The obvious reading is that
+the thresholds needed recalibrating. They did not.
+
+Reading the path end to end rather than trusting that summary:
+
+1. A cell's byte is its rank against the habitat within **25 km** (25i).
+2. `habitatField` smooths that surface, because a contour around single 128 m
+   cells is a contour around noise.
+3. Smoothing pulls the extremes in hard - the comment in `export_zone_tiles.py`
+   says 5 % of cells sit above the 95th percentile before the blur and none
+   after - so the field is **ranked a second time**, against
+   `smoothed_rank_lut`: a 256-entry empirical CDF of the smoothed surface
+   **over the whole country**.
+4. The contours cut that re-ranked field at 0.70 / 0.85 / 0.95.
+
+Because step 3 is a national CDF, step 4 selects exactly 30 / 15 / 5 % of
+scored cells in Norway. **By construction, not by tuning.** The 37.8 / 11.9 /
+1.0 % was measured over Kristiansand, a subset with no obligation to match the
+national split - and it does not, in both directions at once: more ground than
+average above the 70th, far less above the 95th, which is a fair description of
+broadly decent coastal lowland with no extremes in it.
+
+So there was nothing to recalibrate, and recalibrating would have been the
+error. Making each 25 km neighbourhood contain its own 30 / 15 / 5 % is
+precisely the failure 25i fixed from the other side: rank nationally and the
+whole of southern Norway is one colour; rank purely locally and every region
+looks equally good, including the ones with no good ground in them.
+
+**What was actually wrong was the sentence.** Om said the bands were the top
+30 / 15 / 5 % "av terrenget rundt deg - omtrent 25 km i hver retning", which
+describes step 1 and attributes step 4 to it. The two-stage shape is the honest
+thing and is now what Om says: **the score is local, the thresholds are
+national.** That is also the property worth having, and it is why a kommune
+with little good mushroom ground gets few zones instead of having its own best
+cells coloured in regardless of how weak they are.
+
+Worth keeping as a method note: this sat in the README for days as a judgement
+call about a constant, because the measurement was taken over one kommune and
+compared against a claim about a different denominator. **When a number
+disagrees with a document, check what each is counting before changing either.**

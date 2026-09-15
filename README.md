@@ -184,9 +184,15 @@ dist_norge --branch check` gives a preview URL in about nine seconds.
 - With several species drawn at once the band fills thin as `1/sqrt(n)`. Whether
   that still reads clearly at four species is a question about how it looks in
   the hand.
-- Om describes the rings as the top 30 / 15 / 5 % of the ground around you.
-  Measured over Kristiansand they are 37.8 / 11.9 / 1.0 %. The top ring is
-  rarer than advertised — conservative, but the copy states the numbers flatly.
+- ~~Om describes the rings as the top 30 / 15 / 5 % of the ground around you.~~
+  **Resolved 2026-09-15, and the code was right.** The bands are cut on a field
+  that has been re-ranked against the *national* CDF of the smoothed surface,
+  so they select exactly 30 / 15 / 5 % of scored cells in Norway — round by
+  construction. The 37.8 / 11.9 / 1.0 % figures were measured over Kristiansand
+  alone, which is a subset and has no reason to match. What was wrong was the
+  copy: Om said the comparison was against the 25 km neighbourhood, when the
+  neighbourhood produces the *score* and the country sets the *thresholds*. Om
+  now says both halves. See FINDINGS 27b.
 
 **Not started**: no native wrapper exists. There is no `ios/` directory and no
 Capacitor. Testers install it from the browser; the App Store is a separate
