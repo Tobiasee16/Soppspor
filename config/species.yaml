@@ -57,19 +57,50 @@ species:
 # interface with its own measured AUC next to it.
 #
 # Selection rule, applied before any model was fitted: species people actually
-# go looking for, with enough Agder records to train on. Counts are Artskart
-# TotalCount on the access date, via filter.taxons + filter.countys=42, and
-# filter.areas=4204 for the kommune.
+# go looking for, with enough records to train on. Counts are Artskart
+# TotalCount on the access date.
 #
-# Deliberately excluded, with the reason recorded so it is not quietly revisited:
-#   Albatrellus ovinus (faresopp)      117 Agder but **0 in Kristiansand**.
-#                                      A map for a species never recorded in the
-#                                      prediction extent is extrapolation with
-#                                      nothing to check it against.
-#   Macrolepiota procera (parasollsopp) 31 in Agder, below the 50-record floor.
-#   Hydnum rufescens (rødgul piggsopp) 98 Agder / 7 Krs, and routinely recorded
-#                                      as H. repandum; the pair is not cleanly
-#                                      separated in the source.
+# The extent moved in September 2026 and so did the count that matters. The
+# first five below were chosen on Agder numbers (filter.countys=42, and
+# filter.areas=4204 for the kommune) and carry them. Everything added from
+# 2026-09-16 carries `norway_records` and `nordland_records` instead, because
+# Nordland is the held-out ground where the transfer AUC is measured and where
+# the synthetic control has to be beaten - a national total says nothing about
+# whether a species can reach the picker. For scale: blek piggsopp ships on 42
+# Nordland records, and the interface labels anything under 20 held-out finds
+# as «få funn».
+#
+# Deliberately excluded, with the reason recorded so it is not quietly revisited.
+#
+# Rechecked 2026-09-16 against the extents that now apply. The list used to be
+# argued from Agder counts with Kristiansand as the held-out ground, and the
+# expansion to the whole country quietly expired two of the three reasons -
+# which is why the note says which numbers it was decided on.
+#
+#   Hydnum rufescens (rødgul piggsopp)  1 093 Norway / 19 Nordland. The count is
+#                                      no longer the objection: it beats species
+#                                      that ship. The objection is that the
+#                                      source routinely records it as
+#                                      **Hydnum repandum**, which is already on the
+#                                      map, so the two presence sets are partly
+#                                      the same observations. Two maps built
+#                                      from one set of records, each labelled a
+#                                      different mushroom, is a confound we
+#                                      would be adding knowingly.
+#   Macrolepiota procera (parasollsopp)  364 Norway but **0 in Nordland**. The
+#                                      old reason - below the 50-record floor in
+#                                      Agder - has expired; this one is stronger.
+#                                      With nothing in the held-out extent there
+#                                      is no transfer AUC to measure and no way
+#                                      for it to clear the synthetic control, so
+#                                      it cannot reach the picker however well it
+#                                      fits.
+#   Lactarius utilis (blek hulriske)   Not separable in the source. Artskart
+#                                      returns taxon 40466 for both this and
+#                                      L. trivialis, so an entry for it would
+#                                      fit the same records twice under two
+#                                      names. tests/test_species_config.py holds
+#                                      the line.
 #
 # taxon ids resolved 2026-09-12 via publicapi/api/taxon?term=<name>
 additional_species:
@@ -130,6 +161,99 @@ additional_species:
       Mixed forest, mossy ground, often with the chanterelles. The thinnest
       presence set here and the one whose Kristiansand figure rests on fewest
       records - read its transfer AUC with that in mind.
+
+  # -------------------------------------------------------------------------
+  # Added 2026-09-16, at the owner's request: edible russulas and milk caps,
+  # plus gul trompetsopp and fåresopp. Counts are Artskart TotalCount that day.
+  #
+  # The request was for "edible russulas and milk caps" as groups. They are
+  # fitted as named species instead, because CLAUDE.md forbids pooling and the
+  # ecology says the same thing louder: L. deterrimus is spruce-obligate,
+  # L. torminosus birch-obligate, R. decolorans a poor-ground pine and spruce
+  # species. Pooled, their only shared signal is where people walk, which is the
+  # artefact this whole pipeline exists to remove.
+  #
+  # Two of these are thin in the held-out extent and are expected to struggle.
+  # They are fitted anyway and the registered bar decides, rather than a person
+  # deciding in advance which species deserve to be measured.
+
+  - key: "lactarius_deterrimus"
+    scientific_name: "Lactarius deterrimus"
+    vernacular_no: "granmatriske"
+    vernacular_en: "false saffron milkcap"
+    artskart_taxon_id: 40391
+    norway_records: 3473     # 2026-09-16
+    nordland_records: 198
+    habitat_signal: >-
+      Obligately with spruce. The counterpart to L. versipelle's birch: between
+      them, SR16 treslag either carries real weight in both directions or it
+      carries none, and one species could not tell us which.
+
+  - key: "lactarius_torminosus"
+    scientific_name: "Lactarius torminosus"
+    vernacular_no: "skjeggriske"
+    vernacular_en: "woolly milkcap"
+    artskart_taxon_id: 161560
+    norway_records: 3575
+    nordland_records: 235
+    habitat_signal: >-
+      Obligately with birch, and the largest held-out set of anything here. A
+      second birch species in a different genus from L. versipelle, so a
+      treslag effect that appears in both is harder to read as noise.
+
+  - key: "russula_aeruginea"
+    scientific_name: "Russula aeruginea"
+    vernacular_no: "grønnkremle"
+    vernacular_en: "green brittlegill"
+    artskart_taxon_id: 40489
+    norway_records: 3220
+    nordland_records: 136
+    habitat_signal: >-
+      With birch, on poorer well-drained ground, common and widespread. Expected
+      to be the weakest of this batch, which is the point of including it: a
+      generalist to read the specialists against.
+
+  - key: "russula_decolorans"
+    scientific_name: "Russula decolorans"
+    vernacular_no: "skiftende kremle"
+    vernacular_en: "copper brittlegill"
+    artskart_taxon_id: 40537
+    norway_records: 2498
+    nordland_records: 119
+    habitat_signal: >-
+      Pine and spruce on poor, mossy, often boggy ground. AR50 mire and stand
+      type should both bite, in the opposite direction to the rich-ground
+      species already in the set.
+
+  - key: "craterellus_lutescens"
+    scientific_name: "Craterellus lutescens"
+    vernacular_no: "gul trompetsopp"
+    vernacular_en: "yellowfoot"
+    artskart_taxon_id: 39035
+    norway_records: 1633
+    nordland_records: 22
+    habitat_signal: >-
+      Damp mossy coniferous forest and bog margins, often on richer ground - a
+      close ecological neighbour of C. tubaeformis. Thin in the held-out extent,
+      so expect «få funn» beside its accuracy if it ships at all.
+      Added because "yellowfoot" names this as well as traktkantarell, and only
+      traktkantarell was already modelled.
+
+  - key: "albatrellus_ovinus"
+    scientific_name: "Albatrellus ovinus"
+    vernacular_no: "fåresopp"
+    vernacular_en: "sheep polypore"
+    artskart_taxon_id: 40238
+    norway_records: 1690
+    nordland_records: 11
+    habitat_signal: >-
+      Spruce forest, often on richer ground. **The thinnest held-out set in the
+      project**: 11 records against blek piggsopp's 42, so its transfer interval
+      will be wide and it is more likely than not to fail the control. Fitted
+      rather than excluded in advance, because the registered bar exists to make
+      that call on measured numbers and the marginal cost of one more species in
+      a run already happening is small. If it fails it is reported and drawn
+      nowhere, like blek piggsopp on the Agder model.
 
 null_control:
   key: "synthetic_null"
