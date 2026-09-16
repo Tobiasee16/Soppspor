@@ -5227,3 +5227,114 @@ Both halves of the lesson are the same one. **One measurement is not a rate.**
 23e over-trusted a single slow run as evidence about the estimate; this
 over-trusted a single slow run as evidence about the job. The estimate was
 sound both times.
+
+## 32. A day of interface bugs, and what they had in common - 2026-09-17
+
+Section 31 covers the six species. This is the rest of the same day: a run of
+user-reported interface faults, recorded because four of them share a shape and
+that shape is worth recognising sooner next time.
+
+**Every one of them was a thing that already worked, measured wrongly.** None
+was a missing feature. Each was code doing exactly what it said while the
+reader experienced something else, which is why none of them showed up in a
+test until somebody used the app.
+
+### 32a. The rotated map ignored its own rotation
+
+Panning did `view.cx -= dx * mpp`, the screen-to-world direction only while the
+map points north. Turned a quarter turn, dragging right walked the view west
+instead of south. The momentum glide carried a second copy of the same two
+lines, which is how the first survived being noticed.
+
+Everything else that moves the view - pinch, wheel, double-tap - already
+anchored through `s2w` and was correct at any angle. That is why the map held
+its ground under two fingers and only the drag felt wrong, and it is the clue
+that should have been read faster.
+
+The fix is one helper, and the test asserts the thing a drag *means* rather than
+a sign convention: the ground under the finger stays under the finger, checked
+at five rotations.
+
+### 32b. A colour table that had silently run out
+
+`SPCOL` named seven species. The national build has shipped eight since
+September, so blek piggsopp fell through to `SPFALLBACK`, which **cycles**, and
+drew in traktkantarell's blue - same dot in the picker, same colour on the map.
+Live, and unnoticed. Adding six species would have made it seven collisions.
+
+Two things worth keeping from this. The guard has to span two files, because
+the species list is in `config/species.yaml` and the colours are in the shell,
+so neither side could catch the mismatch alone. And **the measurement changed
+the plan**: the palette comment says seven is about the limit for categorical
+colour, so the assumption was that fourteen species needed a redesign. An
+unconstrained search for fourteen colours returns black, pure yellow and
+near-white - unusable as translucent fills, which is why Okabe-Ito's yellow was
+swapped for a charcoal here originally. Constrained to the lightness and chroma
+band the originals occupy, keeping the seven and adding seven costs **nothing**:
+worst-case separation stays at dE 13.6, set by a pair that was already the
+bottleneck. The redesign was never needed.
+
+### 32c. A gesture that existed and could not be reached
+
+The species sheet was dismissable by dragging. It had been all along. The drag
+lived on the `.grab` notch: 36x5 px, about a fifth of a fingertip. So a reader
+pulls the sheet by the thing that looks like a handle, misses, and concludes it
+does not drag.
+
+This took three passes, and the last one is the lesson. Pass one added the
+header - still not enough, because the header is ~44 px against a 70 px
+threshold, so the finger leaves it mid-pull. Pass two moved to window-level
+listeners so nothing depended on `setPointerCapture`, which sits behind a
+`try/catch` and is one silent failure from a stalled drag. Pass three found the
+actual cause: the exclusion list skipped anything inside a `button`, and **the
+species list is a column of buttons**. "The whole sheet is the handle" had left
+the notch, the header and a caption.
+
+A press on a row may start a drag now; a drag swallows the click it would
+otherwise deliver, so dismissing does not also pick a species. A tap that never
+moved still reaches the row.
+
+**My tests passed throughout.** They drove the handler with fake elements, which
+proves the wiring and says nothing about whether a finger can reach it.
+
+### 32d. The search ranked by the wrong question
+
+Reported as "the search experience is buggy". Two sheet fixes later it turned
+out the complaint was about the *results*, and one query against the live
+register showed it immediately.
+
+Rows were sorted by kind, then purely by distance from the middle of the screen.
+Kartverket answers *Bergen* with the city first; re-sorted by distance from
+Kristiansand, an outfield called Bergen in Fyresdal beats the city by 300 km.
+The register's relevance order was good and was being discarded.
+
+Two more, both visible in one API call:
+
+* The same name arrives once per feature it belongs to, so *Bergen* comes back
+  as a By, a Kommune, a Gard and an Utmark - four rows a reader cannot tell
+  apart, crowding out the other seven answers.
+* `fuzzy=true` was hurting. *Bergve* fuzzy returns 3,464 hits led by *Bergva*, a
+  different word. The same query as a prefix returns 78 led by *Bergveien*.
+
+Order is now relevance, then how likely that kind of place is to be searched
+for, then distance. Distance still decides when the name does not - Norway has
+9,284 *Storvatnet* and the near one is the one you want - it is simply the last
+question rather than the first.
+
+### 32e. The habit this is all arguing for
+
+Section 25i already says to check a national number again over the subsets a
+user occupies. This is the interface version of the same thing, and it cost
+most of a day:
+
+> **Reading the code tells you what it does. Only running it tells you what it
+> returns.**
+
+The search was diagnosed in one `curl` after two wrong fixes made from the
+source alone. The palette question was settled by a search over real colour
+space after an assumption that would have caused a redesign. The pan bug was
+found by asking what a drag means rather than by reading the arithmetic.
+
+And the corollary, from 32c: a test that exercises a function is not a test that
+exercises the feature. Fake elements will happily confirm a listener is attached
+to something no finger can touch.
