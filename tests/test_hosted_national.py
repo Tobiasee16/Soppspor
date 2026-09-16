@@ -158,6 +158,46 @@ class TestTheProse:
         assert bh.nb(f["pool_thinned"]) in about["ab_s2"]
         assert bh.tall(f["fylker"]) in about["ab_s4"]
 
+    def test_the_drop_section_cannot_contradict_itself(self, built):
+        """The heading was the one piece of that section the build could not set.
+
+        Agder dropped blek piggsopp, so the markup says "Én art kom ikke
+        gjennom". Nationally every species clears the control, and `ab_drop`
+        duly ends "in this edition every species got through" - directly under
+        a heading saying one had not, with a closing paragraph about a species
+        that does not exist. All three are addressable now, and this pins them
+        to the payload rather than to whichever build was current when the
+        markup was typed.
+        """
+        payload, _, _ = built
+        about = payload["about"]
+        excluded = payload["meta"]["excluded_species"]
+        assert "ab_droph" in about and "ab_dropkeep" in about
+        if excluded:
+            assert "ikke gjennom" in about["ab_droph"], about["ab_droph"]
+            assert "alle artene gjennom" not in about["ab_drop"]
+        else:
+            assert about["ab_droph"] == "Alle artene kom gjennom kontrollen"
+            assert "alle artene gjennom" in about["ab_drop"]
+            # No dangling "it" for a species that was never dropped.
+            assert not about["ab_dropkeep"].startswith("Den er")
+
+    def test_it_does_not_claim_the_deposits_layer_measures_lime(self, built):
+        """Two findings against one sentence.
+
+        FINDINGS 27: løsmasser classifies depositional *origin*, not chemistry,
+        so the layer cannot say whether ground is calcareous. FINDINGS 30 then
+        measured the chemistry directly against NGU's own kalkinnhold map and
+        found the species separated by about a tenth of a standard deviation.
+        "Kalkrikt eller surt underlag styrer sopp sterkt" was wrong on both
+        counts and shipped on the live site.
+        """
+        payload, _, _ = built
+        about = payload["about"]
+        prose = " ".join(v for v in about.values() if isinstance(v, str))
+        assert "styrer sopp sterkt" not in prose
+        assert "avsetning" in about["ab_layers"], about["ab_layers"]
+
     def test_a_layout_change_in_a_report_stops_the_build(self, tmp_path,
                                                         monkeypatch):
         bad = tmp_path / "model_results_norge.md"
@@ -371,6 +411,15 @@ class TestTheManifestDescribesTheBuildItShipsWith:
 
     Needs no exported run: the description is a function of the build flag.
     """
+
+    def test_the_markup_makes_no_lime_claim_either(self):
+        """The fallback copy is not shipped, and is read while editing.
+
+        It carried the same sentence as the generated copy, so a reader fixing
+        one and not the other leaves the claim alive in the file everybody
+        opens. Needs no exported run - it is a fact about the markup.
+        """
+        assert "styrer sopp sterkt" not in markup()
 
     def test_the_national_build_does_not_promise_marked_routes(self):
         desc = json.loads(bh.manifest_text(national=True))["description"].lower()

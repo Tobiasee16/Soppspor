@@ -229,8 +229,9 @@ def national_about(f: dict, null_auc: float | None, excluded: list,
             "<li><b>Skog</b> fra NIBIO SR16: treslag, alder, kronedekning, "
             "volum, grunnflate, trehøyde, bonitet</li>"
             "<li><b>Løsmasser</b> fra NGU: morene, breelv, marin leire, torv, "
-            "bart fjell og fem til &mdash; kalkrikt eller surt underlag styrer "
-            "sopp sterkt</li>"
+            "bart fjell og fem til. Laget sier hva slags <i>avsetning</i> "
+            "grunnen er, ikke hvor kalkrik den er &mdash; og det skiller "
+            "artene svakt.</li>"
             "<li><b>Arealtype</b> fra NIBIO AR50: skog, myr, dyrka mark, "
             "bebygd, vann</li>"
             "<li><b>Høstnedbør</b> fra MET seNorge: 9. august&ndash;20. "
@@ -355,15 +356,22 @@ def national_about(f: dict, null_auc: float | None, excluded: list,
             "treffsikkerheten er målt på. Er den lav, er tallet en pekepinn og "
             "ikke et mål &mdash; artslisten merker de tynneste med «få funn».",
         "ab_weak":
-            "<li><b>Skogstruktur og høyde bærer modellen.</b> Grunnflate, "
-            "volum og høyde over havet betyr mest. Høyde henger tett sammen "
-            "med avstand til sjø og til folk, så noe av «økologien» kan være "
-            "geografi i forkledning.</li>"
+            "<li><b>Skogstruktur og terreng bærer modellen.</b> Grunnflate, "
+            "høyde over havet, helning og himmelretning ligger så tett sammen "
+            "på toppen at det ikke er grunnlag for å rangere dem. Høyde "
+            "henger tett sammen med avstand til sjø og til folk, så noe av "
+            "«økologien» kan være geografi i forkledning.</li>"
             "<li><b>Skogdataene er modellerte, ikke målte.</b> SR16 treffer "
             "riktig treslag i omtrent to av tre ruter, og volumavviket er "
             "30&ndash;60&nbsp;% av snittet.</li>"
             "<li><b>Ingen fravær.</b> Uten steder noen har lett forgjeves, kan "
             "modellen ikke skille «dårlig sted» fra «ingen har vært der».</li>"
+            "<li><b>Underlaget skiller artene dårlig.</b> Kalkrik grunn regnes "
+            "som viktig for sopp, og vi har målt det mot NGUs kart over "
+            "kalkinnhold i berggrunnen: alle artene her står på litt rikere "
+            "fjell enn soppen rundt dem, men forskjellen <i>mellom</i> artene "
+            "er for liten til å tegne et kart av. Modellen går derfor på "
+            "løsmasser, ikke på kalk.</li>"
             f"<li><b>Bare {held} er holdt unna.</b> Resten av kartet er "
             "terreng modellen er tilpasset på. Treffsikkerheten i tabellen er "
             f"målt på {held}, og det er det tallet som sier noe om hvor mye "
@@ -391,10 +399,36 @@ def national_about(f: dict, null_auc: float | None, excluded: list,
             "funn», hviler treffsikkerheten på en håndfull registreringer og "
             "bør leses som en pekepinn, ikke som et mål.",
     }
-    if not excluded:
-        # The markup's section describes an exclusion that did not happen here.
-        about["ab_drop"] = (
-            about["ab_drop"] + " <b>I denne utgaven kom alle artene gjennom.</b>")
+    # The markup describes an exclusion that happened in one build and not the
+    # other. Agder dropped blek piggsopp; nationally every species cleared the
+    # control, and for as long as that was true the live page carried the
+    # heading "Én art kom ikke gjennom" directly above a sentence saying they
+    # all did. The heading and the closing paragraph are addressable now, so
+    # the three pieces cannot disagree.
+    n_ex = len(excluded)
+    about["ab_droph"] = (
+        "Alle artene kom gjennom kontrollen" if not n_ex else
+        "Én art kom ikke gjennom" if n_ex == 1 else
+        f"{tall(n_ex).capitalize()} arter kom ikke gjennom")
+    if n_ex:
+        about["ab_dropkeep"] = (
+            ("Den er" if n_ex == 1 else "De er")
+            + " ikke slettet fra analysen &mdash; tallet står i rapportene, "
+            "og det ville vært juks å fjerne en art fordi den gjorde det "
+            "dårlig. Men det er forskjell på hva som skal stå i en tabell og "
+            "hva som skal tegnes som en blå sone til noen som skal bruke "
+            "lørdagen på å gå dit.")
+    else:
+        about["ab_drop"] += " <b>I denne utgaven kom alle artene gjennom.</b>"
+        about["ab_dropkeep"] = (
+            "Regelen har bitt før. I den første utgaven av dette kartet, som "
+            "bare hadde Agder å gå på, kom <b>blek piggsopp</b> ikke gjennom, "
+            "og da ble den ikke tegnet. Tallene for hver art står i rapportene "
+            "uansett hvordan den gjorde det &mdash; det ville vært juks å "
+            "fjerne en art fra analysen fordi den gjorde det dårlig. Men det "
+            "er forskjell på hva som skal stå i en tabell og hva som skal "
+            "tegnes som en blå sone til noen som skal bruke lørdagen på å gå "
+            "dit.")
     return about
 
 

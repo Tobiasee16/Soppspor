@@ -547,7 +547,8 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
             <li><b>Skog</b> fra NIBIO SR16: treslag, alder, kronedekning, volum,
               grunnflate, trehøyde, bonitet</li>
             <li><b>Løsmasser</b> fra NGU: morene, breelv, marin leire, torv, bart fjell
-              og fem til &mdash; kalkrikt eller surt underlag styrer sopp sterkt</li>
+              og fem til. Laget sier hva slags <i>avsetning</i> grunnen er, ikke hvor
+              kalkrik den er &mdash; og det skiller artene svakt</li>
             <li><b>Arealtype</b> fra NIBIO AR50: skog, myr, dyrka mark, bebygd, vann</li>
             <li><b>Høstnedbør</b> fra MET seNorge: 9. august&ndash;20. oktober,
               snitt 1991&ndash;2020</li>
@@ -647,14 +648,14 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
 
         </div>
 
-        <h2>Én art kom ikke gjennom</h2>
+        <h2 id="ab_droph">Én art kom ikke gjennom</h2>
         <p id="ab_drop">Regelen er satt på forhånd: <b>en art vises bare hvis den slår kontrollen
           på terreng modellen aldri har sett.</b> Kontrollen er falske funn uten
           økologi i seg. Klarer ikke en art å skille seg fra den, har den ikke vist
           at den kan noe om Kristiansand, og da hører den ikke hjemme på et kart
           noen skal gå etter.</p>
         <div class="warn" id="dropped"></div>
-        <p>Den er ikke slettet fra analysen &mdash; tallet står i rapportene, og
+        <p id="ab_dropkeep">Den er ikke slettet fra analysen &mdash; tallet står i rapportene, og
           det ville vært juks å fjerne en art fordi den gjorde det dårlig. Men det
           er forskjell på hva som skal stå i en tabell og hva som skal tegnes som
           en blå sone til noen som skal bruke lørdagen på å gå dit.</p>
@@ -738,7 +739,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
       <p class="glabel">Personvern</p>
       <div class="about" style="margin-bottom:10px">
         <p><b>Hva vi lagrer.</b> Stedene du lagrer: posisjon, dato, notatet ditt,
-          og hvilken art kartet viste. Ingenting annet. Ingen navn, ingen
+          og arten du selv velger. Ingenting annet. Ingen navn, ingen
           telefonnummer, ingen sporing, ingen analyseverktøy, ingen annonser.
           Legger du til en e-postadresse, lagres den for at du skal kunne logge
           inn igjen.</p>
