@@ -229,12 +229,22 @@ const OSLO = [262000, 6650000];   // roughly the middle of the city, EPSG:25833
   })();
 
   function lift({ open = true, innerHeight = 800, vvHeight = 800, offsetTop = 0,
-                  hasVV = true } = {}) {
-    const sheet = { style: {}, classList: { contains: () => open } };
+                  hasVV = true, safeTop = 0, hostBottom = null } = {}) {
+    /* `bottom` is measured from the sheet's containing block, which stops above
+       the tab bar rather than at the window's edge, so the element has to be
+       asked where its own bottom is. Default it to a tab bar's worth above the
+       window, which is the case that was getting this wrong. */
+    const host = { getBoundingClientRect: () =>
+      ({ bottom: hostBottom === null ? innerHeight - 51 : hostBottom }) };
+    const sheet = { style: {}, offsetParent: host,
+                    classList: { contains: () => open } };
     const win = hasVV
       ? { innerHeight, visualViewport: { height: vvHeight, offsetTop } }
       : { innerHeight };
-    new Function("findSheet", "window", src + "findLift();")(sheet, win);
+    const doc = { getElementById: (id) =>
+      (id === "satProbe" ? { offsetHeight: safeTop } : null) };
+    new Function("findSheet", "window", "document", src + "findLift();")(
+      sheet, win, doc);
     return sheet.style;
   }
 
@@ -243,13 +253,32 @@ const OSLO = [262000, 6650000];   // roughly the middle of the city, EPSG:25833
         st.bottom === "" && st.maxHeight === "",
         `bottom ${JSON.stringify(st.bottom)}, maxHeight ${JSON.stringify(st.maxHeight)}`);
 
+  /* The lift is measured to the sheet's own containing block, not to the
+     window. Getting that wrong raised the sheet by exactly one tab bar and let
+     a full list run off the top - reported twice, and only reproducible once an
+     iOS keyboard was faked in a real browser. Host bottom 749, visible bottom
+     450, so the sheet is lifted 299 rather than 350. */
   st = lift({ innerHeight: 800, vvHeight: 450 });
-  check("an overlaying keyboard lifts the sheet clear of it",
-        st.bottom === "350px", st.bottom);
-  check("and caps it to what is still visible, which is the half that was missing",
+  check("an overlaying keyboard lifts the sheet to where the visible area ends",
+        st.bottom === "299px", st.bottom);
+  check("and caps it to what is still visible",
         st.maxHeight === "442px", st.maxHeight);
   check("the cap is never taller than the visible viewport",
         parseInt(st.maxHeight, 10) <= 450, st.maxHeight);
+
+  /* A notched phone: filling the visible viewport exactly still tucks the notch
+     and the header under the status bar. */
+  st = lift({ innerHeight: 800, vvHeight: 450, safeTop: 47 });
+  check("a status bar is reserved rather than covered",
+        st.maxHeight === "395px", st.maxHeight);
+  check("and reserving it does not move the sheet's bottom edge",
+        st.bottom === "299px", st.bottom);
+
+  /* A page with no tab bar under it: the containing block reaches the window,
+     and then the lift really is the keyboard height. */
+  st = lift({ innerHeight: 800, vvHeight: 450, hostBottom: 800 });
+  check("with no chrome below the sheet the lift is the whole gap",
+        st.bottom === "350px", st.bottom);
 
   /* Android resizes the window instead of overlaying, so there is nothing to
      lift and the CSS cap is already a percentage of the smaller window. */

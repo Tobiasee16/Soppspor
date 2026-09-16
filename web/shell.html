@@ -172,6 +172,12 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sf);
 @supports (height:1dvh){.card{max-height:74dvh}}
 .card.on{transform:translateY(0)}
 @media (prefers-reduced-motion:reduce){.card{transition:none}}
+/* env() cannot be read from JavaScript, and findLift needs the top inset: a
+   sheet that fills the visible viewport exactly still puts its notch under the
+   status bar on a notched phone. A zero-width probe is the standard way to get
+   the number, and costs nothing. */
+#satProbe{position:fixed;top:0;left:0;width:0;height:env(safe-area-inset-top,0px);
+  pointer-events:none;visibility:hidden}
 .grab{width:36px;height:5px;border-radius:3px;background:var(--ink-4);margin:8px auto 10px;
   opacity:.55;cursor:grab;touch-action:none}
 /* The notch is 36x5 px. It looks like the thing you pull, and it is far too
@@ -551,6 +557,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
       landet.</div>
 
     <!-- place and address search, opened from the map -->
+    <div id="satProbe"></div>
     <div class="card" id="findSheet" role="dialog" aria-label="Søk">
       <div class="grab"></div>
       <div class="cardTop">
@@ -3746,9 +3753,21 @@ function findLift(){
   if(!findSheet.classList.contains("on")){
     findSheet.style.bottom="";findSheet.style.maxHeight="";return;}
   var vv=window.visualViewport;
-  var gap=Math.max(0,Math.round(window.innerHeight-vv.height-vv.offsetTop));
+  /* Where the visible area ends, in window coordinates. */
+  var seen=vv.offsetTop+vv.height;
+  var gap=Math.max(0,Math.round(window.innerHeight-seen));
   if(gap>40){
-    findSheet.style.bottom=gap+"px";
+    /* `bottom` is measured from the containing block, and the containing block
+       is not the window - it stops above the tab bar. Lifting by the keyboard
+       height measured from `innerHeight` therefore raises the sheet by one tab
+       bar too many, and a full list then runs off the top.
+       
+       Measured, with an iOS-style keyboard faked in Chromium and twenty
+       suggestions up: the sheet ended at -43px, which is the tab bar to the
+       pixel. This asks the element where its own bottom actually is instead. */
+    var host=findSheet.offsetParent;
+    var hostBottom=host?host.getBoundingClientRect().bottom:window.innerHeight;
+    findSheet.style.bottom=Math.max(0,Math.round(hostBottom-seen))+"px";
     /* Lifting alone was not enough, and this is the half that was missing.
        `.card` caps at 74% of its parent, which is the whole window - a height
        that stops meaning anything once the keyboard covers a third of it. The
@@ -3756,7 +3775,12 @@ function findLift(){
        took the suggestions with it: reported as results disappearing above the
        screen exactly when they appeared. Cap it to what is actually visible and
        the list scrolls inside the sheet instead. */
-    findSheet.style.maxHeight=Math.max(160,Math.round(vv.height)-8)+"px";
+    /* Leave the status bar alone: filling the visible viewport exactly still
+       tucks the notch and the header under it on a notched phone. */
+    var probe=document.getElementById("satProbe");
+    var safeTop=(probe&&probe.offsetHeight)||0;
+    findSheet.style.maxHeight=
+      Math.max(160,Math.round(vv.height)-safeTop-8)+"px";
   }else{
     findSheet.style.bottom="";findSheet.style.maxHeight="";
   }

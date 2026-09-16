@@ -142,6 +142,97 @@ async function measure(page) {
         `sheet ${broken.sheetTop}, field ${broken.fieldTop}, ` +
         `scrolls ${broken.listScrolls}`);
 
+  await ctx.close();
+
+  /* ------------------------------------------------ the iOS keyboard case --
+   * The one that was actually reported, twice, and could not be reproduced any
+   * other way. Chromium shrinks the window for a keyboard; iOS does not - it
+   * leaves innerHeight alone and shrinks the visual viewport underneath it. So
+   * the real case has to be built by hand, and once it was, the fault appeared
+   * on the first run.
+   *
+   * `bottom` is measured from the sheet's containing block, which stops above
+   * the tab bar rather than at the window's edge. Lifting by a keyboard height
+   * measured from innerHeight therefore raised the sheet by one tab bar too
+   * many: with twenty suggestions up it ended 43px above the screen - the tab
+   * bar to the pixel - taking the search field behind the status bar with it,
+   * which is why the note under it read as cut in half. */
+  const ios = await browser.newContext({
+    viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const p2 = await ios.newPage();
+  await p2.addInitScript(() => {
+    try { localStorage.setItem("soppkart.welcomed", "1"); } catch (e) {}
+    const t = new EventTarget();
+    t.height = window.innerHeight; t.offsetTop = 0; t.offsetLeft = 0;
+    t.width = window.innerWidth; t.scale = 1;
+    Object.defineProperty(window, "visualViewport", { get: () => t });
+    window.__keyboard = (px) => {
+      t.height = window.innerHeight - px;
+      t.dispatchEvent(new Event("resize"));
+    };
+  });
+  await p2.goto("file:///" + PAGE.replace(/\\/g, "/"));
+  await p2.waitForSelector("#findBtn", { timeout: 20000 });
+  await p2.click("#findBtn");
+  await p2.waitForTimeout(450);
+  await p2.evaluate(() => window.__keyboard(336));
+  await p2.waitForTimeout(250);
+  await p2.evaluate((n) => {
+    const l = document.getElementById("findList");
+    l.innerHTML = "";
+    for (let i = 0; i < n; i++) {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "findRow";
+      b.innerHTML = '<span class="nm">Storvatnet ' + (i + 1) +
+                    '</span><span class="sub">Innsj\u00f8 \u00b7 Narvik \u00b7 12 km</span>';
+      l.appendChild(b);
+    }
+  }, RESULTS);
+  await p2.waitForTimeout(200);
+
+  const read = () => p2.evaluate(() => {
+    const el = (id) => document.getElementById(id);
+    const b = (x) => x.getBoundingClientRect();
+    return { sheetTop: Math.round(b(el("findSheet")).top),
+             fieldTop: Math.round(b(el("findQ")).top),
+             noteTop: Math.round(b(el("findNote")).top),
+             noteBottom: Math.round(b(el("findNote")).bottom),
+             sheetBottom: Math.round(b(el("findSheet")).bottom),
+             safeTop: (el("satProbe") || {}).offsetHeight || 0 };
+  });
+
+  let k = await read();
+  check("with an iOS keyboard and a full list, the sheet stays on screen",
+        k.sheetTop >= 0, `sheet top at ${k.sheetTop}px`);
+  check("the search field is not pushed behind the status bar",
+        k.fieldTop >= 0, `field top at ${k.fieldTop}px`);
+  check("and the note under it is whole, not half cut off",
+        k.noteTop >= 0 && k.noteBottom <= k.sheetBottom + 1,
+        `note ${k.noteTop}-${k.noteBottom}, sheet ends ${k.sheetBottom}`);
+
+  /* A notched phone. Chromium reports no inset, so the probe is given one -
+     the sheet has to leave room for it rather than filling the viewport. */
+  await p2.addStyleTag({ content: "#satProbe{height:47px !important}" });
+  await p2.evaluate(() => window.__keyboard(336));
+  await p2.waitForTimeout(250);
+  k = await read();
+  check("a status bar is reserved rather than covered",
+        k.sheetTop >= k.safeTop, `sheet top ${k.sheetTop}, inset ${k.safeTop}`);
+
+  /* The self-check for this half: compute the lift the old way, from the
+     window rather than from the element's own containing block. */
+  await p2.evaluate(() => {
+    const s = document.getElementById("findSheet");
+    const vv = window.visualViewport;
+    s.style.bottom = Math.round(window.innerHeight - vv.height - vv.offsetTop) + "px";
+  });
+  await p2.waitForTimeout(150);
+  const wrong = await read();
+  check("measuring the lift from the window instead is detected",
+        wrong.sheetTop < k.sheetTop,
+        `${wrong.sheetTop} vs ${k.sheetTop}`);
+
+  await ios.close();
   await browser.close();
   console.log(fails ? `\n${fails} FAILED` : "\nall layout checks passed");
   process.exit(fails ? 1 : 0);
