@@ -1,0 +1,11 @@
+{
+  "name": "soppspor-dev",
+  "private": true,
+  "description": "Dev tooling only. The app itself is one hand-written HTML file with no build step and no runtime dependency; nothing here is shipped. Playwright exists so layout can be measured in a real browser rather than argued about - see tests/test_layout.js and FINDINGS 32.",
+  "scripts": {
+    "setup": "npm install && npx playwright install chromium"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
+  }
+}

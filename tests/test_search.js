@@ -457,6 +457,10 @@ const OSLO = [262000, 6650000];   // roughly the middle of the city, EPSG:25833
   const sheet = shell.slice(shell.indexOf('id="findSheet"'),
                             shell.indexOf('id="spSheet"'));
 
+  /* What the column buys: the list scrolls rather than the whole sheet, so the
+     field and header stay put while results are read. Keeping the field on
+     screen is the cap's job, and tests/test_layout.js measures that in a real
+     browser. */
   check("the sheet is a column, not a scrolling page",
         /#findSheet\{[^}]*display:flex/.test(css) &&
         /#findSheet\{[^}]*flex-direction:column/.test(css), css.slice(0, 70));
@@ -468,11 +472,11 @@ const OSLO = [262000, 6650000];   // roughly the middle of the city, EPSG:25833
         /#findList\{[^}]*flex:1 1 auto/.test(css) &&
         /#findList\{[^}]*overflow-y:auto/.test(css));
 
-  /* The line that looks redundant and is the whole thing. A flex item will not
-     shrink below its content, so without it the list refuses to be shorter than
-     the results it holds, the column grows anyway, and the overflow never
-     engages - which presents as exactly the bug being fixed. */
-  check("the list may shrink below its contents, or none of the above works",
+  /* Correct and conventional rather than load-bearing: with a definite cap on
+     the sheet, a browser resolves the item to the space available with or
+     without it. Measured, after it was claimed to be the fix and was not.
+     tests/test_layout.js breaks the cap instead, which does fail. */
+  check("the list is still allowed to shrink below its contents",
         /#findList\{[^}]*min-height:0/.test(css));
 
   check("a flick at the end of the list does not scroll the sheet behind it",

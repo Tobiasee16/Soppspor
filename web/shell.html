@@ -154,6 +154,22 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sf);
   padding:0 max(18px, env(safe-area-inset-right)) 16px max(18px, env(safe-area-inset-left));
   transform:translateY(102%);transition:transform .28s cubic-bezier(.32,.72,0,1);
   max-height:74%;overflow-y:auto;-webkit-overflow-scrolling:touch}
+/* The cap is the whole mechanism, so it must not depend on our own JavaScript
+   firing at the right moment.
+   
+   Measured in Chromium: with a cap the sheet sits at 96px from the top however
+   many results are in it; with no cap it grows to 1591px and starts 1222px
+   above the screen, carrying the search field with it. That is the reported
+   fault, and nothing else in the sheet's layout changes it.
+   
+   `74%` resolves against the parent, which is the window - so with a keyboard
+   overlaying the bottom third, 74% of the window is taller than what is left to
+   see. findLift corrects that from JS, and a correction that has to fire at the
+   right moment is a correction that can fail to. `dvh` is the same number
+   computed by the browser against the viewport that is actually visible,
+   keyboard included. Kept behind @supports because the percentage is still
+   right on anything too old to know the unit. */
+@supports (height:1dvh){.card{max-height:74dvh}}
 .card.on{transform:translateY(0)}
 @media (prefers-reduced-motion:reduce){.card{transition:none}}
 .grab{width:36px;height:5px;border-radius:3px;background:var(--ink-4);margin:8px auto 10px;
@@ -379,10 +395,17 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sf);
  * list takes whatever is left and scrolls inside it, and the frame cannot move
  * however many suggestions arrive.
  *
- * `min-height:0` is the load-bearing line. A flex item will not shrink below
- * its content by default, so without it the list refuses to be smaller than the
- * results it holds, the column grows anyway, and the overflow never engages -
- * which looks exactly like the bug this replaces. */
+ * `min-height:0` is the usual companion to that - a flex item will not shrink
+ * below its content without it - and it is kept because it is correct, not
+ * because it is doing the work here. It was claimed as load-bearing and
+ * measurement said otherwise: with a definite cap on the sheet, removing it
+ * changes nothing at all. The cap is what keeps the field on screen, and it
+ * lives on `.card`.
+ *
+ * What this column *does* buy is that the list scrolls instead of the whole
+ * sheet, so the field and the header stay put while you read results rather
+ * than scrolling away with them. That is worth having and it is not the same
+ * claim. */
 #findSheet{display:flex;flex-direction:column;overflow:hidden}
 #findSheet > *{flex:0 0 auto}
 #findSheet #findList{flex:1 1 auto;min-height:0;overflow-y:auto;
