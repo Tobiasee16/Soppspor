@@ -166,8 +166,13 @@ async function measure(page) {
     t.height = window.innerHeight; t.offsetTop = 0; t.offsetLeft = 0;
     t.width = window.innerWidth; t.scale = 1;
     Object.defineProperty(window, "visualViewport", { get: () => t });
-    window.__keyboard = (px) => {
+    /* `scroll` is the part that mattered. A browser that cannot resize the
+       window for a keyboard scrolls the visual viewport up instead, to keep the
+       focused field in view, and then the gap at the bottom is nearly zero
+       while half the screen is still keyboard. */
+    window.__keyboard = (px, scroll) => {
       t.height = window.innerHeight - px;
+      t.offsetTop = scroll || 0;
       t.dispatchEvent(new Event("resize"));
     };
   });
@@ -175,7 +180,7 @@ async function measure(page) {
   await p2.waitForSelector("#findBtn", { timeout: 20000 });
   await p2.click("#findBtn");
   await p2.waitForTimeout(450);
-  await p2.evaluate(() => window.__keyboard(336));
+  await p2.evaluate(() => window.__keyboard(336, 0));
   await p2.waitForTimeout(250);
   await p2.evaluate((n) => {
     const l = document.getElementById("findList");
@@ -193,11 +198,14 @@ async function measure(page) {
   const read = () => p2.evaluate(() => {
     const el = (id) => document.getElementById(id);
     const b = (x) => x.getBoundingClientRect();
+    const vv = window.visualViewport;
     return { sheetTop: Math.round(b(el("findSheet")).top),
              fieldTop: Math.round(b(el("findQ")).top),
              noteTop: Math.round(b(el("findNote")).top),
              noteBottom: Math.round(b(el("findNote")).bottom),
              sheetBottom: Math.round(b(el("findSheet")).bottom),
+             visTop: Math.round(vv.offsetTop),
+             visBottom: Math.round(vv.offsetTop + vv.height),
              safeTop: (el("satProbe") || {}).offsetHeight || 0 };
   });
 
@@ -219,8 +227,50 @@ async function measure(page) {
   check("a status bar is reserved rather than covered",
         k.sheetTop >= k.safeTop, `sheet top ${k.sheetTop}, inset ${k.safeTop}`);
 
+  /* ------------------------------------------------ the reported phone --
+   * This is the one the screenshots showed, and none of the simulations above
+   * would have caught it. The browser does not resize the window; it scrolls
+   * the visual viewport up so the focused field stays visible. The gap at the
+   * bottom is then nearly zero while half the screen is still keyboard, so a
+   * guard written against that gap never fires - the sheet was never lifted,
+   * never capped, and rode off the top with the rest of the page.
+   *
+   * Capping by `vv.height` is wrong here too: correct only when the visible
+   * area starts at zero, and it leaves the sheet exactly `offsetTop` too tall
+   * otherwise. The cap is measured from the visible top instead. */
+  await p2.addStyleTag({ content: "#satProbe{height:0 !important}" });
+  for (const scroll of [336, 168]) {
+    await p2.evaluate((s) => window.__keyboard(336, s), scroll);
+    await p2.waitForTimeout(250);
+    const v = await read();
+    check(`a viewport scrolled ${scroll}px keeps the sheet inside what is visible`,
+          v.sheetTop >= v.visTop,
+          `sheet top ${v.sheetTop}, visible from ${v.visTop}`);
+    check(`and the field with it at ${scroll}px`,
+          v.fieldTop >= v.visTop && v.fieldTop <= v.visBottom,
+          `field ${v.fieldTop} in ${v.visTop}-${v.visBottom}`);
+  }
+
+  /* An empty list must not eat the note. A negative bottom margin on the last
+     flex item shortens the column, and with nothing in the list there is
+     nothing to absorb it, so `overflow:hidden` took the bottom of the note -
+     the "cut in half" half of the report. */
+  await p2.evaluate(() => {
+    document.getElementById("findList").innerHTML = "";
+    window.__keyboard(336, 336);
+  });
+  await p2.waitForTimeout(220);
+  const empty = await read();
+  check("with no results at all, the note under the field is still whole",
+        empty.noteBottom <= empty.sheetBottom + 1,
+        `note ends ${empty.noteBottom}, sheet ends ${empty.sheetBottom}`);
+
+  await p2.evaluate(() => window.__keyboard(336, 0));
+  await p2.waitForTimeout(200);
+
   /* The self-check for this half: compute the lift the old way, from the
      window rather than from the element's own containing block. */
+  const baseline = await read();
   await p2.evaluate(() => {
     const s = document.getElementById("findSheet");
     const vv = window.visualViewport;
@@ -229,8 +279,8 @@ async function measure(page) {
   await p2.waitForTimeout(150);
   const wrong = await read();
   check("measuring the lift from the window instead is detected",
-        wrong.sheetTop < k.sheetTop,
-        `${wrong.sheetTop} vs ${k.sheetTop}`);
+        wrong.sheetTop < baseline.sheetTop,
+        `${wrong.sheetTop} vs ${baseline.sheetTop}`);
 
   await ios.close();
   await browser.close();

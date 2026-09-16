@@ -414,9 +414,13 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sf);
  * claim. */
 #findSheet{display:flex;flex-direction:column;overflow:hidden}
 #findSheet > *{flex:0 0 auto}
+/* No negative bottom margin here, however tempting it is to let the list reach
+   the sheet's edge. A negative margin on the last flex item shortens the
+   column by that much, and with an empty list there is nothing to absorb it -
+   so `overflow:hidden` ate the bottom 16px of the note above, which is exactly
+   the "text under the search field is cut in half" that was reported. */
 #findSheet #findList{flex:1 1 auto;min-height:0;overflow-y:auto;
-  -webkit-overflow-scrolling:touch;overscroll-behavior:contain;
-  margin-bottom:calc(-1 * max(16px, env(safe-area-inset-bottom)))}
+  -webkit-overflow-scrolling:touch;overscroll-behavior:contain}
 #findNote{margin:10px 0 0}
 #findSheet .msg{margin-top:8px}
 
@@ -3753,10 +3757,22 @@ function findLift(){
   if(!findSheet.classList.contains("on")){
     findSheet.style.bottom="";findSheet.style.maxHeight="";return;}
   var vv=window.visualViewport;
-  /* Where the visible area ends, in window coordinates. */
+  /* Where the visible area ends, in layout coordinates. */
   var seen=vv.offsetTop+vv.height;
-  var gap=Math.max(0,Math.round(window.innerHeight-seen));
-  if(gap>40){
+  /* How much of the window the keyboard covers - which is the question, and is
+     NOT the same as how much room is left at the bottom.
+     
+     A browser that cannot resize the window for a keyboard scrolls the visual
+     viewport up instead, to keep the focused field in view. Then the gap at the
+     bottom is nearly zero while half the screen is still keyboard, and a guard
+     written against that gap never fires. That is why this did nothing at all
+     on the phone it was written for: the sheet was never lifted, never capped,
+     and rode up off the top with the rest of the page.
+     
+     `vv.height` shrinks either way, so it is the honest trigger. `offsetTop`
+     then says where the visible area starts, and the placement below uses both. */
+  var covered=Math.round(window.innerHeight-vv.height);
+  if(covered>40){
     /* `bottom` is measured from the containing block, and the containing block
        is not the window - it stops above the tab bar. Lifting by the keyboard
        height measured from `innerHeight` therefore raises the sheet by one tab
@@ -3767,20 +3783,25 @@ function findLift(){
        pixel. This asks the element where its own bottom actually is instead. */
     var host=findSheet.offsetParent;
     var hostBottom=host?host.getBoundingClientRect().bottom:window.innerHeight;
-    findSheet.style.bottom=Math.max(0,Math.round(hostBottom-seen))+"px";
-    /* Lifting alone was not enough, and this is the half that was missing.
-       `.card` caps at 74% of its parent, which is the whole window - a height
-       that stops meaning anything once the keyboard covers a third of it. The
-       sheet grows upward from its new bottom edge, so it ran off the top and
-       took the suggestions with it: reported as results disappearing above the
-       screen exactly when they appeared. Cap it to what is actually visible and
-       the list scrolls inside the sheet instead. */
-    /* Leave the status bar alone: filling the visible viewport exactly still
-       tucks the notch and the header under it on a notched phone. */
+    /* Never below where the sheet already sits: with a scrolled viewport its
+       bottom is inside the visible area already, and pushing it lower would
+       only bury it behind the tab bar. */
+    var lift=Math.max(0,Math.round(hostBottom-seen));
+    findSheet.style.bottom=lift+"px";
+    /* Then cap by the distance from the sheet's real bottom edge up to the top
+       of what can be seen. Capping by `vv.height` instead is only correct when
+       the visible area starts at zero - which is the overlay case and not the
+       scrolled one, where it leaves the sheet exactly `offsetTop` too tall and
+       therefore that far off the top.
+       
+       The status bar is left alone as well: filling the visible viewport
+       exactly still tucks the notch and the header under it on a notched
+       phone, and env() cannot be read from script without the probe. */
     var probe=document.getElementById("satProbe");
     var safeTop=(probe&&probe.offsetHeight)||0;
+    var roof=vv.offsetTop+safeTop+8;
     findSheet.style.maxHeight=
-      Math.max(160,Math.round(vv.height)-safeTop-8)+"px";
+      Math.max(160,Math.round((hostBottom-lift)-roof))+"px";
   }else{
     findSheet.style.bottom="";findSheet.style.maxHeight="";
   }
