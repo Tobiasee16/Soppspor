@@ -350,3 +350,94 @@ setTimeout(() => {
     process.exit(failures ? 1 : 0);
   }, 700);
 }, 700);
+
+// ------------------------------------------ pulling a sheet down to dismiss --
+/* Reported: the species filter had to be closed with the X. It was already
+   dismissable - but only by the `.grab` notch, which is 36x5 px, about a fifth
+   the width of a fingertip. The notch reads as the handle, so a reader pulls
+   the sheet by it, misses, and concludes the sheet does not drag.
+
+   The header drags it now as well. What must not become a drag surface is the
+   body: the species list scrolls, and a sheet that dismisses when you try to
+   scroll it is worse than one that never dismisses at all. */
+{
+  const src = (() => {
+    const i = shell.indexOf("function makeDismissable(");
+    let j = shell.indexOf("{", i), d = 0;
+    for (; j < shell.length; j++) {
+      if (shell[j] === "{") d++;
+      else if (shell[j] === "}") { d--; if (!d) break; }
+    }
+    return shell.slice(i, j + 1);
+  })();
+
+  function fakeEl(tag) {
+    return { tag, handlers: {},
+             addEventListener(t, fn) { (this.handlers[t] ||= []).push(fn); },
+             setPointerCapture() {},
+             fire(t, ev) { (this.handlers[t] || []).forEach((fn) =>
+                             fn({ ...ev, currentTarget: this })); } };
+  }
+  function makeSheet() {
+    const grab = fakeEl("grab"), top = fakeEl("cardTop"), body = fakeEl("list");
+    const classes = new Set(["on"]);
+    const sheet = {
+      grab, top, body, style: {},
+      classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c),
+                   contains: (c) => classes.has(c) },
+      querySelector: (sel) => (sel === ".grab" ? grab : sel === ".cardTop" ? top : null),
+      open: () => classes.has("on"),
+    };
+    new Function("sheet", "onClose", src + "makeDismissable(sheet,onClose);")(sheet, null);
+    return sheet;
+  }
+  const noBtn = { closest: () => null };
+  const isBtn = { closest: (sel) => (sel === "button" ? {} : null) };
+
+  let sh = makeSheet();
+  check("the notch still drags the sheet", (sh.grab.handlers.pointerdown || []).length === 1);
+  check("and so does the header now", (sh.top.handlers.pointerdown || []).length === 1);
+  check("the body does not, because it scrolls",
+        (sh.body.handlers.pointerdown || []).length === 0);
+
+  // A real pull on the header.
+  sh = makeSheet();
+  sh.top.fire("pointerdown", { clientY: 100, target: noBtn, pointerId: 1 });
+  sh.top.fire("pointermove", { clientY: 200, target: noBtn, pointerId: 1 });
+  check("dragging the header moves the sheet with the finger",
+        sh.style.transform === "translateY(100px)", sh.style.transform);
+  sh.top.fire("pointerup", { clientY: 200, target: noBtn, pointerId: 1 });
+  check("and past the threshold it closes", !sh.open());
+  check("the transform is cleared so the sheet is not left offset",
+        sh.style.transform === "");
+
+  // A short tug is not a dismissal.
+  sh = makeSheet();
+  sh.top.fire("pointerdown", { clientY: 100, target: noBtn, pointerId: 1 });
+  sh.top.fire("pointermove", { clientY: 130, target: noBtn, pointerId: 1 });
+  sh.top.fire("pointerup", { clientY: 130, target: noBtn, pointerId: 1 });
+  check("a 30 px tug springs back rather than closing", sh.open());
+
+  // The X lives in the header and has to keep being a button.
+  sh = makeSheet();
+  sh.top.fire("pointerdown", { clientY: 100, target: isBtn, pointerId: 1 });
+  sh.top.fire("pointermove", { clientY: 300, target: isBtn, pointerId: 1 });
+  sh.top.fire("pointerup", { clientY: 300, target: isBtn, pointerId: 1 });
+  check("a press that starts on the close button does not drag the sheet",
+        sh.open() && !sh.style.transform, String(sh.style.transform));
+
+  // Upward is not a dismissal either.
+  sh = makeSheet();
+  sh.grab.fire("pointerdown", { clientY: 300, target: noBtn, pointerId: 1 });
+  sh.grab.fire("pointermove", { clientY: 100, target: noBtn, pointerId: 1 });
+  check("dragging up does not lift the sheet off its anchor",
+        sh.style.transform === "translateY(0px)", sh.style.transform);
+  sh.grab.fire("pointerup", { clientY: 100, target: noBtn, pointerId: 1 });
+  check("and does not close it", sh.open());
+
+  // The header must actually be declared undraggable-by-the-browser, or the
+  // page scrolls under the finger instead of the sheet following it.
+  check("the header opts out of browser touch handling",
+        /\.cardTop\{[^}]*touch-action:none/.test(shell));
+}
+

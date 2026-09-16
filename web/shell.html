@@ -158,6 +158,12 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sf);
 @media (prefers-reduced-motion:reduce){.card{transition:none}}
 .grab{width:36px;height:5px;border-radius:3px;background:var(--ink-4);margin:8px auto 10px;
   opacity:.55;cursor:grab;touch-action:none}
+/* The notch is 36x5 px. It looks like the thing you pull, and it is far too
+   small to be the only thing you can pull - reported as having to use the X to
+   close the species filter. The header drags the sheet too, which is what the
+   notch was always advertising. */
+.cardTop{cursor:grab;touch-action:none}
+.card.drag .cardTop,.card.drag .grab{cursor:grabbing}
 .card{will-change:transform}
 .card.drag{transition:none}
 .walk{display:flex;align-items:center;gap:8px;margin-top:10px;background:var(--fill);
@@ -337,6 +343,22 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sf);
 /* The only links in the app. Browser-default blue would be the loudest colour
    on a page whose whole palette is one muted hue, so this reads as emphasised
    body text that happens to be tappable. */
+/* A block of explanation that does not have to be on screen to be findable.
+   Settings had three walls of prose between the switches they described, and a
+   switch you have to scroll past a paragraph to reach is a worse switch. Same
+   native details/summary as personvern.html and the Om page. */
+.fold{margin:0 16px 16px;background:var(--card);border-radius:12px;overflow:hidden}
+.fold summary{display:flex;align-items:center;justify-content:space-between;
+  gap:12px;padding:12px 15px;min-height:46px;cursor:pointer;color:var(--ink);
+  font-weight:600;font-size:14.5px;list-style:none}
+.fold summary::-webkit-details-marker{display:none}
+.fold summary::after{content:"\203A";color:var(--ink-3);font-size:20px;line-height:1;
+  flex:0 0 auto;transform:rotate(90deg);transition:transform .18s}
+.fold[open] summary::after{transform:rotate(-90deg)}
+.fold summary:focus-visible{outline:2px solid var(--tint);outline-offset:-3px}
+.fold .about{margin:0;padding:0 15px 12px}
+.fold .about p:last-child{margin-bottom:0}
+@media (prefers-reduced-motion:reduce){.fold summary::after{transition:none}}
 .about a{color:var(--ink-2);text-decoration:underline;text-underline-offset:2px;
   text-decoration-color:var(--ink-4)}
 .sheetList{margin:6px -18px 0}
@@ -729,15 +751,30 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
         </div>
         <div class="msg" id="acctMsg" hidden></div>
       </div>
-      <div class="about" style="margin-bottom:20px">
-        <p>Når dette er på, lagres stedene dine på en konto som bare du har tilgang
-          til, slik at de følger med til andre enheter. De er <b>ikke</b> synlige for
-          andre brukere og brukes <b>ikke</b> til å lage kartet.</p>
-        <p>Er det av, ligger stedene bare på denne telefonen.</p>
+      <details class="fold">
+        <summary>Hva synkronisering gjør</summary>
+        <div class="about">
+          <p>Når dette er på, lagres stedene dine på en konto som bare du har tilgang
+            til, slik at de følger med til andre enheter. De er <b>ikke</b> synlige for
+            andre brukere og brukes <b>ikke</b> til å lage kartet.</p>
+          <p>Er det av, ligger stedene bare på denne telefonen.</p>
+        </div>
+      </details>
+
+      <p class="glabel">Utseende</p>
+      <div class="group">
+        <div class="row"><span class="lbl">Tema</span>
+          <div class="seg" id="segTheme">
+            <button type="button" data-v="auto" aria-pressed="true">Auto</button>
+            <button type="button" data-v="light" aria-pressed="false">Lys</button>
+            <button type="button" data-v="dark" aria-pressed="false">Mørk</button>
+          </div></div>
       </div>
 
       <p class="glabel">Personvern</p>
-      <div class="about" style="margin-bottom:10px">
+      <details class="fold">
+        <summary>Hva vi lagrer, og hvem som ser det</summary>
+        <div class="about">
         <p><b>Hva vi lagrer.</b> Stedene du lagrer: posisjon, dato, notatet ditt,
           og arten du selv velger. Ingenting annet. Ingen navn, ingen
           telefonnummer, ingen sporing, ingen analyseverktøy, ingen annonser.
@@ -762,7 +799,8 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
           kontoen, hos oss og her. Den kan ikke angres, og vi kan ikke hente det
           tilbake etterpå. Ta en kopi først under «Mine steder» hvis du vil
           beholde noe.</p>
-      </div>
+        </div>
+      </details>
       <div style="margin:0 16px 22px">
         <button class="ghost danger" id="wipeShow">Slett kontoen og alle stedene</button>
         <div id="wipeBox" hidden>
@@ -774,15 +812,6 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
           <button class="ghost" id="wipeCancel">Avbryt</button>
         </div>
         <div class="msg" id="wipeMsg" hidden></div>
-      </div>
-      <p class="glabel">Utseende</p>
-      <div class="group">
-        <div class="row"><span class="lbl">Tema</span>
-          <div class="seg" id="segTheme">
-            <button type="button" data-v="auto" aria-pressed="true">Auto</button>
-            <button type="button" data-v="light" aria-pressed="false">Lys</button>
-            <button type="button" data-v="dark" aria-pressed="false">Mørk</button>
-          </div></div>
       </div>
     </div>
   </div>
@@ -3612,24 +3641,41 @@ document.getElementById("cardClose").addEventListener("click",function(){
 /* Reaching the little cross at the top of a sheet with one hand is the worst
    target on the screen. Dragging the handle down is where the thumb already
    is, and is what every other sheet on the platform does. */
+/* Pull a sheet down to dismiss it.
+ *
+ * The drag used to live on the `.grab` notch alone, which is 36x5 px - about a
+ * fifth the width of a fingertip. It reads as the handle, so a reader tries to
+ * pull the sheet by it, misses, and concludes the sheet does not drag at all;
+ * reported as having to reach for the X on the species filter every time.
+ *
+ * The header drags it as well now. Not the body: the species list scrolls, and
+ * a sheet that dismisses when you try to scroll it is worse than one that does
+ * not dismiss. The close button keeps being a button. */
 function makeDismissable(sheet,onClose){
-  var gr=sheet.querySelector(".grab");
-  if(!gr)return;
+  var surfaces=[sheet.querySelector(".grab"),sheet.querySelector(".cardTop")]
+    .filter(function(el){return el;});
+  if(!surfaces.length)return;
   var y0=null,dy=0;
-  gr.addEventListener("pointerdown",function(e){
+  function down(e){
+    /* The X lives in the header. A press on it is a press on it. */
+    if(e.target&&e.target.closest&&e.target.closest("button"))return;
     y0=e.clientY;dy=0;sheet.classList.add("drag");
-    try{gr.setPointerCapture(e.pointerId);}catch(err){}});
-  gr.addEventListener("pointermove",function(e){
+    try{e.currentTarget.setPointerCapture(e.pointerId);}catch(err){}}
+  function move(e){
     if(y0===null)return;
     dy=Math.max(0,e.clientY-y0);
-    sheet.style.transform="translateY("+dy+"px)";});
+    sheet.style.transform="translateY("+dy+"px)";}
   function end(){
     if(y0===null)return;
     y0=null;sheet.classList.remove("drag");sheet.style.transform="";
     if(dy>70){sheet.classList.remove("on");if(onClose)onClose();}}
-  gr.addEventListener("pointerup",end);
-  gr.addEventListener("pointercancel",end);
-  gr.addEventListener("lostpointercapture",end);
+  surfaces.forEach(function(el){
+    el.addEventListener("pointerdown",down);
+    el.addEventListener("pointermove",move);
+    el.addEventListener("pointerup",end);
+    el.addEventListener("pointercancel",end);
+    el.addEventListener("lostpointercapture",end);
+  });
 }
 makeDismissable(card,function(){selected=-1;draw();});
 document.getElementById("spClose").addEventListener("click",function(){
