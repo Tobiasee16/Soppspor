@@ -25,6 +25,7 @@ project's history:
 """
 from __future__ import annotations
 
+import datetime
 import json
 import pathlib
 import re
@@ -36,6 +37,27 @@ import urllib.request
 UA = "soppspor/0.1 (deployment check; support@soppspor.no)"
 TIMEOUT = 30
 
+# How far the KV-served weather may trail the day this build fetched before it
+# counts as stale rather than merely behind. seNorge publishes one to two days
+# in arrears and the scheduled job writes twice daily, so a deploy that runs
+# after a publication and before the next job legitimately sees a one-day gap.
+# Two days is comfortably inside that and still catches a job that has stopped.
+KV_LAG_DAYS = 2
+
+
+def days_behind(live: str | None, built: str | None) -> int:
+    """How many days `live` trails `built`, 0 if it is level or ahead.
+
+    Either being missing or unparseable is reported as a large number rather
+    than as zero: "could not tell" must not read as "fine".
+    """
+    try:
+        a = datetime.date.fromisoformat(live)
+        b = datetime.date.fromisoformat(built)
+    except (TypeError, ValueError):
+        return 99
+    return max(0, (b - a).days)
+
 fails = 0
 
 
@@ -44,6 +66,22 @@ def check(name: str, ok: bool, detail: str = "") -> None:
     print(("PASS  " if ok else "FAIL  ") + name + (f"   {detail}" if detail else ""))
     if not ok:
         fails += 1
+
+
+def head(url: str) -> dict:
+    """Response headers, lowercased, or {} if the request fails.
+
+    Only the conditions route needs these, and it needs them to answer a
+    question the body cannot: whether the Pages Function served this from KV or
+    passed through to the file in the deployment. Failures are empty rather than
+    fatal - this informs a check, it is not one.
+    """
+    req = urllib.request.Request(url, headers={"User-Agent": UA}, method="HEAD")
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+            return {k.lower(): v for k, v in r.headers.items()}
+    except Exception:  # noqa: BLE001 - absence is a valid answer here
+        return {}
 
 
 def get(url: str, tries: int = 3) -> tuple[int, bytes, str]:
@@ -212,27 +250,47 @@ def main() -> int:
     # conditions route is a Pages Function now, so what it returns depends on
     # runtime state - a KV binding - that no amount of reading the built
     # directory can predict, and an edge copy hides exactly that.
-    status, body, ctype = get(origin + f"/conditions.json?deploycheck={int(time.time())}")
+    cond_url = origin + f"/conditions.json?deploycheck={int(time.time())}"
+    headers = head(cond_url)
+    status, body, ctype = get(cond_url)
     check("the weather is served", status == 200, f"HTTP {status}")
     if status == 200:
         try:
             cond = json.loads(body.decode("utf-8"))
             check("it carries a last day", bool(cond.get("last_day")),
                   str(cond.get("last_day")))
-            # And that it is *this* build's day, not whatever was there before.
-            # Checking only that some day exists is how a stale layer passes:
-            # the day that was already live is still a day.
+            # And that it is not a stale layer. Checking only that some day
+            # exists is how a stale layer passes: the day that was already live
+            # is still a day.
+            #
+            # What "stale" means depends on which of the two things answered.
+            # The route is a Pages Function, and a function beats a static asset
+            # at the same path, so when the KV binding exists the file in the
+            # deployment is a fallback nothing serves. The two are then updated
+            # on unrelated schedules - the build fetches seNorge at deploy time,
+            # KV is written twice a day by .github/workflows/conditions.yml -
+            # and requiring them to be equal fails whenever seNorge has
+            # published since the last KV write. That is the ordinary case on
+            # any afternoon deploy, and it made this check cry wolf.
             built = out / "conditions.json"
-            if built.exists():
-                mine = json.loads(built.read_text(encoding="utf-8")).get("last_day")
+            mine = (json.loads(built.read_text(encoding="utf-8")).get("last_day")
+                    if built.exists() else None)
+            from_kv = "x-conditions-written" in headers
+            if from_kv:
+                print(f"      (served from KV, written {headers['x-conditions-written']};"
+                      f" the build's own file is a fallback nothing serves)")
+                check("the weather served is not stale",
+                      days_behind(cond.get("last_day"), mine) <= KV_LAG_DAYS,
+                      f"live {cond.get('last_day')} vs built {mine} "
+                      f"({days_behind(cond.get('last_day'), mine)} days behind; "
+                      f"the scheduled job runs twice daily)")
+            elif mine:
+                # Nothing shadowing the file, so it must be the one just built.
                 check("the weather served is the weather built",
                       cond.get("last_day") == mine,
                       f"live {cond.get('last_day')} vs built {mine}")
             else:
-                # No file in the build means the layer comes from KV, so the
-                # build has nothing to compare against and the route is the
-                # only source of truth.
-                print("      (no conditions.json in the build - served from KV)")
+                print("      (no conditions.json in the build, and no KV header)")
         except Exception as e:  # noqa: BLE001 - reported, not swallowed
             check("the weather parses as JSON", False, str(e)[:80])
 

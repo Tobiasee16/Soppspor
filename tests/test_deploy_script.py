@@ -107,3 +107,63 @@ def test_the_deployment_checker_exists_and_takes_an_origin():
     # The four things it must look at, each of which has been wrong once.
     for probe in ["area_label", "personvern.html", "404", "conditions.json"]:
         assert probe in py, f"the deployment check no longer looks at {probe}"
+
+
+class TestTheWeatherStalenessCheck:
+    """The check has to keep biting after being taught to stop crying wolf.
+
+    It used to require the live conditions layer to be byte-identical in date to
+    the file in the build. That cannot hold: the route is a Pages Function, a
+    function beats a static asset at the same path, and when the KV binding
+    exists the built file is a fallback nothing serves. The build fetches seNorge
+    at deploy time while KV is written twice a day, so any afternoon deploy after
+    a fresh seNorge publication failed a check that described nothing wrong - and
+    a check that fails for no reason is one people learn to ignore.
+
+    Loosening it is the risk. These pin that a genuinely stopped job still fails,
+    and that "cannot tell" is never read as "fine".
+    """
+
+    @pytest.fixture(scope="class")
+    def mod(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "check_deployed", ROOT / "scripts" / "check_deployed.py")
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return m
+
+    def test_level_is_not_behind(self, mod):
+        assert mod.days_behind("2026-09-15", "2026-09-15") == 0
+
+    def test_one_day_behind_is_tolerated(self, mod):
+        """The ordinary case: seNorge published after the last scheduled write."""
+        assert mod.days_behind("2026-09-14", "2026-09-15") == 1
+        assert 1 <= mod.KV_LAG_DAYS
+
+    def test_a_stopped_job_still_fails(self, mod):
+        """The thing the check is actually for."""
+        assert mod.days_behind("2026-09-08", "2026-09-15") > mod.KV_LAG_DAYS
+
+    def test_a_layer_ahead_of_the_build_is_not_negative(self, mod):
+        """KV can legitimately be fresher than a build made yesterday."""
+        assert mod.days_behind("2026-09-16", "2026-09-15") == 0
+
+    def test_unreadable_dates_are_not_reported_as_healthy(self, mod):
+        """'Could not tell' must not read as 'fine'."""
+        for live, built in (("", "2026-09-15"), (None, "2026-09-15"),
+                            ("2026-09-15", None), ("rubbish", "2026-09-15")):
+            assert mod.days_behind(live, built) > mod.KV_LAG_DAYS, (live, built)
+
+    def test_the_tolerance_is_not_open_ended(self, mod):
+        """A week would make the check decorative."""
+        assert mod.KV_LAG_DAYS <= 3
+
+    def test_the_exact_check_survives_for_a_statically_served_layer(self):
+        """With no KV binding the function passes through to the built file, and
+        then the old equality is exactly right. Both branches must still exist."""
+        src = (ROOT / "scripts" / "check_deployed.py").read_text(encoding="utf-8")
+        assert "the weather served is the weather built" in src
+        assert "the weather served is not stale" in src
+        assert "x-conditions-written" in src
+
