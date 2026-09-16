@@ -52,6 +52,7 @@ const probe = js.slice(0, at) + `
   spColour, levelsFor, levelsForOverlay, ringLabel, BANDS,
   renderLegend, bandsDrawn,
   addSpot, showSpot, removeSpot, spotColour, SPOTS: () => SPOTS,
+  spotSpeciesOptions,
   legend: () => document.getElementById("legend").innerHTML,
   pill: () => document.getElementById("pillName").textContent,
   card: () => document.getElementById("cardBody").innerHTML,
@@ -242,10 +243,12 @@ check("and its three bands come back",
         threw ? threw.stack.split("\n").slice(0, 2).join(" | ") : "");
   const c = app.card();
   check("the card asks which mushroom it was", /Hva fant du/.test(c));
-  check("it offers one chip per shipped species, plus Annet",
-        (c.match(/class="spChip"/g) || []).length === app.D.species.length + 1,
-        String((c.match(/class="spChip"/g) || []).length) + " chips for "
+  check("it offers one row per shipped species, plus Annet",
+        (c.match(/data-key="/g) || []).length === app.D.species.length + 1,
+        String((c.match(/data-key="/g) || []).length) + " rows for "
           + app.D.species.length + " species");
+  check("the rows are in one scrolling column, not scattered as buttons",
+        /<div class="spList"/.test(c) && !/spChip/.test(c));
   check("the species it was saved as is the one ticked",
         new RegExp('data-key="' + sp.key + '" aria-pressed="true"').test(c),
         (c.match(/data-key="[^"]*" aria-pressed="true"/g) || []).join(" "));

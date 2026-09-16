@@ -67,9 +67,9 @@ const NULL_SP = { key: "synthetic_null", no: "Kontroll", is_null: true };
 
 function sandbox(species) {
   const src = SPCOL_SRC + decl("SPFALLBACK") + decl("SPOT_NEUTRAL")
-    + grab("spColour") + grab("spotColour") + grab("spotSpeciesChips");
+    + grab("spColour") + grab("spotColour") + grab("spotSpeciesOptions");
   return new Function("D",
-    src + "return {spColour,spotColour,spotSpeciesChips,SPOT_NEUTRAL};")(
+    src + "return {spColour,spotColour,spotSpeciesOptions,SPOT_NEUTRAL};")(
     { species: species });
 }
 const S = sandbox(SHIPPED.concat([NULL_SP]));
@@ -104,7 +104,7 @@ check("a pin keeps its colour when the species list is reordered",
       SHIPPED.every(sp => reordered.spotColour(sp.key) === S.spotColour(sp.key)));
 
 // ------------------------------------------------------------ the chooser --
-const chips = S.spotSpeciesChips({ key: "", name: "" });
+const chips = S.spotSpeciesOptions({ key: "", name: "" });
 check("the chooser offers every shipped species",
       SHIPPED.every(sp => chips.some(c => c.key === sp.key)),
       chips.map(c => c.key).join(","));
@@ -118,12 +118,12 @@ check("each chip carries the colour its pin will draw",
 
 // A spot saved under a species that has since left the build keeps a chip of
 // its own, so opening the card does not quietly drop what it was saved as.
-const departed = S.spotSpeciesChips({ key: "hydnum_repandum", name: "Blek piggsopp" });
+const departed = S.spotSpeciesOptions({ key: "hydnum_repandum", name: "Blek piggsopp" });
 check("a stored species missing from the build keeps its own chip",
       departed.some(c => c.key === "hydnum_repandum" && c.label === "Blek piggsopp"),
       departed.map(c => c.label).join(","));
 check("that chip is not duplicated for a species still shipped",
-      S.spotSpeciesChips({ key: "boletus_edulis", name: "Steinsopp" })
+      S.spotSpeciesOptions({ key: "boletus_edulis", name: "Steinsopp" })
         .filter(c => c.key === "boletus_edulis").length === 1);
 
 // --------------------------------------------------------------- the save --
@@ -190,9 +190,46 @@ check("the row in Steder takes the same colour as the pin",
 
 const cardSrc = grab("showSpot");
 check("the spot card asks which mushroom it was",
-      cardSrc.includes("spotSpeciesChips(") && /Hva fant du/.test(cardSrc));
+      cardSrc.includes("spotSpeciesOptions(") && /Hva fant du/.test(cardSrc));
 check("the spot card still offers the note and the delete",
       cardSrc.includes("spotNote") && cardSrc.includes("spotDel"));
+
+// ------------------------------------------------------------- the list --
+/* It was a wrapping row of chips while there were eight species. Fourteen made
+   it four ragged rows of pills taller than the sheet they sat on, with no order
+   a reader could scan. These pin the shape that replaced it: one bounded
+   scrolling column, and a list that opens on the answer already stored rather
+   than at the top - a spot saved as the last species would otherwise appear to
+   offer a list without it. */
+const css = shell.slice(shell.indexOf(".spList{"), shell.indexOf(".spotRow{"));
+check("the list is height-capped rather than growing with the species count",
+      /max-height:\s*\d+px/.test(css), css.slice(0, 60));
+check("and it scrolls inside that cap",
+      /overflow-y:\s*auto/.test(css));
+check("a scroll at its end does not drag the sheet behind it",
+      /overscroll-behavior:\s*contain/.test(css));
+check("the cap leaves a part-row visible, which is what says 'more below'", (() => {
+  const cap = +css.match(/max-height:\s*(\d+)px/)[1];
+  const row = +css.match(/min-height:\s*(\d+)px/)[1];
+  return cap % row !== 0 && cap > row * 3;
+})(), css.match(/max-height:\s*(\d+)px/)[1] + " / row "
+      + css.match(/min-height:\s*(\d+)px/)[1]);
+check("no chip styling survives to contradict the list",
+      !shell.includes(".spChip") && !shell.includes('class="spSet"'));
+
+const scrollSrc = grab("scrollToChosen");
+check("the card opens on the chosen species",
+      cardSrc.includes("scrollToChosen(list)"));
+check("a row already in view is left alone rather than centred pointlessly",
+      /offsetTop\s*\+\s*at\.offsetHeight\s*<=\s*list\.clientHeight/.test(scrollSrc));
+/* It runs under a DOM stub where layout properties do not exist. Reading
+   offsetTop off a stub returns undefined, and arithmetic on that yields NaN,
+   which would silently set scrollTop to NaN rather than throwing - so the
+   guard has to be a type check, not a truthiness check. */
+check("it refuses to guess when the list cannot report its geometry",
+      /typeof at\.offsetTop\s*!==\s*"number"/.test(scrollSrc), scrollSrc);
+check("and never scrolls to a negative offset",
+      /Math\.max\(0,/.test(scrollSrc));
 
 console.log(fails ? "\n" + fails + " FAILED" : "\nall good");
 process.exit(fails ? 1 : 0);
