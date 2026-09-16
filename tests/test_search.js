@@ -36,10 +36,20 @@ function grab(name) {
   return shell.slice(start, i + 1);
 }
 
-const SRC = ["findInNorway", "findPoint", "findRank",
+/* findRank leans on findNorm, findMatch and findTypeRank now, and on the two
+   constants they read. Ranking by relevance before distance is the whole point
+   of them, so they come along rather than being stubbed out. */
+const DECL = (n) => {
+  const i = shell.indexOf("var " + n + "=");
+  return shell.slice(i, shell.indexOf(";", i) + 1);
+};
+const SRC = DECL("FIND_MAJOR") + DECL("FIND_MINOR") +
+            ["findInNorway", "findPoint", "findNorm", "findMatch",
+             "findTypeRank", "findRank", "findDedupe",
              "findParsePlaces", "findParseAddresses"].map(grab).join("\n");
 const F = new Function(SRC +
-  "return {findInNorway,findPoint,findRank,findParsePlaces,findParseAddresses};")();
+  "return {findInNorway,findPoint,findNorm,findMatch,findTypeRank,findRank," +
+  "findDedupe,findParsePlaces,findParseAddresses};")();
 
 // Kartverket stedsnavn, "Nordmarka", fuzzy, utkoordsys=25833.
 const PLACES = {
@@ -316,6 +326,113 @@ const OSLO = [262000, 6650000];   // roughly the middle of the city, EPSG:25833
     const focus = open.indexOf("findQ.focus()");
     return reset > -1 && focus > -1 && reset < focus;
   })());
+}
+
+
+// ------------------------------------------------------------- the ranking --
+/* The complaint was the search itself, not the sheet it sits in, and it was
+   right. Rows were sorted by kind and then purely by distance from the middle
+   of the screen, which throws away the register's own relevance order - and
+   that order is good. Kartverket answers «Bergen» with the city first.
+   Re-sorted by distance from Kristiansand, an outfield called Bergen in
+   Fyresdal beat the city by 300 km and the answer everybody meant fell off the
+   list. Then the same name arrived once per feature it belongs to, so four
+   rows reading «Bergen» crowded out everything else. */
+{
+  const grab = (n) => {
+    const i = shell.indexOf("function " + n + "(");
+    let j = shell.indexOf("{", i), d = 0;
+    for (; j < shell.length; j++) {
+      if (shell[j] === "{") d++;
+      else if (shell[j] === "}") { d--; if (!d) break; }
+    }
+    return shell.slice(i, j + 1);
+  };
+  const decl = (n) => {
+    const i = shell.indexOf("var " + n + "=");
+    return shell.slice(i, shell.indexOf(";", i) + 1);
+  };
+  const M = new Function(
+    decl("FIND_MAJOR") + decl("FIND_MINOR") +
+    ["findNorm", "findMatch", "findTypeRank", "findRank", "findDedupe"]
+      .map(grab).join("\n") +
+    "return {findNorm,findMatch,findTypeRank,findRank,findDedupe};")();
+
+  const KRS = [86000, 6464000];
+  const rank = (q, rows, at = KRS) =>
+    M.findDedupe(M.findRank(q, rows, at[0], at[1]));
+
+  const bergen = [
+    { kind: "sted", name: "Bergen", what: "Utmark", where: "Fyresdal",
+      e: 120000, n: 6580000 },
+    { kind: "sted", name: "Bergengen", what: "Bruk", where: "Gjøvik",
+      e: 250000, n: 6740000 },
+    { kind: "sted", name: "Bergen", what: "By", where: "Bergen",
+      e: -30000, n: 6740000 },
+    { kind: "sted", name: "Bergen", what: "Kommune", where: "Bergen",
+      e: -30000, n: 6742000 },
+  ];
+  let out = rank("Bergen", bergen);
+  check("the city beats a nearer outfield with the same name",
+        out[0].what === "By" && out[0].where === "Bergen",
+        out.map((r) => `${r.name}/${r.what}`).join(", "));
+  check("and the same place is not listed twice under two feature types",
+        out.filter((r) => r.name === "Bergen" && r.where === "Bergen").length === 1,
+        String(out.length));
+  check("a longer name never outranks the exact one",
+        out.findIndex((r) => r.name === "Bergen") <
+        out.findIndex((r) => r.name === "Bergengen"));
+
+  /* Distance is still the right answer when the name does not decide. Norway
+     has nine thousand Storvatnet and the one you want is the near one. */
+  const storvatnet = [
+    { kind: "sted", name: "Storvatnet", what: "Innsjø", where: "Narvik",
+      e: 590000, n: 7590000 },
+    { kind: "sted", name: "Storvatnet", what: "Vann", where: "Birkenes",
+      e: 100000, n: 6480000 },
+  ];
+  check("among equal names the nearest still wins",
+        rank("Storvatnet", storvatnet)[0].where === "Birkenes",
+        rank("Storvatnet", storvatnet)[0].where);
+
+  // A half-typed name should still find the thing it is the start of.
+  const prefix = [
+    { kind: "sted", name: "Bergveien", what: "Veg", where: "Oslo",
+      e: 260000, n: 6650000 },
+    { kind: "sted", name: "Storebergve", what: "Vad", where: "Valle",
+      e: 90000, n: 6570000 },
+  ];
+  check("a prefix beats a name that merely contains the letters",
+        rank("Bergve", prefix)[0].name === "Bergveien",
+        rank("Bergve", prefix)[0].name);
+
+  // Street numbers still mean addresses, but only once the name ties.
+  const mixed = [
+    { kind: "sted", name: "Karl Johans gate", what: "Veg", where: "Oslo",
+      e: 262000, n: 6649000 },
+    { kind: "adresse", name: "Karl Johans gate 1", what: "Adresse",
+      where: "OSLO", e: 262100, n: 6649100 },
+  ];
+  check("a typed street number puts the address first",
+        rank("Karl Johans gate 1", mixed)[0].kind === "adresse",
+        rank("Karl Johans gate 1", mixed)[0].name);
+
+  check("æ, ø and å are matched however they were typed",
+        M.findMatch("Bo", "Bø") === 0 && M.findMatch("Alesund", "Ålesund") === 0,
+        `${M.findMatch("Bo", "Bø")} ${M.findMatch("Alesund", "Ålesund")}`);
+
+  check("a town outranks a ford, and an unknown type sits between them",
+        M.findTypeRank("By") < M.findTypeRank("Innsjø") &&
+        M.findTypeRank("Innsjø") < M.findTypeRank("Vad"),
+        [M.findTypeRank("By"), M.findTypeRank("Innsjø"),
+         M.findTypeRank("Vad")].join(" < "));
+
+  // The query itself.
+  check("places are asked for as a prefix rather than fuzzily",
+        /sok="\+encodeURIComponent\(q\+"\*"\)/.test(shell));
+  check("and fuzzy is kept only for when the prefix finds nothing",
+        /Ingen n\u00f8yaktige treff/.test(shell) &&
+        (shell.match(/fuzzy=true/g) || []).length === 1);
 }
 
 

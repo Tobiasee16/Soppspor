@@ -3480,18 +3480,80 @@ function findPoint(p){
   if(findInNorway(a,b))return[a,b];
   return null;
 }
-/* A query with a digit in it is somebody typing a street number, so addresses
-   go first; otherwise the place name is what was meant. Within each group,
-   nearest to the middle of the screen. */
+/* Ranking, and the mistake it replaces.
+ *
+ * This used to sort by kind and then purely by distance from the middle of the
+ * screen, which throws away the register's own relevance ordering - and that
+ * ordering is good. Kartverket answers «Bergen» with the city first. Sorted by
+ * distance from Kristiansand, an outfield called Bergen in Fyresdal beats the
+ * city by 300 km, and the thing everybody meant is off the bottom of the list.
+ *
+ * Distance still matters, because «Storvatnet» has nine thousand hits and the
+ * one you want is the nearest. It is just the last question rather than the
+ * first. The order is: how well the name answers what was typed, then how
+ * likely that kind of place is to be what anybody searches for, then distance.
+ */
+function findNorm(s){
+  return String(s||"").toLowerCase()
+    .replace(/[\u00e0-\u00e5]/g,"a").replace(/[\u00e8-\u00eb]/g,"e")
+    .replace(/[\u00ec-\u00ef]/g,"i").replace(/[\u00f2-\u00f6]/g,"o")
+    .replace(/[\u00f9-\u00fc]/g,"u").replace(/\u00e6/g,"ae")
+    .replace(/\u00f8/g,"o").replace(/\s+/g," ").trim();
+}
+/* Lower is better. An exact name beats a prefix beats a word inside the name
+   beats a substring, which is what makes «Bergen» the city rather than
+   «Bergengen», whatever the register happened to return first. */
+function findMatch(q,name){
+  var a=findNorm(name),b=findNorm(q);
+  if(!b)return 4;
+  if(a===b)return 0;
+  if(a.indexOf(b)===0)return 1;
+  var w=a.split(" ");
+  for(var i=1;i<w.length;i++) if(w[i].indexOf(b)===0)return 2;
+  return a.indexOf(b)>0?3:4;
+}
+/* The register types every name, and the types are not equally likely to be
+   what somebody typed into a search box. A town is; a «vad» - a ford across a
+   stream, of which Norway has thousands - is not. Unknown types sit in the
+   middle rather than being guessed at, because this list will never be
+   complete and a new type should not be penalised for being new. */
+var FIND_MAJOR="by tettsted kommune bygd grend tettbebyggelse boligfelt fylke";
+var FIND_MINOR="bruk gard jorde vad grunne teig traktorveg sti annen kulturdetalj "
+  +"del av innsj\u00f8 adressetilleggsnavn bergverk";
+function findTypeRank(t){
+  var k=" "+findNorm(t)+" ";
+  if((" "+FIND_MAJOR+" ").indexOf(k)>=0)return 0;
+  if((" "+FIND_MINOR+" ").indexOf(k)>=0)return 2;
+  return 1;
+}
 function findRank(q,rows,cx,cy){
+  /* A digit means a street number was typed, so an address is more likely to be
+     meant than a place. Only a tiebreak now: an exact name match wins first. */
   var addrFirst=/\d/.test(q);
   return rows.slice().sort(function(a,b){
-    if(a.kind!==b.kind)
-      return (a.kind==="adresse")===addrFirst?-1:1;
+    var ma=findMatch(q,a.name),mb=findMatch(q,b.name);
+    if(ma!==mb)return ma-mb;
+    if(a.kind!==b.kind)return (a.kind==="adresse")===addrFirst?-1:1;
+    var ta=a.kind==="adresse"?1:findTypeRank(a.what);
+    var tb=b.kind==="adresse"?1:findTypeRank(b.what);
+    if(ta!==tb)return ta-tb;
     var da=(a.e-cx)*(a.e-cx)+(a.n-cy)*(a.n-cy);
     var db=(b.e-cx)*(b.e-cx)+(b.n-cy)*(b.n-cy);
     return da-db;
   });
+}
+/* One row per place. A name is listed once per feature it belongs to, so
+   «Bergen» arrives as a By, a Kommune, a Gard and an Utmark: four rows a reader
+   cannot tell apart, pointing at nearly the same pixel, crowding out the other
+   seven answers. Run after ranking, so the survivor is the best-ranked one. */
+function findDedupe(rows){
+  var seen={},out=[],i,k;
+  for(i=0;i<rows.length;i++){
+    k=rows[i].kind+"|"+findNorm(rows[i].name)+"|"+findNorm(rows[i].where);
+    if(seen[k])continue;
+    seen[k]=1;out.push(rows[i]);
+  }
+  return out;
 }
 function findParsePlaces(j){
   var out=[],i,v,p;
@@ -3569,8 +3631,13 @@ function findRun(q){
       return j?parse(j):[];}).catch(function(){return null;});
   }
   Promise.all([
-    ask("https://api.kartverket.no/stedsnavn/v1/navn?sok="+enc
-        +"&treffPerSide="+FIND_FETCH+"&utkoordsys=25833&fuzzy=true",
+    /* A trailing wildcard rather than fuzzy matching. Measured on the live
+       register: «Bergve» fuzzy returns 3,464 hits led by «Bergva», a different
+       word; as a prefix it returns 78 led by «Bergveien», which is what somebody
+       half way through typing meant. Fuzzy is kept as a fallback below, for
+       when the prefix finds nothing and a typo is the likeliest explanation. */
+    ask("https://api.kartverket.no/stedsnavn/v1/navn?sok="+encodeURIComponent(q+"*")
+        +"&treffPerSide="+FIND_FETCH+"&utkoordsys=25833",
         findParsePlaces),
     ask("https://ws.geonorge.no/adresser/v1/sok?sok="+enc
         +"&treffPerSide="+FIND_FETCH+"&utkoordsys=25833",
@@ -3583,9 +3650,23 @@ function findRun(q){
       findSay("Fikk ikke kontakt med Kartverket. Søk krever nett.");
       findList.innerHTML="";return;
     }
-    var rows=findRank(q,(res[0]||[]).concat(res[1]||[]),view.cx,view.cy);
-    findRender(rows.slice(0,FIND_SHOW));
-    findSay(rows.length?"":"Ingen treff på \u201c"+q+"\u201d.");
+    var rows=findDedupe(findRank(q,(res[0]||[]).concat(res[1]||[]),
+                                 view.cx,view.cy));
+    if(rows.length){
+      findRender(rows.slice(0,FIND_SHOW));findSay("");return;
+    }
+    /* Nothing matched as typed, so a typo is now the likeliest explanation
+       and fuzzy earns its place. One extra round trip, taken only when the
+       alternative is an empty list. */
+    ask("https://api.kartverket.no/stedsnavn/v1/navn?sok="+enc
+        +"&treffPerSide="+FIND_FETCH+"&utkoordsys=25833&fuzzy=true",
+        findParsePlaces).then(function(fz){
+      if(seq!==findSeq)return;
+      var alt=findDedupe(findRank(q,fz||[],view.cx,view.cy));
+      findRender(alt.slice(0,FIND_SHOW));
+      findSay(alt.length?"Ingen nøyaktige treff. Mente du:"
+                        :"Ingen treff på \u201c"+q+"\u201d.");
+    });
   });
 }
 function findInput(){
