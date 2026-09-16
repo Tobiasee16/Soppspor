@@ -153,3 +153,41 @@ class TestTheExclusionsStaySpecific:
             "no exclusion cites the held-out extent that actually decides")
         # One dated recheck, so a reader knows which numbers these are.
         assert "2026-09-16" in block
+
+
+class TestEverySpeciesHasItsOwnColour:
+    """The picker and the map colour species by key, from SPCOL in the shell.
+
+    A species with no entry falls through to SPFALLBACK, which **cycles**. That
+    is not a hypothetical: the national build shipped eight species against
+    seven SPCOL entries, so blek piggsopp drew in traktkantarell's blue on the
+    live site - same dot in the picker, same colour on the map, no error
+    anywhere. Adding six more species would have made it seven collisions.
+
+    The list of species lives in this config and the colours live in the shell,
+    so nothing but a test spanning both can catch the mismatch.
+    """
+
+    @pytest.fixture(scope="class")
+    def spcol(self) -> dict:
+        text = (ROOT / "web" / "shell.html").read_text(encoding="utf-8")
+        block = text[text.index("var SPCOL="):text.index("var SPFALLBACK=")]
+        return dict(re.findall(r'(\w+):\s*"(#[0-9A-Fa-f]{6})"', block))
+
+    def test_every_modelled_species_has_a_colour(self, modelled, spcol):
+        missing = [sp["key"] for sp in modelled if sp["key"] not in spcol]
+        assert not missing, (
+            f"no colour for {missing}; they will fall through to SPFALLBACK, "
+            f"which cycles and will hand them another species' colour")
+
+    def test_no_two_species_share_a_colour(self, spcol):
+        seen: dict[str, str] = {}
+        for key, hexc in spcol.items():
+            assert hexc not in seen, f"{key} and {seen[hexc]} are both {hexc}"
+            seen[hexc] = key
+
+    def test_the_palette_carries_no_species_that_left_the_build(self, modelled, spcol):
+        """A stale entry is harmless on the map and misleading in the file."""
+        keys = {sp["key"] for sp in modelled}
+        assert set(spcol) <= keys, f"SPCOL names species not in the config: {set(spcol) - keys}"
+

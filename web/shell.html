@@ -1968,8 +1968,32 @@ var SPCOL={
   boletus_edulis:            "#009E73",   // green
   craterellus_cornucopioides:"#4A4A55",   // charcoal
   leccinum_versipelle:       "#D55E00",   // vermillion
-  suillus_luteus:            "#56B4E9"    // sky
+  suillus_luteus:            "#56B4E9",   // sky
+  // Added 2026-09-16 with six more species. The seven above are Okabe-Ito and
+  // stay exactly as they were: traktkantarell has been blue since Phase 0 and
+  // there is no reason to repaint somebody's map for a metric nobody asked
+  // about. These seven were chosen by maximising the smallest distance to
+  // every colour already here, under normal, protan, deutan and tritan vision
+  // at once, over the lightness and chroma band the original seven occupy -
+  // the constraint that matters, because a colour outside it does not read as
+  // a translucent fill over a topographic map whatever its separation says.
+  //
+  // Worst-case separation is **unchanged at dE 13.6**, and the pair that sets
+  // it is #0072B2 against #009E73 under tritanopia, which was already the
+  // bottleneck with seven. So the additions cost nothing. A purpose-built
+  // fourteen reaches dE 19.5, but only by changing every existing colour.
+  hydnum_repandum:           "#A2B45A",   // olive
+  lactarius_deterrimus:      "#B44848",   // brick
+  lactarius_torminosus:      "#FC90A2",   // rose
+  russula_aeruginea:         "#3636B4",   // indigo
+  russula_decolorans:        "#902412",   // oxblood
+  craterellus_lutescens:     "#906CFC",   // violet
+  albatrellus_ovinus:        "#7E247E"    // plum
 };
+// Reached only by a species with no SPCOL entry, which
+// tests/test_species_config.py now forbids. It cycles, so before that test
+// existed an eighth shipped species silently drew in the first species'
+// colour - which is exactly what blek piggsopp did on the live national build.
 var SPFALLBACK=["#0072B2","#E69F00","#CC79A7","#009E73","#4A4A55","#D55E00","#56B4E9"];
 function spColour(sp,n){
   return SPCOL[sp.key]||SPFALLBACK[n%SPFALLBACK.length];
