@@ -441,3 +441,47 @@ setTimeout(() => {
         /\.cardTop\{[^}]*touch-action:none/.test(shell));
 }
 
+// ------------------------------------- the walk-to arrow is a true bearing --
+/* Deliberate, and it looks like a bug, which is why it is pinned.
+ *
+ * Panning a rotated map really was broken in exactly this shape - view.cx moved
+ * as though north were always up - so anyone who turns the map, taps a spot and
+ * sees the arrow pointing off-target will reach for walkTo next. The owner was
+ * asked and chose to keep it: "I like that the compass points north either
+ * way." The row names the direction in words as well as drawing it, and «mot
+ * nord-øst» is a bearing whatever the screen is doing; an arrow that followed
+ * the map would contradict its own caption. */
+{
+  const src = (() => {
+    const i = shell.indexOf("function walkTo(");
+    let j = shell.indexOf("{", i), d = 0;
+    for (; j < shell.length; j++) {
+      if (shell[j] === "{") d++;
+      else if (shell[j] === "}") { d--; if (!d) break; }
+    }
+    return shell.slice(i, j + 1);
+  })();
+  const COMPASS = ["nord", "nord-øst", "øst", "sør-øst", "sør", "sør-vest",
+                   "vest", "nord-vest"];
+  function arrow(rot, east, north) {
+    const html = new Function("gpsPos", "gpsAcc", "COMPASS", "view", "esc",
+                              src + "return walkTo(" + east + "," + north + ");")(
+      [0, 0], 5, COMPASS, { rot, cx: 0, cy: 0, mpp: 10 }, (x) => x);
+    return { deg: +(html.match(/rotate\((\d+)deg\)/) || [0, -1])[1],
+             word: (html.match(/mot ([a-zø-]+)/) || [0, ""])[1] };
+  }
+  const flat = arrow(0, 0, 1000);              // due north of the reader
+  check("due north reads as north with the map upright",
+        flat.deg === 0 && flat.word === "nord", `${flat.deg}° ${flat.word}`);
+  for (const deg of [30, 90, 180, -90]) {
+    const turned = arrow(deg * Math.PI / 180, 0, 1000);
+    check(`turning the map ${deg}° does not turn the walk-to arrow`,
+          turned.deg === flat.deg && turned.word === flat.word,
+          `${turned.deg}° ${turned.word} vs ${flat.deg}° ${flat.word}`);
+  }
+  const ne = arrow(0, 1000, 1000);
+  check("and it still points where the ground is", ne.deg === 45 && ne.word === "nord-øst",
+        `${ne.deg}° ${ne.word}`);
+  check("the arrow never consults the rotation at all", !/view\.rot/.test(src));
+}
+

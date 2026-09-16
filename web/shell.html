@@ -3831,7 +3831,21 @@ function treslagLabel(ar,tre){
 var COMPASS=["nord","nordøst","øst","sørøst","sør","sørvest","vest","nordvest"];
 /* A percentile tells you whether a place is worth walking to; this tells you
    whether you can be bothered. Without it the map is something to read at
-   home rather than something to use on the way. */
+   home rather than something to use on the way.
+
+   **The arrow is a true bearing and does not follow the map's rotation.** This
+   looks like a bug and is a decision, taken by the owner in September 2026 when
+   it was put to them directly: "I like that the compass points north either
+   way." It reads as one because the drag *was* a real bug of exactly that shape
+   - panning ignored `view.rot` and had to be fixed - so the next person to turn
+   the map and tap a spot will reach for this function next. Do not.
+
+   The reasoning: the row says a direction in words as well as drawing it, and
+   «mot nord-øst» is a compass bearing whatever the screen is doing. An arrow
+   that turned with the map would contradict its own caption, and a bearing is
+   the thing that still works when you put the phone in your pocket and walk.
+   The compass rose on the map is what says where north is on screen; these are
+   two different questions and the answer to this one is north. */
 function walkTo(east,north){
   if(!gpsPos)return "";
   var dx=east-gpsPos[0],dy=north-gpsPos[1];
