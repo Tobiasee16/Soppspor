@@ -276,5 +276,48 @@ const OSLO = [262000, 6650000];   // roughly the middle of the city, EPSG:25833
 }
 
 
+// ------------------------------------------------- the sheet starts empty --
+/* Reopening search used to show the last query still in the field, the last
+   results still listed, and their distances still measured from wherever the
+   map was when they were found. So the first thing anybody did was clear a box
+   and ignore a list describing somewhere they had already gone. */
+{
+  const src = (() => {
+    const i = shell.indexOf("function findReset(");
+    let j = shell.indexOf("{", i), d = 0;
+    for (; j < shell.length; j++) {
+      if (shell[j] === "{") d++;
+      else if (shell[j] === "}") { d--; if (!d) break; }
+    }
+    return shell.slice(i, j + 1);
+  })();
+
+  let aborted = false, said = null, seq = 0, cleared = 0;
+  const findQ = { value: "Bergen" };
+  const findList = { set innerHTML(v) { if (v === "") cleared++; } };
+  new Function("findTimer", "findCtl", "findSeq", "findQ", "findList", "findSay",
+               "clearTimeout",
+               src + "findReset(); return findSeq;")(
+    1, { abort() { aborted = true; } }, seq, findQ, findList,
+    (t) => { said = t; }, () => {});
+
+  check("it empties the field", findQ.value === "", JSON.stringify(findQ.value));
+  check("it empties the result list", cleared === 1, String(cleared));
+  check("it clears the message", said === "", JSON.stringify(said));
+  check("it aborts a request still in flight", aborted);
+  check("and bumps the sequence, so a late answer is ignored",
+        /findSeq\+\+/.test(src));
+
+  check("closing the sheet resets it",
+        /function findShut\(\)\{[\s\S]*?findReset\(\);[\s\S]*?\}/.test(shell));
+  check("and so does opening it, before the field is focused", (() => {
+    const open = shell.slice(shell.indexOf('getElementById("findBtn")'));
+    const reset = open.indexOf("findReset()");
+    const focus = open.indexOf("findQ.focus()");
+    return reset > -1 && focus > -1 && reset < focus;
+  })());
+}
+
+
 console.log(fails ? `\n${fails} FAILED` : "\nall search checks passed");
 process.exit(fails ? 1 : 0);

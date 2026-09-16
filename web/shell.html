@@ -3637,15 +3637,30 @@ if(window.visualViewport){
   window.visualViewport.addEventListener("resize",findLift);
   window.visualViewport.addEventListener("scroll",findLift);
 }
+/* Everything a search leaves behind. Reopening the sheet used to show the
+   previous query still in the field, the previous results still listed, and
+   their distances still measured from wherever the map was when they were
+   found - so the first thing a reader did was clear a box and ignore a list
+   describing somewhere they had already been. An in-flight request is dropped
+   too, or its answer arrives into the next search. */
+function findReset(){
+  if(findTimer){clearTimeout(findTimer);findTimer=null;}
+  if(findCtl){try{findCtl.abort();}catch(e){}findCtl=null;}
+  findSeq++;
+  findQ.value="";
+  findList.innerHTML="";
+  findSay("");
+}
 function findShut(){
   findSheet.classList.remove("on");
   findSheet.style.bottom="";
   findSheet.style.maxHeight="";
+  findReset();
 }
 document.getElementById("findBtn").addEventListener("click",function(){
   closeSheets();
+  findReset();
   findSheet.classList.add("on");
-  findSay("");
   /* Focused only after the sheet is up: focusing a field behind a closed sheet
      is what makes iOS raise the keyboard over nothing. */
   setTimeout(function(){try{findQ.focus();}catch(e){}findLift();},260);
@@ -3689,9 +3704,19 @@ document.getElementById("cardClose").addEventListener("click",function(){
 function makeDismissable(sheet,onClose){
   if(!sheet.querySelector(".grab"))return;   /* a notch is the promise */
   var y0=null,dy=0,dragging=false,fromTop=true;
-  /* A press that begins on a control is that control's. */
+  /* Text entry only.
+
+     This excluded every button, which sounded careful and was the whole bug:
+     the species list is a column of buttons and so is the search result list,
+     so "the whole sheet is the handle" left the notch, the header and a caption
+     - almost no sheet at all. A press on a row may become a drag; what it must
+     not do is fire the row's click afterwards, and `end` swallows that.
+
+     A text field keeps its press, because there a drag means selecting text and
+     placing a caret, and taking that over would be worse than a sheet that has
+     one small area you cannot pull from. */
   function onControl(t){
-    return !!(t&&t.closest&&t.closest("button,input,textarea,select,a,summary"));
+    return !!(t&&t.closest&&t.closest("input,textarea,select"));
   }
   function down(e){
     if(e.button>0||onControl(e.target))return;
@@ -3722,6 +3747,14 @@ function makeDismissable(sheet,onClose){
     window.removeEventListener("pointercancel",end);
     if(!dragging)return;
     dragging=false;sheet.classList.remove("drag");sheet.style.transform="";
+    /* The press started on a row and ended as a gesture, so the browser is
+       about to deliver that row's click. Swallow exactly one, in the capture
+       phase, before it reaches the row - otherwise pulling the sheet shut also
+       picks a species or flies to a search result. */
+    var swallow=function(ev){
+      ev.stopPropagation();if(ev.preventDefault)ev.preventDefault();};
+    sheet.addEventListener("click",swallow,true);
+    setTimeout(function(){sheet.removeEventListener("click",swallow,true);},0);
     if(dy>70){sheet.classList.remove("on");if(onClose)onClose();}
   }
   sheet.addEventListener("pointerdown",down);

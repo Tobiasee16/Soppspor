@@ -387,7 +387,16 @@ setTimeout(() => {
       classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c) },
       querySelector: (sel) => (sel === ".grab" ? {} : null),
       addEventListener(t, fn) { (this.handlers[t] ||= []).push(fn); },
-      fire(t, ev) { (this.handlers[t] || []).forEach((fn) => fn(ev)); },
+      removeEventListener(t, fn) {
+        this.handlers[t] = (this.handlers[t] || []).filter((f) => f !== fn); },
+      fire(t, ev) { (this.handlers[t] || []).slice().forEach((fn) => fn(ev)); },
+      /* Whether a click delivered now would reach the row it was aimed at. */
+      clickReaches() {
+        let stopped = false;
+        (this.handlers.click || []).slice().forEach((fn) =>
+          fn({ stopPropagation() { stopped = true; }, preventDefault() {} }));
+        return !stopped;
+      },
       open: () => classes.has("on"),
     };
     new Function("sheet", "onClose", "window", src + "makeDismissable(sheet,onClose);")(
@@ -395,7 +404,10 @@ setTimeout(() => {
     return { sheet, win };
   }
   const plain = { closest: () => null };
-  const control = { closest: () => ({}) };
+  /* A species row or a search result: a <button>, and most of the sheet. */
+  const row = { closest: (sel) => (/button/.test(sel) ? {} : null) };
+  /* The search field, where a drag means selecting text. */
+  const field = { closest: (sel) => (/input/.test(sel) ? {} : null) };
   const ev = (y, target = plain) => ({ clientY: y, target, button: 0,
                                        cancelable: true, preventDefault() {} });
 
@@ -459,11 +471,30 @@ setTimeout(() => {
   check("a 3 px wobble is not a drag and is not swallowed",
         !sheet.style.transform && !prevented);
 
-  // Controls keep being controls.
+  /* The bug that made "the whole sheet is the handle" a lie. Excluding every
+     button sounded careful; the species list and the search results are columns
+     of buttons, so it left the notch, the header and a caption. */
   ({ sheet, win } = makeSheet(0));
-  sheet.fire("pointerdown", ev(100, control));
+  sheet.fire("pointerdown", ev(100, row));
+  win.fire("pointermove", ev(200));
+  check("a pull that starts on a row still drags the sheet",
+        sheet.style.transform === "translateY(100px)", sheet.style.transform);
+  win.fire("pointerup", ev(200));
+  check("and closes it", !sheet.open());
+  check("but the row's click is swallowed, or dismissing also picks a species",
+        !sheet.clickReaches());
+
+  // A tap on a row is a tap, and must reach the row.
+  ({ sheet, win } = makeSheet(0));
+  sheet.fire("pointerdown", ev(100, row));
+  win.fire("pointerup", ev(100));
+  check("a tap on a row is left alone", sheet.open() && sheet.clickReaches());
+
+  // Text entry keeps its press: there a drag selects text.
+  ({ sheet, win } = makeSheet(0));
+  sheet.fire("pointerdown", ev(100, field));
   win.fire("pointermove", ev(300));
-  check("a press that starts on a button or a row does not drag the sheet",
+  check("a press that starts in a text field does not drag the sheet",
         sheet.open() && !sheet.style.transform, String(sheet.style.transform));
 
   // Upward is not a dismissal.
