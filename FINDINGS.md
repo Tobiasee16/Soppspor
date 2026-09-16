@@ -5338,3 +5338,50 @@ found by asking what a drag means rather than by reading the arithmetic.
 And the corollary, from 32c: a test that exercises a function is not a test that
 exercises the feature. Fake elements will happily confirm a listener is attached
 to something no finger can touch.
+
+### 32f. The browser arrived, and immediately contradicted me - 2026-09-17
+
+Written after 32e, which argues that only running a thing tells you what it
+does. The owner approved Playwright as a dev dependency on the strength of it,
+and the first measurement overturned the fix I had just shipped and explained
+at length.
+
+The search sheet going off-screen had been "fixed" three times. The third was a
+flex rebuild of the sheet - fixed header and field, list scrolling inside - and
+the commit message called `min-height:0` the load-bearing line, because a flex
+item will not shrink below its content without it.
+
+`tests/test_layout.js` ends by breaking the layout on purpose to prove it can
+detect the bug. Aimed at `min-height:0`, **it passed**. So the declaration was
+measured against four alternatives, rendering the built page in Chromium at
+390x844 with the viewport halved for a keyboard:
+
+| configuration | field on screen |
+|---|---|
+| as shipped, flex frame | yes |
+| without `min-height:0` | yes |
+| without `overflow:hidden` | yes |
+| not a flex column at all | yes |
+| **no height cap** | **no: sheet 1591 px, top at -1222 px** |
+
+**The flex rebuild is not what keeps the field on screen. The height cap is,
+and nothing else is.** Every explanation offered for the previous fix was
+wrong about the mechanism while being right that the symptom improved.
+
+That matters beyond the tidiness, because it says where the fragility is.
+`max-height:74%` resolves against the window, so with a keyboard covering the
+bottom third it is taller than what remains visible; `findLift` corrected that
+from JavaScript, and a correction that must fire at the right moment can fail
+to - which is the best available explanation for why the fault kept returning
+on a real phone and never on any of ours. `.card` now also caps at `74dvh`,
+the same number computed by the browser against the viewport actually visible.
+No JavaScript in the path.
+
+The flex column stays, with a smaller claim: the list scrolls instead of the
+whole sheet, so the field and header stay put while results are read.
+
+**The general lesson is about the self-check rather than the layout.** A
+mutation check that passes is not a formality; it is the test telling you that
+your account of why the code works is wrong. Three fixes were shipped here on
+explanations that sounded right and were never tested as explanations. The one
+that was tested lasted about ninety seconds.
