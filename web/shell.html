@@ -1131,6 +1131,33 @@ function s2w(x,y){
   if(r){var c=Math.cos(r),sn=Math.sin(r),rx=dx*c+dy*sn;dy=-dx*sn+dy*c;dx=rx;}
   return[dx*view.mpp+view.cx,view.cy-dy*view.mpp];}
 
+/* Move the view by a drag measured in screen pixels.
+ *
+ * The delta form of s2w, and it has to be, because a drag is a screen-space
+ * measurement and the view centre is a world-space one. Turning the map turns
+ * that relationship: with the map a quarter turn clockwise, north lies to the
+ * right of the screen, so dragging right must walk the view south rather than
+ * west.
+ *
+ * This was two inline lines - `view.cx -= dx * view.mpp` and its partner - and
+ * they are only the screen-to-world direction while rot is 0. Reported from
+ * the phone as the map "still thinking it is pointing north" when turned.
+ * Everything else that moves the view already anchors through s2w, which is
+ * why the pinch held its ground and only the drag felt wrong.
+ *
+ * The momentum glide carried its own copy of the same two lines, so it is a
+ * function now rather than a line repeated twice: the second copy is exactly
+ * how the first one survived being noticed.
+ *
+ * At rot 0 the rotation reduces to the identity and this is the old
+ * arithmetic, unchanged, which tests/test_gestures.js pins rather than trusts.
+ */
+function panBy(dx,dy){
+  var r=view.rot,wx=dx,wy=dy;
+  if(r){var c=Math.cos(r),sn=Math.sin(r);wx=dx*c+dy*sn;wy=-dx*sn+dy*c;}
+  view.cx-=wx*view.mpp;view.cy+=wy*view.mpp;
+}
+
 /* The canvas transform for anything that depicts ground: device pixels, then
    the map's own rotation about the middle of the screen. Everything drawn
    through this may use the flat w2s and comes out turned; everything drawn
@@ -2538,7 +2565,7 @@ function glide(){
   var prev=performance.now();
   function step(now){
     var dt=Math.min(now-prev,48); prev=now;
-    view.cx-=vx*dt*view.mpp; view.cy+=vy*dt*view.mpp;
+    panBy(vx*dt,vy*dt);
     var k=Math.pow(.0022,dt/1000);
     vx*=k; vy*=k;
     clampView(); draw();
@@ -2633,7 +2660,7 @@ canvas.addEventListener("pointermove",function(e){
   if(moved>10)cancelLongPress();
   last={x:e.clientX,y:e.clientY};
   pts[e.pointerId]={x:e.clientX,y:e.clientY};
-  view.cx-=dx*view.mpp;view.cy+=dy*view.mpp;clampView();requestDraw();});
+  panBy(dx,dy);clampView();requestDraw();});
 canvas.addEventListener("pointerup",function(e){
   delete pts[e.pointerId];
   cancelLongPress();

@@ -130,12 +130,16 @@ const js = shell.slice(shell.indexOf("<script>") + 8, shell.lastIndexOf("</scrip
    somewhere unrelated. This anchor has already drifted once. */
 if (js.indexOf("\nsize();\n") < 0)
   throw new Error("probe anchor missing from shell.html - the shell moved");
-const probe = js.replace("\nsize();\n", "\nglobal.__view=view;\nsize();\n");
+const probe = js.replace("\nsize();\n",
+  "\nglobal.__view=view;global.__s2w=s2w;global.__w2screen=w2screen;"
+  + "global.__panBy=panBy;global.__GRID=GRID;\nsize();\n");
 if (probe === js) throw new Error("could not install the view probe");
 (0, eval)(probe);
 flush(3);
 
 const view = global.__view;
+const s2w = global.__s2w, w2screen = global.__w2screen;
+const panBy = global.__panBy, GRID = global.__GRID;
 function fire(type, ev) {
   (listeners.get("map:" + type) || []).forEach((fn) => fn(ev));
 }
@@ -219,6 +223,105 @@ flush(2);
 check("a lost pointer does not leave the map in pinch mode",
   Math.abs(view.cx - (86000 + 20 * 20)) < 1,
   `cx ${view.cx.toFixed(0)}, expected ${86000 + 400}`);
+
+// ----------------------------------------------- panning a rotated map --
+/* Reported from the phone: with the map turned, dragging it "still thinks it's
+   pointing north". It did. The one-finger pan did
+   `view.cx -= dx * mpp; view.cy += dy * mpp`, which is the screen-to-world
+   direction only while rot is 0, and the momentum glide repeated the same two
+   lines. Everything else that moves the view already anchored through s2w,
+   which is why the pinch held its ground and only the drag felt wrong.
+
+   The property checked is not a sign convention, it is what a drag means: the
+   ground under your finger stays under your finger. That holds at any angle, so
+   the same assertion runs at several, and it failed at every non-zero one
+   before the fix.
+
+   Three things this had to be taught, all harness rather than product. The
+   cases sit in the middle of the grid, because a rotated viewport is wider than
+   an upright one and a clamped drag fails the invariant for a reason that is
+   not the bug. Each drag ends slowly, because a quick release starts a momentum
+   glide and the stub runs queued animation frames even after stopGlide has
+   cancelled them - a glide left over from one case was still moving the map
+   during the next, producing errors that grew with the iteration count and
+   looked convincingly like they grew with the angle. And the whole block sits
+   ahead of the long-press case rather than after it: that one leaves a finger
+   down and waits on a real timer, so a resetPointers here lifted its finger and
+   cancelled the press it was about to check. */
+const viewBefore = { cx: view.cx, cy: view.cy, mpp: view.mpp, rot: view.rot };
+const MID = { x: (GRID[0] + GRID[2]) / 2, y: (GRID[1] + GRID[3]) / 2 };
+
+resetPointers();
+function dragKeepsGroundUnderFinger(rot, dx, dy) {
+  view.cx = MID.x; view.cy = MID.y; view.mpp = 6; view.rot = rot;
+  const want = { cx: view.cx, cy: view.cy };
+  const from = { x: 200, y: 400 };
+  const held = s2w(from.x, from.y);        // world point under the finger
+  fire("pointerdown", pe(31, from.x, from.y)); NOW += 16;
+  fire("pointermove", pe(31, from.x + dx, from.y + dy));
+  flush(2);
+  const now = w2screen(held[0], held[1]);  // where that point ended up
+  const c = Math.cos(rot), sn = Math.sin(rot);
+  const drift = Math.hypot(
+    view.cx - (want.cx - (dx * c + dy * sn) * 6),
+    view.cy - (want.cy + (-dx * sn + dy * c) * 6));
+  NOW += 300;                              // released slowly: starts no glide
+  resetPointers();
+  flush(2);
+  return { off: Math.hypot(now[0] - (from.x + dx), now[1] - (from.y + dy)), drift };
+}
+for (const deg of [0, 30, 90, 150, -90]) {
+  const r = dragKeepsGroundUnderFinger(deg * Math.PI / 180, 60, -40);
+  check(`a drag on a map turned ${deg}\u00b0 keeps the ground under the finger`,
+        r.off < 1.5 && r.drift < 1, `${r.off.toFixed(2)} px adrift`);
+}
+
+/* And the direction, stated once concretely, because an invariant can be
+   satisfied by two wrongs that cancel. Turned a quarter turn, north lies to the
+   right of the screen, so dragging right must walk the view south, not west. */
+view.cx = MID.x; view.cy = MID.y; view.mpp = 6; view.rot = Math.PI / 2;
+{
+  const p = w2screen(MID.x, MID.y + 1000);       // a point 1 km due north
+  check("a quarter turn puts north to the right of the screen",
+        p[0] > W / 2 + 10 && Math.abs(p[1] - H / 2) < 10,
+        `north plots at ${p[0].toFixed(0)},${p[1].toFixed(0)}`);
+  const before = { cx: view.cx, cy: view.cy };
+  panBy(60, 0);                                  // drag right
+  check("dragging right on a quarter-turned map moves the view south",
+        view.cy < before.cy - 100 && Math.abs(view.cx - before.cx) < 1,
+        `cx ${(view.cx - before.cx).toFixed(0)} m, cy ${(view.cy - before.cy).toFixed(0)} m`);
+}
+
+/* North-up must be untouched. The fix reduces to the old two lines at rot 0,
+   and this says so rather than trusting the algebra. */
+view.rot = 0; view.cx = MID.x; view.cy = MID.y; view.mpp = 20;
+{
+  const before = { cx: view.cx, cy: view.cy };
+  panBy(60, -40);
+  check("north-up panning is exactly what it always was",
+        Math.abs((view.cx - before.cx) + 60 * 20) < 1e-9 &&
+        Math.abs((view.cy - before.cy) + 40 * 20) < 1e-9,
+        `${(view.cx - before.cx).toFixed(0)}, ${(view.cy - before.cy).toFixed(0)}`);
+}
+
+/* The glide reuses the velocities the drag produced and carried its own copy of
+   the broken arithmetic. One helper now: a second copy is exactly how the first
+   survived being noticed, so what is pinned is that only one remains. Comments
+   are stripped first - the helper's own note quotes the line it replaced, and a
+   check that its own explanation defeats is worse than no check. */
+const code = shell.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+check("the drag and the glide both go through the helper",
+      /panBy\(dx,dy\)/.test(code) && /panBy\(vx\*dt,vy\*dt\)/.test(code));
+check("and no raw screen-delta pan survives outside it",
+      (code.match(/view\.cx\s*-=[^;]*view\.mpp/g) || []).length === 1,
+      (code.match(/view\.cx\s*-=[^;]*view\.mpp/g) || []).join(" | "));
+
+/* Leave the map as it was found. The next case sets its own centre and scale
+   but not its rotation, and a long press read through a turned s2w lands
+   somewhere else entirely - possibly outside BOUNDS, where it saves nothing. */
+view.cx = viewBefore.cx; view.cy = viewBefore.cy;
+view.mpp = viewBefore.mpp; view.rot = viewBefore.rot;
+resetPointers();
 
 // 6. holding a finger on the map saves a private spot. Real timer, so this
 //    one has to wait rather than tick the fake clock.
