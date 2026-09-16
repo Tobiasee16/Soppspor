@@ -196,7 +196,11 @@ class TestTheProse:
         about = payload["about"]
         prose = " ".join(v for v in about.values() if isinstance(v, str))
         assert "styrer sopp sterkt" not in prose
-        assert "avsetning" in about["ab_layers"], about["ab_layers"]
+        # The measured result moved out of the feature list and into the
+        # weaknesses when the page was cut down, which is where it belongs -
+        # the list says what the layers are, not what they failed to show.
+        assert "Underlaget skiller artene" in about["ab_weak"]
+        assert "kalk" in about["ab_weak"].lower()
 
     def test_a_layout_change_in_a_report_stops_the_build(self, tmp_path,
                                                         monkeypatch):
@@ -290,8 +294,13 @@ class TestTheProse:
         assert "elevation" in keys and "ar50" in keys
         # The national model has no TWI, so neither can the card.
         assert "twi" not in keys
-        assert "fuktighetsindeks" in payload["about"]["ab_layers"]
-        assert "Uten fuktighetsindeks" in payload["about"]["ab_layers"]
+        # The national model has no wetness index, so the national feature
+        # list must not offer one. The markup's own list does - the inline
+        # Kristiansand build genuinely has it - so this checks the override
+        # actually removed it rather than that a paragraph apologises for it.
+        assert "vann samler seg" in markup()
+        assert "vann samler seg" not in payload["about"]["ab_layers"]
+        assert "fuktighetsindeks" not in payload["about"]["ab_layers"]
 
     def test_it_says_which_ground_the_model_never_saw(self, built):
         """The national map is in-sample everywhere but Nordland, unlike Phase

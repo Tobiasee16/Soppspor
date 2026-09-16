@@ -408,6 +408,27 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
   padding:11px 13px;margin:0 0 12px}
 .doc .warn p:last-child{margin-bottom:0}
 .doc .src{font-size:12.5px;color:var(--ink-3);line-height:1.5}
+/* The rest of the page, folded. Om used to be about 9,000 characters of
+   continuous prose and nobody read it; what a reader wants first is how the
+   thing works, and the validation belongs behind a tap rather than deleted -
+   it is the part that makes the estimate honest, and it is still one tap away.
+   Same native details/summary as personvern.html, for the same reasons. */
+.doc .more{margin:22px 0 0;font-size:13px;color:var(--ink-3)}
+.doc .acc{margin:7px 0 0;background:var(--card);border-radius:12px;overflow:hidden}
+.doc .acc details{border-bottom:.5px solid var(--sep)}
+.doc .acc details:last-child{border-bottom:none}
+.doc .acc summary{display:flex;align-items:center;justify-content:space-between;
+  gap:12px;padding:13px 15px;min-height:48px;cursor:pointer;color:var(--ink);
+  font-weight:600;font-size:15.5px;list-style:none}
+.doc .acc summary::-webkit-details-marker{display:none}
+.doc .acc summary::after{content:"\203A";color:var(--ink-3);font-size:21px;
+  line-height:1;flex:0 0 auto;transform:rotate(90deg);transition:transform .18s}
+.doc .acc details[open] summary::after{transform:rotate(-90deg)}
+.doc .acc summary:focus-visible{outline:2px solid var(--tint);outline-offset:-3px}
+.doc .acc .body{padding:0 15px 13px}
+.doc .acc .body > :last-child{margin-bottom:0}
+.doc .acc .body h2{display:none}
+@media (prefers-reduced-motion:reduce){.doc .acc summary::after{transition:none}}
 </style>
 
 <div class="app">
@@ -526,187 +547,153 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
       <div class="doc">
         <p class="lead" id="ab_lead">Kartet er et <b>anslag</b>, ikke en fasit. Det viser ikke hvor
           det står sopp. Det viser hvor terrenget <b>ligner på steder der arten faktisk
-          er funnet før</b>, justert for hvor mye det har regnet i det siste &mdash;
-          og det er noe annet.</p>
+          er funnet før</b>, justert for hvor mye det har regnet i det siste.</p>
         <p id="ab_intro">Ingen har gått over Kristiansand og registrert hva som vokser hvor. Det
           finnes bare spredte funn, samlet inn av folk som gikk der de pleier å gå.
-          Modellen tar de funnene, lærer hva slags terreng de ligger i, og farger
-          resten av kommunen etter hvor godt den ligner.</p>
+          Modellen lærer hva slags terreng de funnene ligger i, og farger resten etter
+          hvor godt det ligner.</p>
 
         <h2>Slik blir kartet til</h2>
 
         <div class="step"><span class="n">1</span><h3>Funnene hentes inn</h3>
-          <p id="ab_s1">Fra <b>Artskart</b> (Artsdatabanken og GBIF-Norge), én art om gangen.
-            For traktkantarell er det 248 funn i Agder etter at funn som ligger oppå
-            hverandre er tynnet bort; de andre artene ligger mellom 126 og 396.
-            Det finnes <b>ingen registrerte fravær</b> &mdash; ingen har notert
-            «her lette jeg og fant ingenting». Det er den viktigste begrensningen i
-            hele prosjektet.</p></div>
+          <p id="ab_s1">Fra <b>Artskart</b>, én art om gangen. Det finnes
+            <b>ingen registrerte fravær</b> &mdash; ingen har notert «her lette jeg og
+            fant ingenting». Det er den største begrensningen i hele prosjektet.</p></div>
 
         <div class="step"><span class="n">2</span><h3>Vi korrigerer for hvor folk går</h3>
-          <p id="ab_s2">Soppfunn klumper seg langs stier, veier og nær folk. En modell som får
-            tilfeldige punkter å sammenligne med, lærer bare «nær vei». Derfor trekkes
-            sammenligningspunktene fra <b>alle soppfunn i Agder</b> &mdash; 82 129
-            registreringer, 3 882 etter tynning. Da har både funnene og
-            sammenligningsgrunnlaget samme skjevhet, og modellen må finne noe annet
-            enn tilgjengelighet for å skille dem.</p></div>
+          <p id="ab_s2">Soppfunn klumper seg der folk går. Sammenlignet med tilfeldige punkter
+            ville modellen bare lært «nær vei». Derfor sammenlignes funnene med
+            <b>alle andre soppfunn</b> i stedet. Da har begge sider samme skjevhet, og
+            modellen må finne noe annet enn tilgjengelighet for å skille dem.</p></div>
 
         <div class="step"><span class="n">3</span><h3>Terrenget beskrives</h3>
-          <p id="ab_s3">Hver 16&nbsp;m rute får <b>40 tall</b> knyttet til seg, fra offentlige
-            kartdata:</p>
+          <p id="ab_s3">Hver rute får <b>40 tall</b> knyttet til seg, fra offentlige kartdata:</p>
           <ul id="ab_layers">
-            <li><b>Terreng</b> fra Kartverkets høydemodell: høyde, helning, himmelretning,
-              krumning og <i>fuktighetsindeks</i> (hvor vann samler seg)</li>
-            <li><b>Skog</b> fra NIBIO SR16: treslag, alder, kronedekning, volum,
-              grunnflate, trehøyde, bonitet</li>
-            <li><b>Løsmasser</b> fra NGU: morene, breelv, marin leire, torv, bart fjell
-              og fem til. Laget sier hva slags <i>avsetning</i> grunnen er, ikke hvor
-              kalkrik den er &mdash; og det skiller artene svakt</li>
-            <li><b>Arealtype</b> fra NIBIO AR50: skog, myr, dyrka mark, bebygd, vann</li>
-            <li><b>Høstnedbør</b> fra MET seNorge: 9. august&ndash;20. oktober,
-              snitt 1991&ndash;2020</li>
+            <li><b>Terreng</b>: høyde, helning, himmelretning, krumning og hvor vann samler seg</li>
+            <li><b>Skog</b> fra NIBIO SR16: treslag, alder, kronedekning, volum, trehøyde</li>
+            <li><b>Løsmasser</b> fra NGU: morene, breelv, marin leire, torv, bart fjell</li>
+            <li><b>Arealtype</b>: skog, myr, dyrka mark, bebygd, vann</li>
+            <li><b>Høstnedbør</b>, snitt over tretti år</li>
           </ul></div>
 
-        <div class="step"><span class="n">4</span><h3>Modellen tilpasses</h3>
-          <p id="ab_s4">En <b>MaxEnt-type modell</b> (L1-straffet logistisk regresjon med
-            kvadratiske ledd) lærer hvilke kombinasjoner av de 40 tallene som skiller
-            funnstedene fra sammenligningspunktene. Den tilpasses på <b>Agder minus
-            Kristiansand</b>, pluss en 4 km sone rundt kommunen som også holdes unna.
-            Kristiansand er altså terreng modellen aldri har sett.</p></div>
+        <div class="step"><span class="n">4</span><h3>Modellen lærer forskjellen</h3>
+          <p id="ab_s4">En <b>MaxEnt-type modell</b> finner hvilke kombinasjoner av de 40 tallene
+            som skiller funnstedene fra sammenligningspunktene. Den tilpasses på ett
+            område og testes på et annet, som den aldri har sett.</p></div>
 
         <div class="step"><span class="n">5</span><h3>Flaten jevnes ut</h3>
-          <p>Modellen gir hver rute et tall. Tallene er støyete på denne skalaen, så
-            flaten <b>jevnes ut</b> før den tegnes &mdash; en strek rundt enkeltruter
+          <p>Modellen gir hver rute et tall, og tallene er støyete på denne skalaen.
+            Flaten <b>jevnes ut</b> før den tegnes &mdash; en strek rundt enkeltruter
             ville vært en strek rundt støy.</p></div>
 
         <div class="step"><span class="n">6</span><h3 id="ab_s6h">Ferske forhold legges oppå</h3>
           <p id="ab_s6">Nedbøren de siste 21 døgnene hentes fra <b>MET seNorge</b> og sammenlignes
-            med hva som er normalt der på den datoen. Ruter som har fått mer enn vanlig
-            vektes opp, ruter som har fått mindre vektes ned. Så deles resultatet i de
-            øverste <b>30&nbsp;%, 15&nbsp;% og 5&nbsp;%</b> innenfor kommunen.</p></div>
+            med hva som er normalt der på den datoen. Har det regnet mer enn vanlig, vektes
+            ruta opp; mindre, ned. Så deles flaten i de øverste
+            <b>30&nbsp;%, 15&nbsp;% og 5&nbsp;%</b>.</p></div>
 
         <div class="warn">
-          <p id="ab_zonewarn"><b>Sonene er en rangering, ikke en sannsynlighet.</b> «Topp» betyr at ruta
-            er blant de 5&nbsp;% mest lovende <i>i Kristiansand</i>. Det sier ingenting
-            om hvor mange sopp som står der, eller om det står noen i det hele tatt.</p>
+          <p id="ab_zonewarn"><b>Sonene er en rangering, ikke en sannsynlighet.</b> «Topp» betyr at
+            ruta er blant de 5&nbsp;% mest lovende. Det sier ingenting om hvor mange sopp
+            som står der, eller om det står noen i det hele tatt.</p>
         </div>
-
-        <div id="ab_clocks">
-        <h2>To klokker: habitat og forhold</h2>
-        <p>Kartet kombinerer to lag som oppdateres i helt ulikt tempo.</p>
-        <ul>
-          <li><b>Habitat</b> endrer seg knapt. Skog, løsmasser og terreng er de samme
-            neste år. Dette laget er modellen, og det er det som er testet.</li>
-          <li><b>Forhold</b> endrer seg hele tiden. Sopp fruktifiserer etter fukt, og
-            det hjelper ikke at et sted er perfekt hvis det ikke har regnet på tre uker.
-            Dette laget hentes fra <b>MET seNorge</b> og er nedbøren de siste 21 døgnene,
-            sammenlignet med hva som er normalt <i>akkurat der</i> på akkurat den datoen,
-            målt mot 1991&ndash;2020.</li>
-        </ul>
-        <p>Nedbøren i selve modellen er et 30-årssnitt. Det er riktig for en modell:
-          det beskriver hva et sted <i>pleier</i> å være. Men det sier ingenting om
-          denne uka, og derfor ligger det ferske laget utenpå i stedet for inni.</p>
-        <p>Værlaget <b>hentes på nytt hver gang du åpner appen</b>, så lenge du har
-          dekning. seNorge publiseres ett til to døgn etterskuddsvis, og appen skriver
-          hvor gammelt tallet er i stedet for å la deg tro at det er sanntid. Uten
-          dekning står det som lå der fra før.</p>
-        <div class="warn">
-          <p><b>Det ferske laget er ikke testet.</b> Ingen soppfunn er brukt til å
-            finne ut hvor mye nedbør skal telle. Vekten er satt etter skjønn og er
-            bevisst liten &mdash; forholdene kan flytte rangeringen noe, ikke snu den.
-            Habitatlaget er det som er validert; dette er en tommelfingerregel oppå.</p>
-          <p>Trykk på en rute, så ser du begge tallene hver for seg.</p>
-        </div>
-
-        </div>
-
-        <h2>Hvordan vi vet om det virker i det hele tatt</h2>
-        <p>Det er lett å lage et kart som ser overbevisende ut og ikke betyr noe.
-          Tre ting er gjort for å hindre det:</p>
-        <ul>
-          <li><b>Ingen tilfeldig oppdeling.</b> Funn som ligger nær hverandre ligner
-            hverandre. Deler man tilfeldig, havner nabofunn på hver sin side og modellen
-            får se fasiten. Her deles kartet i <b>7,5 km ruter</b> med en <b>4 km sone</b>
-            som kastes, slik at test og trening ikke rører hverandre.</li>
-          <li id="ab_transfer"><b>Overføringstest.</b> Modellen tilpasses på resten av Agder og testes
-            én gang på Kristiansand, som den aldri har sett.</li>
-          <li><b>En kontroll uten økologi.</b> Falske «funn» trekkes fra selve
-            innsatsmønsteret, uten noe biologisk innhold. Den <i>skal</i> lande på 0,50.
-            Gjør den ikke det, er sammenligningsgrunnlaget ødelagt og ingenting annet
-            i tabellen betyr noe.</li>
-        </ul>
-
-        <table id="aucTable"></table>
-        <p id="ab_auc">AUC 0,50 er myntkast. 1,00 er perfekt. <b>Under 0,75 er svakt til
-          moderat</b> &mdash; bedre enn tilfeldig, langt fra pålitelig. Kolonnen
-          til høyre er hvor mange funn i Kristiansand tallet er målt på; er den
-          lav, er treffsikkerheten en pekepinn og ikke et mål. Kontrollen landet
-          på 0,496, så korreksjonen for innsats holder.</p>
-
-        <div id="ab_order">
-        <h2>Det som ikke gikk som forutsagt</h2>
-        <p>Før noen modell ble kjørt, ble det skrevet ned hvilken rekkefølge vi ventet:
-          traktkantarell best (den er kresen på fuktig mosegran), kantarell i midten,
-          rød fluesopp dårligst. <b>Det slo ikke til.</b> På Kristiansand kom
-          traktkantarell <i>sist</i>, og kantarell best &mdash; nesten omvendt av det
-          vi hadde registrert på forhånd.</p>
-        <p>Spådommen står, og resultatet står ved siden av den. Et kart som bare viste
-          fram det som stemte ville vært et dårligere kart.</p>
-        <p>De øvrige artene i listen kom til <b>etter</b> at den testen var gjort.
-          De går gjennom nøyaktig samme mølle: samme sammenligningsgrunnlag, samme
-          oppdeling i 7,5 km ruter, samme kontroll uten økologi ved siden av, og
-          treffsikkerheten er målt på Kristiansand på samme måte. Men det ble aldri
-          skrevet ned på forhånd hvordan <i>de</i> skulle rangere, så de inngår ikke
-          i testen over, og resultatet av den endres ikke av at de kom til.</p>
-
-        </div>
-
-        <h2 id="ab_droph">Én art kom ikke gjennom</h2>
-        <p id="ab_drop">Regelen er satt på forhånd: <b>en art vises bare hvis den slår kontrollen
-          på terreng modellen aldri har sett.</b> Kontrollen er falske funn uten
-          økologi i seg. Klarer ikke en art å skille seg fra den, har den ikke vist
-          at den kan noe om Kristiansand, og da hører den ikke hjemme på et kart
-          noen skal gå etter.</p>
-        <div class="warn" id="dropped"></div>
-        <p id="ab_dropkeep">Den er ikke slettet fra analysen &mdash; tallet står i rapportene, og
-          det ville vært juks å fjerne en art fordi den gjorde det dårlig. Men det
-          er forskjell på hva som skal stå i en tabell og hva som skal tegnes som
-          en blå sone til noen som skal bruke lørdagen på å gå dit.</p>
-        <div class="warn">
-          <p id="ab_thin"><b>Flere av de andre hviler på få funn.</b> Kolonnen «Funn» i tabellen
-            over er hvor mange registreringer i Kristiansand treffsikkerheten er
-            målt på. Er den lav, er tallet en pekepinn og ikke et mål &mdash;
-            artslisten merker de tynneste med «få funn».</p>
-        </div>
-
-        <h2>Svakheter du bør kjenne til</h2>
-        <ul id="ab_weak">
-          <li><b>Høyde over havet dominerer.</b> Den enkeltvariabelen bærer modellen
-            mer enn noen annen. I dette landskapet henger høyde tett sammen med avstand
-            til sjø og til by, så noe av «økologien» kan være geografi i forkledning.</li>
-          <li><b>Skogdataene er modellerte, ikke målte.</b> SR16 treffer riktig treslag
-            i omtrent to av tre ruter, og volumavviket er 30&ndash;60&nbsp;% av snittet.</li>
-          <li><b>Ingen fravær.</b> Uten steder noen har lett forgjeves, kan modellen
-            ikke skille «dårlig sted» fra «ingen har vært der».</li>
-          <li><b>Kartet er fra i fjor, ikke fra i dag.</b> Nedbøren er et
-            30-årssnitt for høsten. Ingenting her vet om det har regnet denne uka.</li>
-          <li><b>Rutene er 128 m på skjermen.</b> Modellen regner på 16 m, men vises
-            grovere. En sone peker på en skogteig, ikke på et tre.</li>
-        </ul>
 
         <h2>Dette er ikke en soppbestemmer</h2>
         <p>Appen kjenner ikke igjen arter fra bilde, og sier ingenting om hva som er
           trygt å spise. Den kjenner bare terreng.</p>
 
-        <h2>Introduksjonen</h2>
-        <p><button class="ghost" id="obAgain" style="max-width:300px">Vis introduksjonen igjen</button></p>
+        <p class="more">Vil du vite mer, står resten her:</p>
+        <div class="acc">
 
-        <h2>Kilder</h2>
-        <p class="src">Funn: <b>Artskart</b>, Artsdatabanken og GBIF-Norge.
-          Bakgrunnskart og høydemodell: <b>Kartverket</b>, CC&nbsp;BY&nbsp;4.0.
-          Skogstruktur: <b>NIBIO SR16</b>. Arealtype: <b>NIBIO AR50</b>.
-          Løsmasser: <b>NGU</b>. Nedbør: <b>MET seNorge_2018</b>, NLOD.
-          Naturtyper: <b>Miljødirektoratet Naturbase</b>.</p>
+          <details>
+          <summary>Hvor godt treffer det?</summary>
+          <div class="body">
+            <p>Det er lett å lage et kart som ser overbevisende ut og ikke betyr noe.
+              Tre ting hindrer det:</p>
+            <ul>
+              <li><b>Ingen tilfeldig oppdeling.</b> Funn som ligger nær hverandre ligner
+                hverandre, så kartet deles i ruter med en sone imellom som kastes.</li>
+              <li id="ab_transfer"><b>Overføringstest.</b> Modellen testes én gang på et
+                område den aldri har sett.</li>
+              <li><b>En kontroll uten økologi.</b> Falske «funn» uten biologisk innhold,
+                som <i>skal</i> lande på 0,50. Gjør den ikke det, betyr ingenting annet
+                i tabellen noe.</li>
+            </ul>
+            <table id="aucTable"></table>
+            <p id="ab_auc">AUC 0,50 er myntkast, 1,00 er perfekt. <b>Under 0,75 er svakt til
+              moderat</b> &mdash; bedre enn tilfeldig, langt fra pålitelig.</p>
+            <div class="warn">
+              <p id="ab_thin"><b>Flere arter hviler på få funn.</b> Står det «få funn» i
+                artslisten, er tallet en pekepinn og ikke et mål.</p>
+            </div>
+          </div>
+          </details>
+
+          <details>
+          <summary>Spådommen vi skrev ned på forhånd</summary>
+          <div class="body" id="ab_order">
+            <p>Før noen modell ble kjørt skrev vi ned hvilken rekkefølge vi ventet.
+              <b>Det slo ikke til.</b> Spådommen står, og resultatet står ved siden av
+              den &mdash; et kart som bare viste fram det som stemte ville vært et
+              dårligere kart.</p>
+          </div>
+          </details>
+
+          <details>
+          <summary id="ab_droph">Én art kom ikke gjennom</summary>
+          <div class="body">
+            <p id="ab_drop">Regelen er satt på forhånd: <b>en art vises bare hvis den slår
+              kontrollen på terreng modellen aldri har sett.</b> Klarer den ikke det, hører
+              den ikke hjemme på et kart noen skal gå etter.</p>
+            <div class="warn" id="dropped"></div>
+            <p id="ab_dropkeep">Den er ikke slettet fra analysen &mdash; tallet står i rapportene.
+              Men det er forskjell på hva som skal stå i en tabell og hva som skal tegnes
+              som en blå sone til noen som skal bruke lørdagen på å gå dit.</p>
+          </div>
+          </details>
+
+          <details>
+          <summary>To klokker: habitat og forhold</summary>
+          <div class="body" id="ab_clocks">
+            <p><b>Habitat</b> endrer seg knapt &mdash; skog, løsmasser og terreng er de samme
+              neste år. Det er dette laget som er modellen, og det som er testet.</p>
+            <p><b>Forhold</b> endrer seg hele tiden. Det hjelper ikke at et sted er perfekt
+              hvis det ikke har regnet på tre uker.</p>
+            <div class="warn"><p><b>Det ferske laget er ikke testet.</b> Ingen soppfunn er brukt
+              til å finne ut hvor mye nedbør skal telle. Vekten er satt etter skjønn og er
+              bevisst liten.</p></div>
+          </div>
+          </details>
+
+          <details>
+          <summary>Svakheter du bør kjenne til</summary>
+          <div class="body">
+            <ul id="ab_weak">
+              <li><b>Høyde over havet dominerer.</b> Høyde henger tett sammen med avstand
+                til sjø og til folk, så noe av «økologien» kan være geografi i forkledning.</li>
+              <li><b>Skogdataene er modellerte, ikke målte.</b> SR16 treffer riktig treslag
+                i omtrent to av tre ruter.</li>
+              <li><b>Ingen fravær.</b> Uten steder noen har lett forgjeves kan modellen ikke
+                skille «dårlig sted» fra «ingen har vært der».</li>
+              <li><b>Rutene er grovere enn et tre.</b> En sone peker på en skogteig.</li>
+            </ul>
+          </div>
+          </details>
+
+          <details>
+          <summary>Kilder</summary>
+          <div class="body">
+            <p class="src">Funn: <b>Artskart</b>, Artsdatabanken og GBIF-Norge.
+              Bakgrunnskart og høydemodell: <b>Kartverket</b>, CC&nbsp;BY&nbsp;4.0.
+              Skogstruktur: <b>NIBIO SR16</b>. Arealtype: <b>NIBIO AR50</b>.
+              Løsmasser: <b>NGU</b>. Nedbør: <b>MET seNorge_2018</b>, NLOD.
+              Naturtyper: <b>Miljødirektoratet Naturbase</b>.</p>
+          </div>
+          </details>
+
+        </div>
+
+        <p><button class="ghost" id="obAgain" style="max-width:300px">Vis introduksjonen igjen</button></p>
       </div>
     </div>
 

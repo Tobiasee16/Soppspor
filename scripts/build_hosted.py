@@ -188,216 +188,145 @@ def national_about(f: dict, null_auc: float | None, excluded: list,
     about = {
         "ab_lead":
             "Kartet er et <b>anslag</b>, ikke en fasit. Det viser ikke hvor "
-            "det står sopp. Det viser hvor terrenget <b>ligner på steder der "
-            "arten faktisk er funnet før</b>"
+            "det st\u00e5r sopp. Det viser hvor terrenget <b>ligner p\u00e5 steder der "
+            "arten faktisk er funnet f\u00f8r</b>"
             + (", justert for hvor mye det har regnet i det siste" if cond else "")
-            + " &mdash; og det er noe annet.",
+            + ".",
         "ab_intro":
-            "Ingen har gått over Norge og registrert hva som vokser hvor. Det "
+            "Ingen har g\u00e5tt over Norge og registrert hva som vokser hvor. Det "
             "finnes bare spredte funn, samlet inn av folk som gikk der de "
-            "pleier å gå. Modellen tar de funnene, lærer hva slags terreng de "
-            "ligger i, og farger resten av landet etter hvor godt det ligner.",
+            "pleier \u00e5 g\u00e5. Modellen l\u00e6rer hva slags terreng de funnene ligger "
+            "i, og farger resten av landet etter hvor godt det ligner.",
         "ab_s1":
-            "Fra <b>Artskart</b> (Artsdatabanken og GBIF-Norge), én art om "
-            f"gangen. For traktkantarell er det {nb(tub)} funn i landet utenom "
-            f"{held} etter at funn som ligger oppå hverandre er tynnet bort; "
-            f"de andre artene ligger mellom {nb(others[0])} og "
-            f"{nb(others[-1])}. Det finnes <b>ingen registrerte fravær</b> "
-            "&mdash; ingen har notert «her lette jeg og fant ingenting». Det "
-            "er den viktigste begrensningen i hele prosjektet.",
+            f"Fra <b>Artskart</b>, \u00e9n art om gangen: {nb(tub)} funn for "
+            f"traktkantarell etter tynning, de andre mellom {nb(others[0])} og "
+            f"{nb(others[-1])}. Det finnes <b>ingen registrerte frav\u00e6r</b> "
+            "&mdash; ingen har notert \u00abher lette jeg og fant ingenting\u00bb. Det "
+            "er den st\u00f8rste begrensningen i hele prosjektet.",
         "ab_s2":
-            "Soppfunn klumper seg langs stier, veier og nær folk. En modell "
-            "som får tilfeldige punkter å sammenligne med, lærer bare «nær "
-            "vei». Derfor trekkes sammenligningspunktene fra <b>alle soppfunn "
-            f"i de {tall(f['fylker'])} fylkene</b> &mdash; {nb(f['pool_raw'])} "
-            f"registreringer, {nb(f['pool_thinned'])} etter tynning. Da har "
-            "både funnene og sammenligningsgrunnlaget samme skjevhet, og "
-            "modellen må finne noe annet enn tilgjengelighet for å skille dem.",
+            "Soppfunn klumper seg der folk g\u00e5r. Sammenlignet med tilfeldige "
+            "punkter ville modellen bare l\u00e6rt \u00abn\u00e6r vei\u00bb. Derfor sammenlignes "
+            f"funnene med <b>alle andre soppfunn</b> i de {tall(f['fylker'])} "
+            f"fylkene &mdash; {nb(f['pool_thinned'])} punkter etter tynning. Da "
+            "har begge sider samme skjevhet, og modellen m\u00e5 finne noe annet "
+            "enn tilgjengelighet for \u00e5 skille dem.",
         "ab_s3":
-            f"Hver {f['cell_m']}&nbsp;m rute får <b>{f['features']} tall</b> "
+            f"Hver {f['cell_m']}&nbsp;m rute f\u00e5r <b>{f['features']} tall</b> "
             "knyttet til seg, fra offentlige kartdata:",
-        # The markup's list names a fuktighetsindeks. The national model does
-        # not have one - flow accumulation over 1.83 billion cells does not fit
-        # in memory - and a feature list that claims it would be describing the
-        # Kristiansand model on a map of Norway.
+        # The national model has no wetness index - flow accumulation over 1.83
+        # billion cells does not fit in memory - so the list must not claim one.
         "ab_layers":
-            "<li><b>Terreng</b> fra Kartverkets høydemodell: høyde, helning, "
-            "himmelretning og krumning. <b>Uten fuktighetsindeks</b> &mdash; "
-            "den krever at vannet spores over hele landet i én sammenhengende "
-            "beregning, og den får ikke plass i maskinen. Kristiansand-kartet "
-            "har den; dette har den ikke.</li>"
+            "<li><b>Terreng</b> fra Kartverkets h\u00f8ydemodell: h\u00f8yde, helning, "
+            "himmelretning og krumning</li>"
             "<li><b>Skog</b> fra NIBIO SR16: treslag, alder, kronedekning, "
-            "volum, grunnflate, trehøyde, bonitet</li>"
-            "<li><b>Løsmasser</b> fra NGU: morene, breelv, marin leire, torv, "
-            "bart fjell og fem til. Laget sier hva slags <i>avsetning</i> "
-            "grunnen er, ikke hvor kalkrik den er &mdash; og det skiller "
-            "artene svakt.</li>"
+            "volum, treh\u00f8yde, bonitet</li>"
+            "<li><b>L\u00f8smasser</b> fra NGU: morene, breelv, marin leire, torv, "
+            "bart fjell og fem til</li>"
             "<li><b>Arealtype</b> fra NIBIO AR50: skog, myr, dyrka mark, "
             "bebygd, vann</li>"
-            "<li><b>Høstnedbør</b> fra MET seNorge: 9. august&ndash;20. "
-            "oktober, snitt 1991&ndash;2020</li>",
+            "<li><b>H\u00f8stnedb\u00f8r</b> fra MET seNorge, snitt over tretti \u00e5r</li>",
         "ab_s4":
-            "En <b>MaxEnt-type modell</b> (L1-straffet logistisk regresjon "
-            "med kvadratiske ledd) lærer hvilke kombinasjoner av de "
+            "En <b>MaxEnt-type modell</b> finner hvilke kombinasjoner av de "
             f"{f['features']} tallene som skiller funnstedene fra "
-            f"sammenligningspunktene. Den tilpasses på <b>{tall(f['fylker'])} "
-            f"fylker</b> &mdash; hele fastlandet utenom {held} &mdash; pluss "
-            f"en {f['buffer_m'] // 1000} km sone rundt funnene som holdes "
-            f"unna. <b>{held} er den eneste delen av dette kartet modellen "
-            "aldri har sett.</b> Resten er terreng den er tilpasset på, og det "
-            "er en reell svakhet: Kristiansand-kartet var holdt unna i hele "
-            "sin utstrekning, dette er det ikke.",
-        "ab_s6h": ("Ferske forhold legges oppå" if cond
+            f"sammenligningspunktene. Den tilpasses p\u00e5 {tall(f['fylker'])} "
+            f"fylker og testes p\u00e5 <b>{held}</b> &mdash; den eneste delen av "
+            "dette kartet modellen aldri har sett.",
+        "ab_s6h": ("Ferske forhold legges opp\u00e5" if cond
                    else "Flaten deles i soner"),
         "ab_s6":
-            (("Nedbøren de siste 21 døgnene hentes fra <b>MET seNorge</b> og "
-              "sammenlignes med hva som er normalt der på den datoen. Ruter "
-              "som har fått mer enn vanlig vektes opp, ruter som har fått "
-              "mindre vektes ned. " ) if cond else "")
-            + "Ruta får først en poengsum <b>mot terrenget rundt seg</b> &mdash; "
-            "omtrent 25&nbsp;km i hver retning. Målt mot hele Norge ble store "
-            "deler av Sør- og Østlandet liggende i toppsjiktet samtidig, og da "
-            "forsvant nettopp den forskjellen du står og lurer på: er det bedre "
-            "her enn i skogen ved siden av?<br><br>"
-            "Sonene er så de <b>30&nbsp;%, 15&nbsp;% og 5&nbsp;% høyeste av "
-            "disse poengsummene i hele landet</b> &mdash; eller utenfor alle "
-            "tre. Begge leddene teller: poengsummen er lokal, grensene er "
-            "nasjonale. Det betyr at et område med lite god soppmark får få "
-            "soner i stedet for å få sine egne beste ruter farget uansett hvor "
-            "svake de er. Grensene er regnet ut på forhånd, så en rute skifter "
-            "ikke farge når du panorerer eller zoomer.",
+            (("Nedb\u00f8ren de siste 21 d\u00f8gnene hentes fra <b>MET seNorge</b> og "
+              "sammenlignes med hva som er normalt der p\u00e5 den datoen. Har det "
+              "regnet mer enn vanlig, vektes ruta opp; mindre, ned. ") if cond else "")
+            + "Ruta f\u00e5r poengsummen sin <b>mot terrenget rundt seg</b>, omtrent "
+            "25&nbsp;km i hver retning &mdash; m\u00e5lt mot hele landet ble hele "
+            "S\u00f8r-Norge liggende i toppsjiktet samtidig. Sonene er s\u00e5 de "
+            "<b>30&nbsp;%, 15&nbsp;% og 5&nbsp;% h\u00f8yeste</b> av de poengsummene "
+            "i landet: lokal score, nasjonale grenser.",
         "ab_zonewarn":
-            "<b>Sonene er en rangering, ikke en sannsynlighet.</b> «Topp» "
-            "betyr at ruta er blant de 5&nbsp;% som scorer høyest <i>i "
-            "landet</i>, der scoren er målt mot terrenget innenfor omtrent "
-            "25&nbsp;km. Det sier ingenting om hvor mange sopp som "
-            "står der, eller om det står noen i det hele tatt. "
-            "<b>Vann, dyrket mark, bebyggelse og isbre får ingen sone.</b> "
-            "Skogdataene sier ingenting om slik grunn, og et anslag der ville "
-            "vært en gjetning uten noe bak seg.",
+            "<b>Sonene er en rangering, ikke en sannsynlighet.</b> \u00abTopp\u00bb "
+            "betyr at ruta er blant de 5&nbsp;% som scorer h\u00f8yest i landet. Det "
+            "sier ingenting om hvor mange sopp som st\u00e5r der, eller om det "
+            "st\u00e5r noen i det hele tatt. <b>Vann, dyrket mark, bebyggelse og "
+            "isbre f\u00e5r ingen sone i det hele tatt.</b>",
         "ab_clocks":
-            "<h2>To klokker: habitat og forhold</h2>"
-            "<p>Kartet kombinerer to lag som oppdateres i helt ulikt tempo.</p>"
-            "<ul>"
-            "<li><b>Habitat</b> endrer seg knapt. Skog, løsmasser og terreng "
-            "er de samme neste år. Dette laget er modellen, og det er det som "
-            "er testet.</li>"
-            "<li><b>Forhold</b> endrer seg hele tiden. Sopp fruktifiserer "
-            "etter fukt, og det hjelper ikke at et sted er perfekt hvis det "
-            "ikke har regnet på tre uker."
-            + (f" Dette laget hentes fra <b>MET seNorge</b> for hele "
-               f"fastlandet, regnet ut på deres eget kilometersrutenett og "
-               f"vist på {km} km ruter." if cond else "")
-            + "</li></ul>"
-            "<p>Nedbøren inne i modellen er et <b>30-årssnitt</b> for høsten. "
-            "Det er riktig for en modell: det beskriver hva et sted "
-            "<i>pleier</i> å være. Men det sier ingenting om denne uka, og "
-            "derfor ligger det ferske laget utenpå i stedet for inni.</p>"
-            + ("<p>Værlaget <b>hentes på nytt hver gang du åpner appen</b>, så "
-               "lenge du har dekning. seNorge publiseres ett til to døgn "
-               "etterskuddsvis, og appen skriver hvor gammelt tallet er i "
-               "stedet for å la deg tro at det er sanntid.</p>"
-               '<div class="warn"><p><b>Det ferske laget er ikke testet.</b> '
-               "Ingen soppfunn er brukt til å finne ut hvor mye nedbør skal "
-               "telle. Vekten er satt etter skjønn og er bevisst liten "
-               "&mdash; forholdene kan flytte rangeringen noe, ikke snu den. "
-               "Habitatlaget er det som er validert; dette er en "
-               "tommelfingerregel oppå.</p>"
-               "<p>Trykk på en rute, så ser du begge tallene hver for seg.</p>"
-               "</div>"
+            "<p><b>Habitat</b> endrer seg knapt &mdash; skog, l\u00f8smasser og "
+            "terreng er de samme neste \u00e5r. Dette laget er modellen, og det er "
+            "det som er testet.</p>"
+            "<p><b>Forhold</b> endrer seg hele tiden. Sopp fruktifiserer etter "
+            "fukt, og det hjelper ikke at et sted er perfekt hvis det ikke har "
+            "regnet p\u00e5 tre uker."
+            + (f" Nedb\u00f8ren hentes fra <b>MET seNorge</b> for hele fastlandet og "
+               f"vises p\u00e5 {km} km ruter." if cond else "")
+            + "</p>"
+            "<p>Nedb\u00f8ren <i>inne i</i> modellen er et 30-\u00e5rssnitt. Det beskriver "
+            "hva et sted pleier \u00e5 v\u00e6re, ikke hvordan det er denne uka, og "
+            "derfor ligger det ferske laget utenp\u00e5 i stedet for inni.</p>"
+            + ('<div class="warn"><p><b>Det ferske laget er ikke testet.</b> '
+               "Ingen soppfunn er brukt til \u00e5 finne ut hvor mye nedb\u00f8r skal "
+               "telle. Vekten er satt etter skj\u00f8nn og er bevisst liten &mdash; "
+               "forholdene kan flytte rangeringen noe, ikke snu den.</p></div>"
                if cond else
-               '<div class="warn"><p><b>Det ferske nedbørslaget er ikke med i '
+               '<div class="warn"><p><b>Det ferske nedb\u00f8rslaget er ikke med i '
                "denne utgaven.</b> Kartet du ser er rent habitat.</p></div>"),
         "ab_transfer":
-            f"<b>Overføringstest.</b> Modellen tilpasses på {tall(f['fylker'])} "
-            f"fylker og testes én gang på <b>{held}</b>, som den aldri har "
-            "sett.",
+            f"<b>Overf\u00f8ringstest.</b> Modellen testes \u00e9n gang p\u00e5 <b>{held}</b>, "
+            "som den aldri har sett.",
         "ab_auc":
-            "AUC 0,50 er myntkast. 1,00 er perfekt. <b>Under 0,75 er svakt "
-            "til moderat</b> &mdash; bedre enn tilfeldig, langt fra pålitelig. "
-            f"Kolonnen til høyre er hvor mange funn i {held} tallet er målt "
-            "på; er den lav, er treffsikkerheten en pekepinn og ikke et mål."
-            + (f" Kontrollen landet på {dec(null_auc)}, så korreksjonen for "
+            "AUC 0,50 er myntkast, 1,00 er perfekt. <b>Under 0,75 er svakt til "
+            "moderat</b> &mdash; bedre enn tilfeldig, langt fra p\u00e5litelig."
+            + (f" Kontrollen landet p\u00e5 {dec(null_auc)}, s\u00e5 korreksjonen for "
                "innsats holder." if null_auc is not None else ""),
         # Agder's registered ordering failed; nationally it held. Both stand.
         "ab_order":
-            "<h2>Det som var spådd på forhånd</h2>"
-            "<p>Før noen modell ble kjørt, ble det skrevet ned hvilken "
-            "rekkefølge vi ventet: traktkantarell best (den er kresen på "
-            "fuktig mosegran), kantarell i midten, rød fluesopp dårligst. "
-            "<b>På landsbasis slo det til</b> &mdash; både i den blokkdelte "
-            f"testen og på {held}, og med god avstand mellom de tre.</p>"
-            "<p>Den samme spådommen slo <b>ikke</b> til da modellen bare hadde "
-            "Agder å gå på: der kom traktkantarell sist. Begge resultatene "
-            "står, og det eldre står i rapportene. Et kart som bare viste fram "
-            "det som stemte ville vært et dårligere kart.</p>"
-            "<p>Tallene ble også høyere med hele landet enn med Agder alene, i "
-            "snitt 0,07. <b>Det betyr ikke at modellen ble bedre.</b> Et "
-            "større land gir større spenn i høyde, klima, skog og løsmasser på "
-            "én gang, og da er det lettere å skille gode steder fra dårlige "
-            "uten at modellen har lært noe nytt. At gevinsten ville komme, og "
-            "hvorfor, var skrevet ned før kjøringen.</p>"
-            "<p>De øvrige artene i listen kom til <b>etter</b> at den testen "
-            "var gjort. De går gjennom nøyaktig samme mølle: samme "
-            "sammenligningsgrunnlag, samme oppdeling i 7,5 km ruter, samme "
-            "kontroll uten økologi ved siden av, og treffsikkerheten er målt "
-            f"på {held} på samme måte. Men det ble aldri skrevet ned på "
-            "forhånd hvordan <i>de</i> skulle rangere, så de inngår ikke i "
-            "testen over.</p>",
+            "<p>F\u00f8r noen modell ble kj\u00f8rt skrev vi ned hvilken rekkef\u00f8lge vi "
+            "ventet: traktkantarell best, kantarell i midten, r\u00f8d fluesopp "
+            f"d\u00e5rligst. <b>P\u00e5 landsbasis slo det til</b>, ogs\u00e5 p\u00e5 {held}.</p>"
+            "<p>Den samme sp\u00e5dommen slo <b>ikke</b> til da modellen bare hadde "
+            "Agder \u00e5 g\u00e5 p\u00e5: der kom traktkantarell sist. Begge resultatene "
+            "st\u00e5r. Et kart som bare viste fram det som stemte ville v\u00e6rt et "
+            "d\u00e5rligere kart.</p>"
+            "<p>Tallene ble ogs\u00e5 h\u00f8yere med hele landet enn med Agder alene. "
+            "<b>Det betyr ikke at modellen ble bedre</b> &mdash; et st\u00f8rre land "
+            "gir st\u00f8rre spenn \u00e5 skille p\u00e5. At gevinsten ville komme, og "
+            "hvorfor, var skrevet ned f\u00f8r kj\u00f8ringen.</p>"
+            "<p>De \u00f8vrige artene kom til <b>etter</b> at testen var gjort. De "
+            "g\u00e5r gjennom n\u00f8yaktig samme m\u00f8lle, men ingen skrev ned p\u00e5 forh\u00e5nd "
+            "hvordan <i>de</i> skulle rangere, s\u00e5 de inng\u00e5r ikke i testen.</p>",
         "ab_drop":
-            "Regelen er satt på forhånd: <b>en art vises bare hvis den slår "
-            "kontrollen på terreng modellen aldri har sett.</b> Kontrollen er "
-            "falske funn uten økologi i seg. Klarer ikke en art å skille seg "
-            f"fra den, har den ikke vist at den kan noe om {held}, og da hører "
-            "den ikke hjemme på et kart noen skal gå etter.",
+            "Regelen er satt p\u00e5 forh\u00e5nd: <b>en art vises bare hvis den sl\u00e5r "
+            "kontrollen p\u00e5 terreng modellen aldri har sett.</b> Klarer den ikke "
+            f"det, har den ikke vist at den kan noe om {held}, og da h\u00f8rer den "
+            "ikke hjemme p\u00e5 et kart noen skal g\u00e5 etter.",
         "ab_thin":
-            "<b>Flere av artene hviler på få funn.</b> Kolonnen «Funn» i "
-            f"tabellen over er hvor mange registreringer i {held} "
-            "treffsikkerheten er målt på. Er den lav, er tallet en pekepinn og "
-            "ikke et mål &mdash; artslisten merker de tynneste med «få funn».",
+            "<b>Flere av artene hviler p\u00e5 f\u00e5 funn.</b> St\u00e5r det \u00abf\u00e5 funn\u00bb i "
+            "artslisten, er treffsikkerheten en pekepinn og ikke et m\u00e5l.",
         "ab_weak":
-            "<li><b>Skogstruktur og terreng bærer modellen.</b> Grunnflate, "
-            "høyde over havet, helning og himmelretning ligger så tett sammen "
-            "på toppen at det ikke er grunnlag for å rangere dem. Høyde "
-            "henger tett sammen med avstand til sjø og til folk, så noe av "
-            "«økologien» kan være geografi i forkledning.</li>"
-            "<li><b>Skogdataene er modellerte, ikke målte.</b> SR16 treffer "
-            "riktig treslag i omtrent to av tre ruter, og volumavviket er "
-            "30&ndash;60&nbsp;% av snittet.</li>"
-            "<li><b>Ingen fravær.</b> Uten steder noen har lett forgjeves, kan "
-            "modellen ikke skille «dårlig sted» fra «ingen har vært der».</li>"
-            "<li><b>Underlaget skiller artene dårlig.</b> Kalkrik grunn regnes "
-            "som viktig for sopp, og vi har målt det mot NGUs kart over "
-            "kalkinnhold i berggrunnen: alle artene her står på litt rikere "
-            "fjell enn soppen rundt dem, men forskjellen <i>mellom</i> artene "
-            "er for liten til å tegne et kart av. Modellen går derfor på "
-            "løsmasser, ikke på kalk.</li>"
-            f"<li><b>Bare {held} er holdt unna.</b> Resten av kartet er "
-            "terreng modellen er tilpasset på. Treffsikkerheten i tabellen er "
-            f"målt på {held}, og det er det tallet som sier noe om hvor mye "
-            "resten er verdt.</li>"
-            + (f"<li><b>Nedbøren vises på {km} km ruter.</b> Den er regnet "
-               "ut på seNorges eget kilometersrutenett og slått sammen for "
-               "visning, fordi hele landet på én kilometer er 1,85 millioner "
-               "ruter i en fil appen henter hver gang den åpnes. Et "
-               "nedbøravvik endrer seg lite over noen kilometer; "
-               "millimetertallet på en fjellside gjør det.</li>"
-               if cond else
-               "<li><b>Kartet vet ingenting om denne uka.</b> Nedbøren i "
-               "modellen er et 30-årssnitt for høsten, og det ferske "
-               "nedbørslaget er ikke med i denne utgaven.</li>")
-            + 
-            f"<li><b>Rutene er 128 m på skjermen når du er zoomet inn</b>, "
-            "og grovere når du zoomer ut. Modellen regner på "
-            f"{f['cell_m']} m, men vises grovere uansett. En sone peker på en "
-            "skogteig, ikke på et tre.</li>",
+            "<li><b>Skogstruktur og terreng b\u00e6rer modellen.</b> Grunnflate, "
+            "h\u00f8yde, helning og himmelretning ligger s\u00e5 tett sammen p\u00e5 toppen "
+            "at det ikke er grunnlag for \u00e5 rangere dem. H\u00f8yde henger tett "
+            "sammen med avstand til sj\u00f8 og til folk, s\u00e5 noe av \u00ab\u00f8kologien\u00bb "
+            "kan v\u00e6re geografi i forkledning.</li>"
+            "<li><b>Skogdataene er modellerte, ikke m\u00e5lte.</b> SR16 treffer "
+            "riktig treslag i omtrent to av tre ruter.</li>"
+            "<li><b>Ingen frav\u00e6r.</b> Uten steder noen har lett forgjeves kan "
+            "modellen ikke skille \u00abd\u00e5rlig sted\u00bb fra \u00abingen har v\u00e6rt der\u00bb.</li>"
+            "<li><b>Underlaget skiller artene d\u00e5rlig.</b> Kalkrik grunn regnes "
+            "som viktig for sopp, og vi har m\u00e5lt det: alle artene her st\u00e5r p\u00e5 "
+            "litt rikere berggrunn enn soppen rundt dem, men forskjellen "
+            "<i>mellom</i> artene er for liten til \u00e5 tegne et kart av.</li>"
+            f"<li><b>Bare {held} er holdt unna.</b> Resten av kartet er terreng "
+            "modellen er tilpasset p\u00e5, og treffsikkerheten i tabellen er m\u00e5lt "
+            f"p\u00e5 {held}.</li>"
+            "<li><b>Rutene er grovere enn et tre.</b> En sone peker p\u00e5 en "
+            "skogteig.</li>"
+            + (f"<li><b>Nedb\u00f8ren vises p\u00e5 {km} km ruter.</b> Et nedb\u00f8ravvik "
+               "endrer seg lite over noen kilometer; millimetertallet p\u00e5 en "
+               "fjellside gj\u00f8r ikke det.</li>" if cond else ""),
         "ab_species":
-            "Det store tallet er <b>treffsikkerhet</b>: AUC målt på "
-            f"{held} etter at modellen er tilpasset på de {tall(f['fylker'])} andre "
-            "fylkene. 0,50 er ren gjetning, 1,00 er perfekt. Under står "
-            f"<b>hvor mange funn i {held} tallet er målt på</b>. Står det «få "
-            "funn», hviler treffsikkerheten på en håndfull registreringer og "
-            "bør leses som en pekepinn, ikke som et mål.",
+            "Det store tallet er <b>treffsikkerhet</b>: AUC m\u00e5lt p\u00e5 "
+            f"{held}, som modellen aldri har sett. 0,50 er ren gjetning, 1,00 "
+            f"er perfekt. Under st\u00e5r hvor mange funn i {held} tallet er m\u00e5lt "
+            "p\u00e5. St\u00e5r det \u00abf\u00e5 funn\u00bb, er det en pekepinn og ikke et m\u00e5l.",
     }
     # The markup describes an exclusion that happened in one build and not the
     # other. Agder dropped blek piggsopp; nationally every species cleared the
