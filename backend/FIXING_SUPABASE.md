@@ -83,14 +83,21 @@ The third is the one that closes the linter finding, and it closes it at the
 root: there is no unprotected table left in `public` to report, rather than a
 report being suppressed.
 
-**Confirmed so far, 2026-09-17:** the migration ran and succeeded, which
-without `cascade` is itself the proof that nothing depended on the extension.
+**Confirmed 2026-09-17.** The migration ran and succeeded, which without
+`cascade` is itself the proof that nothing depended on the extension. Checked
+in the dashboard afterwards: RLS is active on `public.spots`, and there is no
+unprotected table left in `public` for the linter to report. The finding is
+closed at the root rather than suppressed.
 
-**Not yet reported back:** the `pg_tables` query above. Run it, or just check
-whether Supabase's linter still lists *RLS Disabled in Public*. Until one of
-those is done, what is known is that PostGIS is uninstalled - not that no other
-unprotected table exists in `public`, which is the wider thing that query
-catches and the reason it is worth running rather than assuming.
+**One thing that is easy to mis-hold.** The project is set to enable RLS
+automatically on new tables, but that default belongs to the dashboard's table
+editor, which pre-ticks the box. A `create table` run in the SQL editor or
+through `psql` does **not** get it - and that is exactly how this schema is
+applied. `spots` is protected because `schema.sql` says so on line 110, not
+because of the default. Any table added by SQL later needs its own
+`enable row level security`, and its own policies: RLS on with no policies
+denies everything, which is safe, and which looks like a bug anywhere except
+where it is.
 
 If PostGIS is ever wanted back, install it outside the exposed schema —
 `create extension postgis schema extensions;` — because putting it back in
