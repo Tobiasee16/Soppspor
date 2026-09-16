@@ -441,16 +441,18 @@ setTimeout(() => {
         /\.cardTop\{[^}]*touch-action:none/.test(shell));
 }
 
-// ------------------------------------- the walk-to arrow is a true bearing --
-/* Deliberate, and it looks like a bug, which is why it is pinned.
+// -------------------------------------------- the walk-to arrow and the map --
+/* The row answers two questions and they come apart the moment the map turns.
  *
- * Panning a rotated map really was broken in exactly this shape - view.cx moved
- * as though north were always up - so anyone who turns the map, taps a spot and
- * sees the arrow pointing off-target will reach for walkTo next. The owner was
- * asked and chose to keep it: "I like that the compass points north either
- * way." The row names the direction in words as well as drawing it, and «mot
- * nord-øst» is a bearing whatever the screen is doing; an arrow that followed
- * the map would contradict its own caption. */
+ * The word is a compass bearing: «mot nord-øst» is true of the ground and must
+ * not move with the screen, or it stops being worth anything once the phone is
+ * in a pocket. The arrow is an instruction about where to look right now, so it
+ * has to follow the map - it was briefly left as a pure bearing, on a
+ * misreading of which of the two the owner meant to keep.
+ *
+ * North sits at screen offset (sin rot, -cos rot), «up» turned clockwise by the
+ * rotation, and CSS rotate() turns clockwise too, so the screen angle is the
+ * bearing plus the rotation. */
 {
   const src = (() => {
     const i = shell.indexOf("function walkTo(");
@@ -463,25 +465,43 @@ setTimeout(() => {
   })();
   const COMPASS = ["nord", "nord-øst", "øst", "sør-øst", "sør", "sør-vest",
                    "vest", "nord-vest"];
-  function arrow(rot, east, north) {
+  function arrow(rotDeg, east, north) {
     const html = new Function("gpsPos", "gpsAcc", "COMPASS", "view", "esc",
                               src + "return walkTo(" + east + "," + north + ");")(
-      [0, 0], 5, COMPASS, { rot, cx: 0, cy: 0, mpp: 10 }, (x) => x);
+      [0, 0], 5, COMPASS, { rot: rotDeg * Math.PI / 180, cx: 0, cy: 0, mpp: 10 },
+      (x) => x);
     return { deg: +(html.match(/rotate\((\d+)deg\)/) || [0, -1])[1],
              word: (html.match(/mot ([a-zø-]+)/) || [0, ""])[1] };
   }
-  const flat = arrow(0, 0, 1000);              // due north of the reader
+
+  const flat = arrow(0, 0, 1000);                    // due north of the reader
   check("due north reads as north with the map upright",
         flat.deg === 0 && flat.word === "nord", `${flat.deg}° ${flat.word}`);
-  for (const deg of [30, 90, 180, -90]) {
-    const turned = arrow(deg * Math.PI / 180, 0, 1000);
-    check(`turning the map ${deg}° does not turn the walk-to arrow`,
-          turned.deg === flat.deg && turned.word === flat.word,
-          `${turned.deg}° ${turned.word} vs ${flat.deg}° ${flat.word}`);
-  }
+
   const ne = arrow(0, 1000, 1000);
-  check("and it still points where the ground is", ne.deg === 45 && ne.word === "nord-øst",
-        `${ne.deg}° ${ne.word}`);
-  check("the arrow never consults the rotation at all", !/view\.rot/.test(src));
+  check("north-east is 45 degrees and named so",
+        ne.deg === 45 && ne.word === "nord-øst", `${ne.deg}° ${ne.word}`);
+
+  /* The arrow follows the map. Turn the map a quarter turn clockwise and north
+     lies to the right, so an arrow pointing at something due north has to
+     point right too. */
+  for (const rot of [30, 90, 180, 270]) {
+    const a = arrow(rot, 0, 1000);
+    check(`the arrow turns with a map rotated ${rot}°`,
+          a.deg === rot % 360, `${a.deg}°, expected ${rot % 360}°`);
+  }
+
+  /* The word does not. It is a fact about the ground. */
+  for (const rot of [30, 90, 180, 270]) {
+    check(`the named direction ignores a map rotated ${rot}°`,
+          arrow(rot, 0, 1000).word === "nord", arrow(rot, 0, 1000).word);
+    check(`and so does it for north-east at ${rot}°`,
+          arrow(rot, 1000, 1000).word === "nord-øst", arrow(rot, 1000, 1000).word);
+  }
+
+  check("a rotated map still points at the right ground",
+        arrow(90, 1000, 1000).deg === 135, String(arrow(90, 1000, 1000).deg));
+  check("the arrow reads the rotation; that is the whole point",
+        /view\.rot/.test(src));
 }
 

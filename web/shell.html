@@ -3833,19 +3833,23 @@ var COMPASS=["nord","nordøst","øst","sørøst","sør","sørvest","vest","nordv
    whether you can be bothered. Without it the map is something to read at
    home rather than something to use on the way.
 
-   **The arrow is a true bearing and does not follow the map's rotation.** This
-   looks like a bug and is a decision, taken by the owner in September 2026 when
-   it was put to them directly: "I like that the compass points north either
-   way." It reads as one because the drag *was* a real bug of exactly that shape
-   - panning ignored `view.rot` and had to be fixed - so the next person to turn
-   the map and tap a spot will reach for this function next. Do not.
+   **The word and the arrow answer different questions, and only one of them
+   turns with the map.**
 
-   The reasoning: the row says a direction in words as well as drawing it, and
-   «mot nord-øst» is a compass bearing whatever the screen is doing. An arrow
-   that turned with the map would contradict its own caption, and a bearing is
-   the thing that still works when you put the phone in your pocket and walk.
-   The compass rose on the map is what says where north is on screen; these are
-   two different questions and the answer to this one is north. */
+   «mot nord-øst» is a compass bearing. It is true of the ground and stays put
+   however the screen is oriented, which is what makes it worth anything once
+   the phone is back in a pocket.
+
+   The arrow is not a bearing, it is an instruction about where to look right
+   now, so it has to be drawn in screen terms. A point due north sits at screen
+   offset (sin rot, -cos rot) - «up» turned clockwise by the map's rotation -
+   and a CSS rotate() turns clockwise too, so the screen angle is simply the
+   bearing plus the rotation. The compass rose is rotated by exactly the same
+   quantity for exactly the same reason.
+
+   This was briefly left as a pure bearing on the understanding that the owner
+   wanted it that way; they had been answering about the rose, which does point
+   north. Corrected once the two were told apart. */
 function walkTo(east,north){
   if(!gpsPos)return "";
   var dx=east-gpsPos[0],dy=north-gpsPos[1];
@@ -3854,9 +3858,12 @@ function walkTo(east,north){
     +'<span>Du står omtrent her.</span></div>';
   var deg=(Math.atan2(dx,dy)*180/Math.PI+360)%360;
   var dir=COMPASS[Math.round(deg/45)%8];
+  /* The bearing names the direction; this points at it on the screen in front
+     of you. They are the same number only while the map is north-up. */
+  var screenDeg=(deg+(view.rot||0)*180/Math.PI+360)%360;
   var dist=d<950?Math.round(d/10)*10+" m":(d/1000).toFixed(1).replace(".",",")+" km";
   return '<div class="walk"><span class="arrow" style="transform:rotate('
-    +deg.toFixed(0)+'deg)">↑</span><span><b>'+dist+'</b> mot '+dir
+    +screenDeg.toFixed(0)+'deg)">↑</span><span><b>'+dist+'</b> mot '+dir
     +(gpsAcc>40?' · posisjon ±'+Math.round(gpsAcc)+' m':'')+'</span></div>';
 }
 function show(i){
