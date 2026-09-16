@@ -83,6 +83,15 @@ The third is the one that closes the linter finding, and it closes it at the
 root: there is no unprotected table left in `public` to report, rather than a
 report being suppressed.
 
+**Confirmed so far, 2026-09-17:** the migration ran and succeeded, which
+without `cascade` is itself the proof that nothing depended on the extension.
+
+**Not yet reported back:** the `pg_tables` query above. Run it, or just check
+whether Supabase's linter still lists *RLS Disabled in Public*. Until one of
+those is done, what is known is that PostGIS is uninstalled - not that no other
+unprotected table exists in `public`, which is the wider thing that query
+catches and the reason it is worth running rather than assuming.
+
 If PostGIS is ever wanted back, install it outside the exposed schema —
 `create extension postgis schema extensions;` — because putting it back in
 `public` brings the finding back with it.
@@ -110,6 +119,26 @@ of this exists.
 leaving them behind, so the old "delete the two anonymous test users" chore is
 gone for good — and it exercises the erasure path on every run, which is the
 right place for it.
+
+### 004, the tombstone purge — verified 2026-09-17
+
+`purge_tombstones()` returned 0, and so did the question that actually matters:
+
+```sql
+select count(*) as overdue
+  from public.spots
+ where deleted_at is not null
+   and deleted_at < now() - interval '30 days';
+```
+
+**0 overdue.** Nothing is sitting in the table past the window, so
+`web/personvern.html`'s promise that a deleted spot is *fjernet permanent innen
+30 dager* is now backed by a measurement rather than by the cron job merely
+existing. Those are different claims and only the second one was ever checked
+before.
+
+Worth re-running after any long gap in which the scheduled job might have
+stopped. A non-zero count there is a privacy-policy problem, not housekeeping.
 
 ---
 
