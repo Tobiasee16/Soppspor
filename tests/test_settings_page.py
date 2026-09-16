@@ -89,14 +89,36 @@ class TestTheSheetsCanBePulledDown:
     def shell(self) -> str:
         return SHELL.read_text(encoding="utf-8")
 
-    def test_the_header_is_a_drag_surface(self, shell):
-        assert 'sheet.querySelector(".cardTop")' in shell
-        assert 'sheet.querySelector(".grab")' in shell
+    def test_the_whole_sheet_is_the_drag_surface(self, shell):
+        """Not the notch, and not the header either.
 
-    def test_the_header_opts_out_of_browser_touch_handling(self, shell):
-        """Without this the page scrolls under the finger instead of the sheet
-        following it, which reads as the drag not working at all."""
+        Both were tried. The notch is 36x5 px; the header is about 44 px tall
+        against a 70 px threshold, so the finger leaves it mid-pull. A hand
+        reaching to dismiss a sheet lands on its body, which is where the
+        listener has to be.
+        """
+        assert 'sheet.addEventListener("pointerdown"' in shell
+        # Only a sheet advertising a handle gets the behaviour.
+        assert 'if(!sheet.querySelector(".grab"))return;' in shell
+
+    def test_the_drag_does_not_depend_on_pointer_capture(self, shell):
+        """setPointerCapture sits behind a try/catch, so it is one silent
+        failure away from a drag that stalls the instant the finger leaves the
+        element. Moves are tracked on the window instead."""
+        body = shell.split("function makeDismissable(")[1]
+        body = body[:body.index("\n}")]
+        assert 'window.addEventListener("pointermove"' in body
+        assert "setPointerCapture" not in body
+
+    def test_a_pull_at_the_end_of_the_list_does_not_scroll_the_page(self, shell):
+        """On iOS that is what makes a dismissal feel like it did nothing."""
+        assert re.search(r"\.card\{overscroll-behavior:contain\}", shell)
+
+    def test_the_handle_opts_out_of_browser_touch_handling(self, shell):
+        """The notch and header never scroll, so they can refuse outright. The
+        body must not, or the species list stops scrolling."""
         assert re.search(r"\.cardTop\{[^}]*touch-action:none", shell)
+        assert re.search(r"\.grab\{[^}]*touch-action:none", shell)
 
     def test_every_sheet_that_has_a_notch_is_dismissable(self, shell):
         """A notch is a promise. A sheet drawing one that cannot be pulled is

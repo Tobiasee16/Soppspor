@@ -352,14 +352,17 @@ setTimeout(() => {
 }, 700);
 
 // ------------------------------------------ pulling a sheet down to dismiss --
-/* Reported: the species filter had to be closed with the X. It was already
-   dismissable - but only by the `.grab` notch, which is 36x5 px, about a fifth
-   the width of a fingertip. The notch reads as the handle, so a reader pulls
-   the sheet by it, misses, and concludes the sheet does not drag.
-
-   The header drags it now as well. What must not become a drag surface is the
-   body: the species list scrolls, and a sheet that dismisses when you try to
-   scroll it is worse than one that never dismisses at all. */
+/* Three goes at this before it worked, and each earlier one is a case below.
+ *
+ * It began on the `.grab` notch alone - 36x5 px - so a reader pulls the sheet,
+ * misses, and concludes it does not drag. Adding the header was not enough: the
+ * header is ~44 px and the threshold is 70, so the finger leaves it mid-pull and
+ * the move events stop unless pointer capture happened to take. And the body was
+ * excluded because the list scrolls, which is exactly where a hand lands.
+ *
+ * What works: the whole sheet is the handle, moves are tracked on `window` so
+ * nothing depends on capture, and a pull only becomes a dismissal if the list
+ * was already at the top when the finger went down. */
 {
   const src = (() => {
     const i = shell.indexOf("function makeDismissable(");
@@ -371,74 +374,119 @@ setTimeout(() => {
     return shell.slice(i, j + 1);
   })();
 
-  function fakeEl(tag) {
-    return { tag, handlers: {},
-             addEventListener(t, fn) { (this.handlers[t] ||= []).push(fn); },
-             setPointerCapture() {},
-             fire(t, ev) { (this.handlers[t] || []).forEach((fn) =>
-                             fn({ ...ev, currentTarget: this })); } };
-  }
-  function makeSheet() {
-    const grab = fakeEl("grab"), top = fakeEl("cardTop"), body = fakeEl("list");
+  function makeSheet(scrollTop = 0) {
     const classes = new Set(["on"]);
+    const win = { handlers: {},
+      addEventListener(t, fn) { (this.handlers[t] ||= []).push(fn); },
+      removeEventListener(t, fn) {
+        this.handlers[t] = (this.handlers[t] || []).filter((f) => f !== fn); },
+      fire(t, ev) { (this.handlers[t] || []).slice().forEach((fn) => fn(ev)); },
+      count(t) { return (this.handlers[t] || []).length; } };
     const sheet = {
-      grab, top, body, style: {},
-      classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c),
-                   contains: (c) => classes.has(c) },
-      querySelector: (sel) => (sel === ".grab" ? grab : sel === ".cardTop" ? top : null),
+      style: {}, scrollTop, closed: false, handlers: {},
+      classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c) },
+      querySelector: (sel) => (sel === ".grab" ? {} : null),
+      addEventListener(t, fn) { (this.handlers[t] ||= []).push(fn); },
+      fire(t, ev) { (this.handlers[t] || []).forEach((fn) => fn(ev)); },
       open: () => classes.has("on"),
     };
-    new Function("sheet", "onClose", src + "makeDismissable(sheet,onClose);")(sheet, null);
-    return sheet;
+    new Function("sheet", "onClose", "window", src + "makeDismissable(sheet,onClose);")(
+      sheet, () => { sheet.closed = true; }, win);
+    return { sheet, win };
   }
-  const noBtn = { closest: () => null };
-  const isBtn = { closest: (sel) => (sel === "button" ? {} : null) };
+  const plain = { closest: () => null };
+  const control = { closest: () => ({}) };
+  const ev = (y, target = plain) => ({ clientY: y, target, button: 0,
+                                       cancelable: true, preventDefault() {} });
 
-  let sh = makeSheet();
-  check("the notch still drags the sheet", (sh.grab.handlers.pointerdown || []).length === 1);
-  check("and so does the header now", (sh.top.handlers.pointerdown || []).length === 1);
-  check("the body does not, because it scrolls",
-        (sh.body.handlers.pointerdown || []).length === 0);
-
-  // A real pull on the header.
-  sh = makeSheet();
-  sh.top.fire("pointerdown", { clientY: 100, target: noBtn, pointerId: 1 });
-  sh.top.fire("pointermove", { clientY: 200, target: noBtn, pointerId: 1 });
-  check("dragging the header moves the sheet with the finger",
-        sh.style.transform === "translateY(100px)", sh.style.transform);
-  sh.top.fire("pointerup", { clientY: 200, target: noBtn, pointerId: 1 });
-  check("and past the threshold it closes", !sh.open());
+  // A pull from anywhere on the sheet, with the list at the top.
+  let { sheet, win } = makeSheet(0);
+  sheet.fire("pointerdown", ev(100));
+  win.fire("pointermove", ev(200));
+  check("a pull from the body moves the sheet when the list is at the top",
+        sheet.style.transform === "translateY(100px)", sheet.style.transform);
+  win.fire("pointerup", ev(200));
+  check("and past the threshold it closes", !sheet.open() && sheet.closed);
   check("the transform is cleared so the sheet is not left offset",
-        sh.style.transform === "");
+        sheet.style.transform === "");
+  check("and the window listeners are removed rather than piling up",
+        win.count("pointermove") === 0 && win.count("pointerup") === 0,
+        `${win.count("pointermove")} move, ${win.count("pointerup")} up`);
+
+  /* The bug this replaced: the finger leaves the header long before 70 px, so
+     anything that only listens on the element it started on stalls. */
+  ({ sheet, win } = makeSheet(0));
+  sheet.fire("pointerdown", ev(100));
+  for (const y of [110, 140, 180, 220]) win.fire("pointermove", ev(y));
+  check("the drag survives the finger leaving the element it started on",
+        sheet.style.transform === "translateY(120px)", sheet.style.transform);
+  win.fire("pointerup", ev(220));
+  check("and closes", !sheet.open());
+
+  // Mid-scroll, the same gesture is a scroll and must be left alone.
+  ({ sheet, win } = makeSheet(240));
+  sheet.fire("pointerdown", ev(100));
+  win.fire("pointermove", ev(300));
+  check("a pull with the list scrolled down does not drag the sheet",
+        !sheet.style.transform, String(sheet.style.transform));
+  win.fire("pointerup", ev(300));
+  check("and certainly does not close it", sheet.open() && !sheet.closed);
+
+  /* Scrolling to the top and then pulling, in one gesture, is still a scroll.
+     The decision is taken when the finger goes down, because by the time it has
+     moved the browser has already scrolled. */
+  ({ sheet, win } = makeSheet(120));
+  sheet.fire("pointerdown", ev(100));
+  sheet.scrollTop = 0;                       // the browser scrolled us to the top
+  win.fire("pointermove", ev(300));
+  check("reaching the top mid-gesture does not turn a scroll into a dismissal",
+        sheet.open() && !sheet.style.transform, String(sheet.style.transform));
 
   // A short tug is not a dismissal.
-  sh = makeSheet();
-  sh.top.fire("pointerdown", { clientY: 100, target: noBtn, pointerId: 1 });
-  sh.top.fire("pointermove", { clientY: 130, target: noBtn, pointerId: 1 });
-  sh.top.fire("pointerup", { clientY: 130, target: noBtn, pointerId: 1 });
-  check("a 30 px tug springs back rather than closing", sh.open());
+  ({ sheet, win } = makeSheet(0));
+  sheet.fire("pointerdown", ev(100));
+  win.fire("pointermove", ev(130));
+  win.fire("pointerup", ev(130));
+  check("a 30 px tug springs back rather than closing",
+        sheet.open() && sheet.style.transform === "");
 
-  // The X lives in the header and has to keep being a button.
-  sh = makeSheet();
-  sh.top.fire("pointerdown", { clientY: 100, target: isBtn, pointerId: 1 });
-  sh.top.fire("pointermove", { clientY: 300, target: isBtn, pointerId: 1 });
-  sh.top.fire("pointerup", { clientY: 300, target: isBtn, pointerId: 1 });
-  check("a press that starts on the close button does not drag the sheet",
-        sh.open() && !sh.style.transform, String(sh.style.transform));
+  // A tap must stay a tap: nothing moved, so nothing is claimed.
+  ({ sheet, win } = makeSheet(0));
+  let prevented = false;
+  sheet.fire("pointerdown", ev(100));
+  win.fire("pointermove", { clientY: 103, target: plain, cancelable: true,
+                            preventDefault() { prevented = true; } });
+  check("a 3 px wobble is not a drag and is not swallowed",
+        !sheet.style.transform && !prevented);
 
-  // Upward is not a dismissal either.
-  sh = makeSheet();
-  sh.grab.fire("pointerdown", { clientY: 300, target: noBtn, pointerId: 1 });
-  sh.grab.fire("pointermove", { clientY: 100, target: noBtn, pointerId: 1 });
-  check("dragging up does not lift the sheet off its anchor",
-        sh.style.transform === "translateY(0px)", sh.style.transform);
-  sh.grab.fire("pointerup", { clientY: 100, target: noBtn, pointerId: 1 });
-  check("and does not close it", sh.open());
+  // Controls keep being controls.
+  ({ sheet, win } = makeSheet(0));
+  sheet.fire("pointerdown", ev(100, control));
+  win.fire("pointermove", ev(300));
+  check("a press that starts on a button or a row does not drag the sheet",
+        sheet.open() && !sheet.style.transform, String(sheet.style.transform));
 
-  // The header must actually be declared undraggable-by-the-browser, or the
-  // page scrolls under the finger instead of the sheet following it.
-  check("the header opts out of browser touch handling",
-        /\.cardTop\{[^}]*touch-action:none/.test(shell));
+  // Upward is not a dismissal.
+  ({ sheet, win } = makeSheet(0));
+  sheet.fire("pointerdown", ev(300));
+  win.fire("pointermove", ev(100));
+  win.fire("pointerup", ev(100));
+  check("dragging up neither lifts nor closes the sheet",
+        sheet.open() && !sheet.style.transform);
+
+  // A cancelled pointer has to clean up like any other ending.
+  ({ sheet, win } = makeSheet(0));
+  sheet.fire("pointerdown", ev(100));
+  win.fire("pointermove", ev(200));
+  win.fire("pointercancel", ev(200));
+  check("a cancelled pointer closes the sheet it had already pulled 100 px",
+        !sheet.open());
+  check("and leaves no window listeners behind", win.count("pointermove") === 0);
+
+  check("the sheet keeps its overscroll to itself",
+        /\.card\{overscroll-behavior:contain\}/.test(shell));
+  check("only a sheet with a notch is made dismissable",
+        /if\(!sheet\.querySelector\("\.grab"\)\)return;/.test(shell));
 }
 
 // -------------------------------------------- the walk-to arrow and the map --

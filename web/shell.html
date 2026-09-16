@@ -164,6 +164,10 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sf);
    notch was always advertising. */
 .cardTop{cursor:grab;touch-action:none}
 .card.drag .cardTop,.card.drag .grab{cursor:grabbing}
+/* A pull that runs off the end of the list must not start scrolling the page
+   behind the sheet, which on iOS is what makes a dismissal feel like it did
+   nothing at all. */
+.card{overscroll-behavior:contain}
 .card{will-change:transform}
 .card.drag{transition:none}
 .walk{display:flex;align-items:center;gap:8px;margin-top:10px;background:var(--fill);
@@ -3655,39 +3659,68 @@ document.getElementById("cardClose").addEventListener("click",function(){
    is, and is what every other sheet on the platform does. */
 /* Pull a sheet down to dismiss it.
  *
- * The drag used to live on the `.grab` notch alone, which is 36x5 px - about a
- * fifth the width of a fingertip. It reads as the handle, so a reader tries to
- * pull the sheet by it, misses, and concludes the sheet does not drag at all;
- * reported as having to reach for the X on the species filter every time.
+ * Three goes at this, and the first two each fixed something real and left the
+ * gesture still not working, so the whole history is here.
  *
- * The header drags it as well now. Not the body: the species list scrolls, and
- * a sheet that dismisses when you try to scroll it is worse than one that does
- * not dismiss. The close button keeps being a button. */
+ * It lived on the `.grab` notch alone: 36x5 px, about a fifth of a fingertip.
+ * The notch reads as the handle, so you pull the sheet by it, miss, and
+ * conclude it does not drag. Adding the header helped and was not enough,
+ * because the header is ~44 px tall and a 70 px pull leaves it almost at once.
+ *
+ * So: **the whole sheet is the handle**, and the two things that stopped that
+ * working are handled rather than designed around.
+ *
+ * `pointermove` is listened for on `window`, not on the element. Capturing the
+ * pointer is the usual trick and it is one `try/catch` away from silently not
+ * happening, after which the drag stalls the moment the finger leaves the
+ * element it started on - which, for a 44 px header and a 70 px threshold, is
+ * always.
+ *
+ * And the body scrolls, which is why it was excluded before. Excluding it is
+ * wrong: the list is most of the sheet, so "grab it and pull" lands there and
+ * does nothing. The rule every bottom sheet uses is that a downward pull from a
+ * list already at the top is a dismissal, and anything else is a scroll. That
+ * needs the scroll position at the moment the finger goes down, not later,
+ * because by the time it has moved the browser may have scrolled already. */
 function makeDismissable(sheet,onClose){
-  var surfaces=[sheet.querySelector(".grab"),sheet.querySelector(".cardTop")]
-    .filter(function(el){return el;});
-  if(!surfaces.length)return;
-  var y0=null,dy=0;
+  if(!sheet.querySelector(".grab"))return;   /* a notch is the promise */
+  var y0=null,dy=0,dragging=false,fromTop=true;
+  /* A press that begins on a control is that control's. */
+  function onControl(t){
+    return !!(t&&t.closest&&t.closest("button,input,textarea,select,a,summary"));
+  }
   function down(e){
-    /* The X lives in the header. A press on it is a press on it. */
-    if(e.target&&e.target.closest&&e.target.closest("button"))return;
-    y0=e.clientY;dy=0;sheet.classList.add("drag");
-    try{e.currentTarget.setPointerCapture(e.pointerId);}catch(err){}}
+    if(e.button>0||onControl(e.target))return;
+    y0=e.clientY;dy=0;dragging=false;
+    fromTop=(sheet.scrollTop||0)<=0;
+    window.addEventListener("pointermove",move,{passive:false});
+    window.addEventListener("pointerup",end);
+    window.addEventListener("pointercancel",end);
+  }
   function move(e){
     if(y0===null)return;
-    dy=Math.max(0,e.clientY-y0);
-    sheet.style.transform="translateY("+dy+"px)";}
+    var d=e.clientY-y0;
+    if(!dragging){
+      if(d<8)return;                 /* not a downward pull yet */
+      if(!fromTop){end();return;}    /* mid-scroll: leave it to the browser */
+      dragging=true;sheet.classList.add("drag");
+    }
+    dy=Math.max(0,d);
+    sheet.style.transform="translateY("+dy+"px)";
+    /* Only once the drag is ours, or a tap would stop being a tap. */
+    if(e.cancelable)e.preventDefault();
+  }
   function end(){
     if(y0===null)return;
-    y0=null;sheet.classList.remove("drag");sheet.style.transform="";
-    if(dy>70){sheet.classList.remove("on");if(onClose)onClose();}}
-  surfaces.forEach(function(el){
-    el.addEventListener("pointerdown",down);
-    el.addEventListener("pointermove",move);
-    el.addEventListener("pointerup",end);
-    el.addEventListener("pointercancel",end);
-    el.addEventListener("lostpointercapture",end);
-  });
+    y0=null;
+    window.removeEventListener("pointermove",move,{passive:false});
+    window.removeEventListener("pointerup",end);
+    window.removeEventListener("pointercancel",end);
+    if(!dragging)return;
+    dragging=false;sheet.classList.remove("drag");sheet.style.transform="";
+    if(dy>70){sheet.classList.remove("on");if(onClose)onClose();}
+  }
+  sheet.addEventListener("pointerdown",down);
 }
 makeDismissable(card,function(){selected=-1;draw();});
 document.getElementById("spClose").addEventListener("click",function(){
