@@ -53,9 +53,13 @@ create table if not exists public.spots (
 
     lon           double precision not null check (lon between -180 and 180),
     lat           double precision not null check (lat between -90 and 90),
-    -- Which species the map was showing when the spot was saved. Free text on
-    -- purpose: the app must keep working when the species list changes, and a
-    -- foreign key to a model artefact would make user data hostage to a refit.
+    -- Which species the user says they found. Seeded from the map when exactly
+    -- one species is showing, because that is what they went out for; left null
+    -- when several are, because SEL[0] is only whichever was toggled on first
+    -- and a confident wrong label is worse than none. Either way the app lets
+    -- them change it. Free text on purpose: the app must keep working when the
+    -- species list changes, and a foreign key to a model artefact would make
+    -- user data hostage to a refit.
     species_key   text,
     species_name  text,
 

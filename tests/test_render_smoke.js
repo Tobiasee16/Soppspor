@@ -51,6 +51,7 @@ const probe = js.slice(0, at) + `
   SEL: () => SEL, D, toggleSpecies, setSel, repaint, draw, show,
   spColour, levelsFor, levelsForOverlay, ringLabel, BANDS,
   renderLegend, bandsDrawn,
+  addSpot, showSpot, removeSpot, spotColour, SPOTS: () => SPOTS,
   legend: () => document.getElementById("legend").innerHTML,
   pill: () => document.getElementById("pillName").textContent,
   card: () => document.getElementById("cardBody").innerHTML,
@@ -219,6 +220,45 @@ check("and its three bands come back",
   }
 }
 
+
+// ------------------------------------------------ a saved spot, end to end --
+/* The unit suite checks the colour lookup and the chooser in isolation. This
+   runs the real save path against the real payload, because the chips are
+   built out of D.species at the moment the card opens: a chooser that reads
+   the payload wrongly, or a helper defined after its first use, throws here
+   and nowhere else. */
+{
+  const sp = app.SEL()[0];
+  const before = app.SPOTS().length;
+  const spot = app.addSpot([85000, 6461000]);
+  check("saving with one species up names it on the spot",
+        spot.key === sp.key && spot.name === sp.no, spot.key + "/" + spot.name);
+  check("the pin takes that species' own colour",
+        app.spotColour(spot.key) === app.spColour(sp, app.D.species.indexOf(sp)),
+        app.spotColour(spot.key));
+  let threw = null;
+  try { app.showSpot(spot); stub.flush(2); } catch (e) { threw = e; }
+  check("opening the spot card does not throw", !threw,
+        threw ? threw.stack.split("\n").slice(0, 2).join(" | ") : "");
+  const c = app.card();
+  check("the card asks which mushroom it was", /Hva fant du/.test(c));
+  check("it offers one chip per shipped species, plus Annet",
+        (c.match(/class="spChip"/g) || []).length === app.D.species.length + 1,
+        String((c.match(/class="spChip"/g) || []).length) + " chips for "
+          + app.D.species.length + " species");
+  check("the species it was saved as is the one ticked",
+        new RegExp('data-key="' + sp.key + '" aria-pressed="true"').test(c),
+        (c.match(/data-key="[^"]*" aria-pressed="true"/g) || []).join(" "));
+  // A validation device is not a mushroom, and must not be offerable as one.
+  check("no chip offers the synthetic null", !/synthetic_null/.test(c));
+  threw = null;
+  try { app.draw(); stub.flush(2); } catch (e) { threw = e; }
+  check("drawing the map with a pin on it does not throw", !threw,
+        threw ? threw.stack.split("\n").slice(0, 2).join(" | ") : "");
+  app.removeSpot(spot.id);
+  check("and the spot can be removed again", app.SPOTS().length === before,
+        app.SPOTS().length + " left, started at " + before);
+}
 
 console.log(fails ? `\n${fails} FAILED` : "\nall render smoke checks passed");
 process.exit(fails ? 1 : 0);

@@ -177,6 +177,21 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sf);
 .noteed{width:100%;box-sizing:border-box;border:none;background:var(--fill);
   border-radius:11px;padding:10px 12px;margin-top:10px;font-family:var(--sf);
   font-size:15px;color:var(--ink);resize:vertical;min-height:64px;line-height:1.4}
+/* Which mushroom this was. Chips rather than a dropdown: one tap with gloves
+   on, and each carries the colour its pin takes on the map, so the link
+   between the chooser and the mark on the ground is shown rather than
+   explained. Dimmed until chosen, the same way the species picker dims a
+   species that is not on the map. */
+.spAsk{font-size:13px;color:var(--ink-3);margin:13px 0 0}
+.spSet{display:flex;flex-wrap:wrap;gap:7px;margin-top:7px}
+.spChip{display:flex;align-items:center;gap:7px;border:none;background:var(--fill);
+  border-radius:999px;padding:8px 13px;min-height:40px;cursor:pointer;
+  font-family:var(--sf);font-size:14px;color:var(--ink-2)}
+.spChip i{width:10px;height:10px;border-radius:5px;flex:0 0 auto;opacity:.45;
+  transition:opacity .15s}
+.spChip[aria-pressed="true"]{background:var(--card);color:var(--ink);font-weight:600;
+  box-shadow:0 1px 3px #00000024}
+.spChip[aria-pressed="true"] i{opacity:1}
 .spotRow{display:flex;align-items:center;gap:12px;padding:13px 15px;width:100%;
   border:none;border-bottom:.5px solid var(--sep);background:transparent;
   font-family:var(--sf);color:var(--ink);text-align:left;cursor:pointer;min-height:58px}
@@ -1958,6 +1973,27 @@ var SPFALLBACK=["#0072B2","#E69F00","#CC79A7","#009E73","#4A4A55","#D55E00","#56
 function spColour(sp,n){
   return SPCOL[sp.key]||SPFALLBACK[n%SPFALLBACK.length];
 }
+/* A saved spot's pin - on the map and on its row under Steder - takes the
+   colour that species has in the picker, so the mark on the ground and the row
+   in the filter are visibly the same mushroom. It goes through spColour rather
+   than reading SPCOL directly, because a species outside that table draws from
+   the fallback ramp, and a second lookup here would be free to disagree with
+   the list the reader is looking at.
+
+   Two cases fall back to a neutral amber. A spot with no species chosen, which
+   is what saving with several species on the map gives; and a spot whose
+   species has left the build - blek piggsopp already has, and any species can
+   when it stops clearing the null control. The second is why this matches on
+   the key rather than on a stored position: a departed species must not hand
+   its colour to whichever mushroom now sits at that index, which would change
+   what somebody's pin means between two builds and say nothing about it. */
+var SPOT_NEUTRAL="#c8791a";
+function spotColour(key){
+  if(!key)return SPOT_NEUTRAL;
+  for(var i=0;i<D.species.length;i++)
+    if(D.species[i].key===key&&!D.species[i].is_null)return spColour(D.species[i],i);
+  return SPOT_NEUTRAL;
+}
 function rgbOf(hex){
   var h=hex.replace("#","");
   return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];
@@ -2751,9 +2787,17 @@ function saveSpots(){
   try{ localStorage.setItem("soppkart.spots",JSON.stringify(SPOTS)); }catch(e){}
 }
 function addSpot(w){
+  /* The species starts as a guess, and the guess is only made when there is
+     one to make. With a single species on the map that is what the reader went
+     out looking for and it is nearly always right. With several up there is no
+     defensible answer - SEL[0] is merely whichever was toggled on first - so
+     the spot is saved without a species and the card asks. An unchosen species
+     draws a neutral pin, which is honest; a confidently wrong one is worse
+     than none, because it is the label the reader will trust next season. */
+  var only=SEL.length===1&&!SEL[0].is_null?SEL[0]:null;
   var s={id:uuid(),
          e:Math.round(w[0]),n:Math.round(w[1]),
-         key:current.key||"",name:current.is_null?"":current.no,
+         key:only?only.key:"",name:only?only.no:"",
          d:new Date().toISOString().slice(0,10),note:"",
          updated_at:null,dirty:true};
   SPOTS.push(s);saveSpots();renderSpots();draw();
@@ -2816,7 +2860,7 @@ function drawSpots(){
     var s=SPOTS[i],p=w2screen(s.e,s.n);
     if(p[0]<-20||p[1]<-20||p[0]>CW+20||p[1]>CH+20)continue;
     ctx.beginPath();ctx.arc(p[0],p[1],7,0,6.2832);
-    ctx.fillStyle="#c8791a";ctx.fill();
+    ctx.fillStyle=spotColour(s.key);ctx.fill();
     ctx.lineWidth=2.4;ctx.strokeStyle="#fff";ctx.stroke();
   }
 }
@@ -2830,16 +2874,64 @@ function spotAt(sx,sy){
 }
 function esc(s){return String(s||"").replace(/[&<>"]/g,function(c){
   return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c];});}
+/* What the chooser offers: every shipped species, never the synthetic null -
+   it is a validation device and nobody found one - and "Annet" for a mushroom
+   that is not on the list, which also clears a species set by mistake.
+
+   A spot saved under a species that has since left the build keeps a chip of
+   its own, labelled with the name it was saved under. Dropping it would lose
+   what the reader wrote down, silently, on a card they opened for some other
+   reason. */
+function spotSpeciesChips(s){
+  var out=[],seen={};
+  D.species.forEach(function(sp){
+    if(sp.is_null)return;
+    seen[sp.key]=1;
+    out.push({key:sp.key,label:sp.no,col:spotColour(sp.key)});
+  });
+  if(s.key&&!seen[s.key])
+    out.unshift({key:s.key,label:s.name||s.key,col:spotColour(s.key)});
+  out.push({key:"",label:"Annet",col:SPOT_NEUTRAL});
+  return out;
+}
+/* Changing the species is a change to a synced row like any other, so it marks
+   the row dirty and pushes. An unknown key - "Annet", or the null if anything
+   ever asked for it - clears both fields rather than leaving a name standing
+   behind a cleared key, which would be a label the pin's colour contradicts. */
+function setSpotSpecies(s,key){
+  var sp=null,i;
+  for(i=0;i<D.species.length;i++)
+    if(D.species[i].key===key&&!D.species[i].is_null)sp=D.species[i];
+  s.key=sp?sp.key:"";
+  s.name=sp?sp.no:"";
+  s.dirty=true;saveSpots();renderSpots();draw();syncNow(true);
+}
 function showSpot(s){
   selected=-1;closeSheets();
   cardTitle.textContent=s.name||"Mitt sted";
   var h='<div class="lead2">Lagret '+esc(s.d)+'.</div>'
+    +'<div class="spAsk">Hva fant du her?</div>'
+    +'<div class="spSet" id="spotSp">'
+    +spotSpeciesChips(s).map(function(c){
+        return '<button type="button" class="spChip" data-key="'+esc(c.key)+'"'
+          +' aria-pressed="'+(c.key===(s.key||"")?"true":"false")+'">'
+          +'<i style="background:'+c.col+'"></i>'+esc(c.label)+'</button>';
+      }).join("")
+    +'</div>'
     +walkTo(s.e,s.n)
-    +'<textarea class="noteed" id="spotNote" placeholder="Notat &mdash; hva fant du, hvordan så det ut?">'
+    +'<textarea class="noteed" id="spotNote" placeholder="Notat &mdash; hvordan så det ut her?">'
     +esc(s.note)+'</textarea>'
     +'<button class="ghost danger" id="spotDel">Slett dette stedet</button>';
   cardBody.innerHTML=h;
   card.classList.add("on");
+  var chips=cardBody.querySelectorAll("#spotSp .spChip");
+  Array.prototype.forEach.call(chips,function(b){
+    b.addEventListener("click",function(){
+      setSpotSpecies(s,b.dataset.key);
+      Array.prototype.forEach.call(chips,function(o){
+        o.setAttribute("aria-pressed",o.dataset.key===(s.key||"")?"true":"false");});
+      cardTitle.textContent=s.name||"Mitt sted";});
+  });
   var ta=document.getElementById("spotNote");
   var noteTimer=0;
   ta.addEventListener("input",function(){
@@ -2890,7 +2982,8 @@ function renderSpots(){
     var far="";
     if(gpsPos){var d=Math.hypot(s.e-gpsPos[0],s.n-gpsPos[1]);
       far=d<950?Math.round(d/10)*10+" m":(d/1000).toFixed(1).replace(".",",")+" km";}
-    html+='<button class="spotRow" data-id="'+esc(s.id)+'"><span class="pin"></span>'
+    html+='<button class="spotRow" data-id="'+esc(s.id)+'">'
+      +'<span class="pin" style="background:'+spotColour(s.key)+'"></span>'
       +'<span class="txt"><span class="nm">'+esc(s.name||"Mitt sted")+'</span>'
       +'<span class="sub2">'+esc(s.d)+(s.note?' · '+esc(s.note):'')+'</span></span>'
       +'<span class="far">'+far+'</span></button>';
