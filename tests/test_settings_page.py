@@ -36,10 +36,15 @@ def settings() -> str:
 class TestTheOrder:
     def test_the_sections_are_in_the_intended_order(self, settings):
         assert re.findall(r'class="glabel">([^<]+)<', settings) == [
-            "Kart", "Synkronisering", "Utseende", "Personvern"]
+            "Kart", "Utseende", "Synkronisering", "Personvern"]
 
-    def test_appearance_comes_before_privacy(self, settings):
-        """The short control ahead of the long explanation, not after it."""
+    def test_appearance_comes_before_the_account_block(self, settings):
+        """Theme is one tap. The account block below it is a status, a form and
+        a warning about losing your spots, and Personvern is longer still - so
+        both of the quick map preferences sit above all of that."""
+        assert settings.index("Utseende") < settings.index("Kun denne telefonen") \
+            if "Kun denne telefonen" in settings else True
+        assert settings.index("Utseende") < settings.index('id="acct"')
         assert settings.index("Utseende") < settings.index("Personvern")
 
     def test_the_delete_everything_button_stays_under_privacy(self, settings):

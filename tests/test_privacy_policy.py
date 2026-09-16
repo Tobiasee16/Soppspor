@@ -240,3 +240,46 @@ class TestItCanBeNavigated:
             body = re.sub(r"<summary>.*?</summary>", "", m.group(0), flags=re.S)
             text = re.sub(r"<[^>]+>", " ", body).strip()
             assert len(text) > 40, f"an empty fold: {m.group(0)[:80]}"
+
+
+class TestItSaysWhyAnythingIsStored:
+    """A policy that lists what is held without saying what it is for reads as
+    collection for its own sake.
+
+    The purpose here is narrow and it is the whole justification: spots are kept
+    on an account so they survive the phone and reach the user's other devices.
+    It was in the page, in the legal-basis section, at the bottom, behind a
+    fold. That is the right place for the article reference and the wrong place
+    for the reason - so the reason is now in the summary, which nobody has to
+    open, and at the head of the section listing what is held.
+    """
+
+    def test_the_summary_says_what_the_storage_is_for(self, prose):
+        outside = re.sub(r"\s+", " ",
+                         re.sub(r"<details.*?</details>", "", prose, flags=re.S))
+        assert "alle enhetene dine" in outside, (
+            "the purpose is only inside a fold; it belongs where a skimmer "
+            "meets it")
+
+    def test_the_storage_section_leads_with_the_purpose(self, prose):
+        section = prose[prose.index("Hva vi lagrer"):]
+        why = section.index("Hvorfor vi lagrer")
+        what = section.index("lagres dette")
+        assert why < what, "the section lists what is held before saying why"
+
+    def test_it_still_says_the_storage_is_optional(self, prose):
+        """The purpose only justifies the data while the user can decline it."""
+        assert "Slår du av synkronisering" in prose
+
+    def test_the_legal_basis_still_matches_the_stated_purpose(self, prose):
+        """Saying it twice is fine; saying two different things is not."""
+        assert "oppfyllelse av avtale" in prose
+        assert "artikkel" in prose and "bokstav b" in prose
+
+    def test_the_app_gives_the_same_reason_as_the_policy(self):
+        """Two documents describing one product. The in-app summary is what
+        most readers see, and it used to say what was stored and never why."""
+        shell = (ROOT / "web" / "shell.html").read_text(encoding="utf-8")
+        assert "Hvorfor vi lagrer noe i det hele tatt" in shell
+        assert "alle enhetene dine" in shell
+

@@ -737,6 +737,16 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
             <span class="sub">turruter fra Kartverket, Turrutebasen</span></span>
           <span class="sw"><input type="checkbox" id="swTrails" checked><i></i></span></div>
       </div>
+      <p class="glabel">Utseende</p>
+      <div class="group">
+        <div class="row"><span class="lbl">Tema</span>
+          <div class="seg" id="segTheme">
+            <button type="button" data-v="auto" aria-pressed="true">Auto</button>
+            <button type="button" data-v="light" aria-pressed="false">Lys</button>
+            <button type="button" data-v="dark" aria-pressed="false">Mørk</button>
+          </div></div>
+      </div>
+
       <p class="glabel">Synkronisering</p>
       <div class="group">
         <div class="row"><span class="lbl">Synkroniser stedene mine
@@ -763,20 +773,14 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
         </div>
       </details>
 
-      <p class="glabel">Utseende</p>
-      <div class="group">
-        <div class="row"><span class="lbl">Tema</span>
-          <div class="seg" id="segTheme">
-            <button type="button" data-v="auto" aria-pressed="true">Auto</button>
-            <button type="button" data-v="light" aria-pressed="false">Lys</button>
-            <button type="button" data-v="dark" aria-pressed="false">Mørk</button>
-          </div></div>
-      </div>
-
       <p class="glabel">Personvern</p>
       <details class="fold">
         <summary>Hva vi lagrer, og hvem som ser det</summary>
         <div class="about">
+        <p><b>Hvorfor vi lagrer noe i det hele tatt.</b> For at stedene dine skal
+          finnes på <b>alle enhetene dine</b>, og komme tilbake hvis du bytter
+          telefon. Det er hele grunnen. Slår du av synkronisering, lagrer vi
+          ingenting &mdash; da ligger alt bare her.</p>
         <p><b>Hva vi lagrer.</b> Stedene du lagrer: posisjon, dato, notatet ditt,
           og arten du selv velger. Ingenting annet. Ingen navn, ingen
           telefonnummer, ingen sporing, ingen analyseverktøy, ingen annonser.
