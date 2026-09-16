@@ -196,5 +196,85 @@ const OSLO = [262000, 6650000];   // roughly the middle of the city, EPSG:25833
         !/localStorage[.]setItem[(]"[^"]*(?:sok|search|find)/i.test(shell));
 }
 
+// ---------------------------------------- the sheet and the on-screen keyboard --
+/* Reported: typing brought suggestions up and they vanished off the top of the
+   screen. Two bugs stacked, and only one of them had been fixed.
+ *
+ * iOS lays the keyboard over the window instead of shrinking it, so a sheet
+ * anchored to the bottom ends up behind the keys. findLift already raised it by
+ * the covered height. What it did not do was shrink it: `.card` caps at 74% of
+ * its parent, which is the whole window, and that stops meaning anything once a
+ * third of the window is keyboard. The sheet grows upward from its new bottom
+ * edge, so it overshot the top and took the results with it - worst exactly
+ * when results appeared, because that is when the sheet was tallest. */
+{
+  const src = (() => {
+    const i = shell.indexOf("function findLift(");
+    let j = shell.indexOf("{", i), d = 0;
+    for (; j < shell.length; j++) {
+      if (shell[j] === "{") d++;
+      else if (shell[j] === "}") { d--; if (!d) break; }
+    }
+    return shell.slice(i, j + 1);
+  })();
+
+  function lift({ open = true, innerHeight = 800, vvHeight = 800, offsetTop = 0,
+                  hasVV = true } = {}) {
+    const sheet = { style: {}, classList: { contains: () => open } };
+    const win = hasVV
+      ? { innerHeight, visualViewport: { height: vvHeight, offsetTop } }
+      : { innerHeight };
+    new Function("findSheet", "window", src + "findLift();")(sheet, win);
+    return sheet.style;
+  }
+
+  let st = lift({ vvHeight: 800 });
+  check("with no keyboard the sheet keeps its own bottom and cap",
+        st.bottom === "" && st.maxHeight === "",
+        `bottom ${JSON.stringify(st.bottom)}, maxHeight ${JSON.stringify(st.maxHeight)}`);
+
+  st = lift({ innerHeight: 800, vvHeight: 450 });
+  check("an overlaying keyboard lifts the sheet clear of it",
+        st.bottom === "350px", st.bottom);
+  check("and caps it to what is still visible, which is the half that was missing",
+        st.maxHeight === "442px", st.maxHeight);
+  check("the cap is never taller than the visible viewport",
+        parseInt(st.maxHeight, 10) <= 450, st.maxHeight);
+
+  /* Android resizes the window instead of overlaying, so there is nothing to
+     lift and the CSS cap is already a percentage of the smaller window. */
+  st = lift({ innerHeight: 450, vvHeight: 450 });
+  check("a window that resizes for the keyboard needs no lift at all",
+        st.bottom === "" && st.maxHeight === "", JSON.stringify(st));
+
+  /* A tiny split-screen keyboard must not collapse the sheet to nothing. */
+  st = lift({ innerHeight: 800, vvHeight: 120 });
+  check("an absurdly small viewport still leaves a usable sheet",
+        parseInt(st.maxHeight, 10) >= 160, st.maxHeight);
+
+  st = lift({ open: false, innerHeight: 800, vvHeight: 450 });
+  check("a closed sheet is left with neither a lift nor a cap",
+        st.bottom === "" && st.maxHeight === "", JSON.stringify(st));
+
+  st = lift({ hasVV: false });
+  check("no visualViewport means no styling at all, not a crash",
+        st.bottom === undefined && st.maxHeight === undefined);
+
+  // Both ways out of the sheet have to undo both properties.
+  check("closing and dragging shut each clear the cap as well as the lift",
+        /findShut\(\)\{[\s\S]*?maxHeight=""/.test(shell) &&
+        /makeDismissable\(findSheet[\s\S]{0,120}maxHeight=""/.test(shell));
+
+  // And the wall of text that made the sheet tall in the first place.
+  const sheetMarkup = shell.slice(shell.indexOf('id="findSheet"'),
+                                  shell.indexOf('id="spSheet"'));
+  const note = (sheetMarkup.match(/<p class="about"[\s\S]*?<\/p>/) || [""])[0];
+  check("the note under the field is a line, not a paragraph",
+        note.replace(/<[^>]+>/g, "").trim().split(/\s+/).length <= 16,
+        note.replace(/<[^>]+>/g, "").trim());
+  check("but it still says where the query goes", /Kartverket/.test(note));
+}
+
+
 console.log(fails ? `\n${fails} FAILED` : "\nall search checks passed");
 process.exit(fails ? 1 : 0);

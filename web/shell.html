@@ -511,10 +511,8 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
              placeholder="Sted eller adresse">
       <div class="sheetList" id="findList"></div>
       <div class="msg" id="findMsg" hidden></div>
-      <p class="about" style="margin:12px 0 0">Søket går til <b>Kartverket</b>
-        sine åpne registre over stedsnavn og adresser. Det du skriver sendes dit
-        for å finne stedet, og lagres ikke her. Stedene dine blir aldri søkt
-        opp noe annet sted enn på telefonen.</p>
+      <p class="about" style="margin:10px 0 0">Søket går til <b>Kartverket</b>.
+        Det du skriver lagres ikke her.</p>
     </div>
 
     <!-- species chooser, opened from the map -->
@@ -3609,10 +3607,23 @@ if(findQ){
    and the sheet is fine as it is on a desktop. */
 function findLift(){
   if(!window.visualViewport)return;
-  if(!findSheet.classList.contains("on")){findSheet.style.bottom="";return;}
+  if(!findSheet.classList.contains("on")){
+    findSheet.style.bottom="";findSheet.style.maxHeight="";return;}
   var vv=window.visualViewport;
   var gap=Math.max(0,Math.round(window.innerHeight-vv.height-vv.offsetTop));
-  findSheet.style.bottom=gap>40?gap+"px":"";
+  if(gap>40){
+    findSheet.style.bottom=gap+"px";
+    /* Lifting alone was not enough, and this is the half that was missing.
+       `.card` caps at 74% of its parent, which is the whole window - a height
+       that stops meaning anything once the keyboard covers a third of it. The
+       sheet grows upward from its new bottom edge, so it ran off the top and
+       took the suggestions with it: reported as results disappearing above the
+       screen exactly when they appeared. Cap it to what is actually visible and
+       the list scrolls inside the sheet instead. */
+    findSheet.style.maxHeight=Math.max(160,Math.round(vv.height)-8)+"px";
+  }else{
+    findSheet.style.bottom="";findSheet.style.maxHeight="";
+  }
 }
 if(window.visualViewport){
   window.visualViewport.addEventListener("resize",findLift);
@@ -3621,6 +3632,7 @@ if(window.visualViewport){
 function findShut(){
   findSheet.classList.remove("on");
   findSheet.style.bottom="";
+  findSheet.style.maxHeight="";
 }
 document.getElementById("findBtn").addEventListener("click",function(){
   closeSheets();
@@ -3681,7 +3693,8 @@ makeDismissable(card,function(){selected=-1;draw();});
 document.getElementById("spClose").addEventListener("click",function(){
   spSheet.classList.remove("on");});
 makeDismissable(spSheet);
-makeDismissable(findSheet,function(){findSheet.style.bottom="";});
+makeDismissable(findSheet,function(){
+  findSheet.style.bottom="";findSheet.style.maxHeight="";});
 
 /* Holding a finger on the spot is the gesture for "remember this", and it
    works with gloves on and without reading anything. */
