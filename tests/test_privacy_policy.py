@@ -184,3 +184,59 @@ class TestItIsActuallyReachable:
         assert policy.lstrip().lower().startswith("<!doctype html>")
         assert '<html lang="no">' in policy
         assert "<script" not in policy.lower()
+
+
+class TestItCanBeNavigated:
+    """The page folds into a list of questions, and two things do not fold.
+
+    A privacy policy is opened by somebody with one question - who can see my
+    spots, how do I delete this - and a wall of prose is how that question goes
+    unanswered. Folding it makes the questions the page's structure. The risk
+    the checks below cover is the obvious one: folding away something a reader
+    must not have to click to find.
+    """
+
+    def test_the_sections_fold(self, policy):
+        n = policy.count("<details")
+        assert n >= 10, f"only {n} folding sections; the page was a wall again"
+        assert policy.count("<summary>") == n, "a section with no heading to tap"
+        assert policy.count("</details>") == n
+
+    def test_it_folds_without_script(self, policy):
+        """`<details>` is why this works at all.
+
+        The page must render before any of the app has loaded, and
+        test_it_stands_alone_as_a_page forbids script outright. A div-and-click
+        accordion would also lose keyboard operation and the screen-reader
+        announcement that the native element gives for nothing.
+        """
+        assert "<script" not in policy.lower()
+        assert "onclick" not in policy.lower()
+
+    def test_print_does_not_hide_anything(self, policy):
+        """On paper there is nothing to tap, so nothing may stay shut."""
+        assert "@media print" in policy
+        assert "details > :not(summary){display:block}" in policy.replace("\n", "")
+
+    def test_the_things_a_reader_must_not_miss_are_not_folded(self, policy):
+        # Collapsed, because the page wraps and "ikke en fasit" spans a line.
+        """The summary and the safety reminder stay on the page unopened.
+
+        The two permanent product constraints - never says what is edible,
+        never identifies from a photograph - and the framing of the map as an
+        estimate are exactly what somebody skimming needs to meet without
+        deciding to open anything.
+        """
+        outside = re.sub(r"\s+", " ",
+                         re.sub(r"<details\b.*?</details>", "", policy, flags=re.S))
+        assert "spiselig" in outside, "the edibility line is behind a fold"
+        assert "bilder" in outside, "the photo-identification line is behind a fold"
+        assert "anslag" in outside and "ikke en fasit" in outside
+        # The five-point summary, which answers most of the page without a tap.
+        assert "aldri" in outside and "slette alt selv" in outside
+
+    def test_every_fold_has_something_in_it(self, policy):
+        for m in re.finditer(r"<details\b.*?</details>", policy, flags=re.S):
+            body = re.sub(r"<summary>.*?</summary>", "", m.group(0), flags=re.S)
+            text = re.sub(r"<[^>]+>", " ", body).strip()
+            assert len(text) > 40, f"an empty fold: {m.group(0)[:80]}"
