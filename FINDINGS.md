@@ -5076,3 +5076,154 @@ national measurement instead of an argument, that the effect the owner asked
 about is shared across species and therefore sits exactly where this design
 cannot see it. Section 27's list of things that cannot be fixed by effort now
 has a measured number against it rather than a structural argument alone.
+
+## 31. Six more species, and two calls I got wrong - 2026-09-16
+
+The owner asked for yellowfoot, edible russulas and milk caps, terracotta
+hedgehog and sheep polypore. Six species were added and one was refused. All
+six cleared the registered bar, which is not what was predicted for two of
+them - by me, in writing, hours earlier.
+
+### 31a. What the request could not be given as asked
+
+**Yellowfoot was already here, and also was not.** *Craterellus tubaeformis* -
+traktkantarell - is one of the registered three and has been on the map since
+Phase 0. But the same English name is used for *Craterellus lutescens*, gul
+trompetsopp, which is a different species and was not modelled. That one was
+added. Worth recording because "already in the app" was very nearly the whole
+answer, and would have been wrong.
+
+**"Edible russulas and milk caps" are not species.** CLAUDE.md forbids pooling,
+and here the rule and the ecology say the same thing: *L. deterrimus* is
+spruce-obligate, *L. torminosus* birch-obligate, *R. decolorans* a poor-ground
+pine and spruce species. Pooled, the only signal they share is where people
+walk - which is precisely the artefact the target-group background exists to
+remove, arriving through the front door. Four named species were fitted instead.
+
+**Terracotta hedgehog was refused, and not for its count.** *Hydnum rufescens*
+has 1,093 national records, more than species that already ship. The objection
+is that the source routinely records it as *Hydnum repandum*, which is on the
+map, so the two presence sets are partly the same observations. Two maps built
+from one set of records, each labelled a different mushroom, is a confound we
+would be introducing knowingly.
+
+**A fifth candidate turned out not to exist.** *Lactarius utilis* (blek
+hulriske) was on the shortlist until the probe returned Artskart taxon **40466**
+for it - the same id as *L. trivialis*. They are not separable in the source. An
+entry for each would have fitted identical records twice under two names and
+drawn two maps of one mushroom. `tests/test_species_config.py` now refuses
+duplicate taxon ids for exactly this reason; nothing had ever looked at that
+field, though `src/species.py` already guarded duplicate *keys*.
+
+### 31b. The exclusion list had quietly expired
+
+`config/species.yaml` carried three species looked at and left out, each with a
+reason. All three reasons were written against **Agder, with Kristiansand held
+out**. The national expansion moved both extents and invalidated two of them
+without anyone noticing:
+
+* *Albatrellus ovinus* was excluded for "117 Agder but **0 in Kristiansand**".
+  Nationally it has 1,690 records and Nordland holds 10. The reason had expired.
+* *Macrolepiota procera* was excluded for "31 in Agder, below the 50-record
+  floor". Nationally it has 364 - but **0 in Nordland**, so nothing can measure
+  it and it cannot clear the control however well it fits. It stays out for a
+  better reason than the one it had.
+
+This is the same failure mode as section 30b and 25i: a decision correct when
+made, resting on numbers that moved underneath it. The block now says which
+extent each reason was decided on, and a test refuses the stale form.
+
+### 31c. Held-out power, checked before anything was fitted
+
+CLAUDE.md's rule is to report thinned counts before modelling, so that a species
+that cannot support a conclusion is named rather than discovered late. All four
+of the chosen four beat every species already shipping:
+
+Counts from `scripts/check_holdout_power.py`, which is a different script from
+the one that later measures the transfer AUC and builds its point set slightly
+differently. For two species the two disagree by a single record - skjeggriske
+140 here and 139 there, grønnkremle 76 and 75 - which changes nothing and is
+noted rather than reconciled silently. The held-out `n` in 31d is the one the
+AUC was actually measured on.
+
+| Species | Training (thinned) | Nordland | share | vs effort |
+|---|---|---|---|---|
+| *Lactarius torminosus* (skjeggriske) | 1,879 | 140 | 6.9 % | 1.62x |
+| *Lactarius deterrimus* (granmatriske) | 1,685 | 128 | 7.1 % | 1.64x |
+| *Russula aeruginea* (grønnkremle) | 1,730 | 76 | 4.2 % | 0.98x |
+| *Russula decolorans* (skiftende kremle) | 1,382 | 74 | 5.1 % | 1.18x |
+| *Craterellus lutescens* (gul trompetsopp) | 774 | 15 | 1.9 % | 0.44x |
+| *Albatrellus ovinus* (fåresopp) | 941 | 10 | 1.1 % | 0.24x |
+
+The last two sit below the 30-record floor. The share column is what
+distinguishes the two ways of being short, and both read as **northern thinning
+rather than a sampling gap** - the same shape as *C. tubaeformis* at 0.47x. That
+is the band *C. cornucopioides* already ships from, on seven records.
+
+### 31d. The result: all six cleared, and the two I doubted came first
+
+Null control, blocked CV: **0.492 ± 0.007**. Sitting on 0.5, so the background
+sampling holds and the rest of the table means something. Null transfer AUC on
+Nordland: **0.475**. The bar is that a species' transfer CI starts above it.
+
+| Species | blocked AUC | transfer AUC | 95 % CI | held-out n |
+|---|---|---|---|---|
+| *Craterellus lutescens* (gul trompetsopp) | 0.824 | **0.750** | 0.639-0.851 | 15 |
+| *Albatrellus ovinus* (fåresopp) | 0.831 | **0.721** | 0.557-0.868 | 10 |
+| *Lactarius deterrimus* (granmatriske) | 0.737 | 0.698 | 0.655-0.744 | 128 |
+| *Russula aeruginea* (grønnkremle) | 0.690 | 0.693 | 0.637-0.750 | 75 |
+| *Russula decolorans* (skiftende kremle) | 0.746 | 0.655 | 0.592-0.716 | 74 |
+| *Lactarius torminosus* (skjeggriske) | 0.670 | 0.645 | 0.603-0.689 | 139 |
+
+All fourteen species now on the map clear the control. Every one of the eight
+already shipping reproduced its blocked AUC **to three decimal places** against
+the committed report - adding six species changed nothing about the other
+eight, which is the reproducibility check worth having and was cheap to run.
+
+**I predicted both of the thin two would struggle, and said so in writing.** The
+recommendation was to fit them anyway and let the registered rule decide, on the
+grounds that the rule should make the call rather than a person. That reasoning
+was right and the estimate inside it was wrong: they are first and second of the
+six on transfer. The argument for automating the bar is not that it saves an
+argument, it is that human priors about thin-data performance are bad enough to
+need overruling.
+
+Both carry «få funn» in the interface, on 15 and 10 held-out records against a
+threshold of 20, and the intervals show why - *A. ovinus* spans 0.557 to 0.868.
+The label is doing real work rather than decorating.
+
+### 31e. A registered guess that failed, recorded rather than dropped
+
+`config/species.yaml` says of *R. aeruginea*, written before any model ran:
+
+> Expected to be the weakest of this batch, which is the point of including it:
+> a generalist to read the specialists against.
+
+It came **second of the four** on transfer and second on blocked CV. The bottom
+two are *L. torminosus* and *R. decolorans*, both specialists, and
+*L. torminosus* has the largest held-out set of any new species and the lowest
+transfer AUC of all fourteen. More records did not mean a better number, and
+being a generalist did not mean a worse one.
+
+This is the third registered prediction in this project to fail - after the
+Phase 0 ordering test on Agder and the calcicole guess in 27b - and like both it
+stays on the record. A guess that only gets written down when it is right is not
+a guess.
+
+### 31f. A timing lesson, in the opposite direction to 23e
+
+Section 23e records nine species predicting at 33-38 minutes each, three
+outliers at 99-130 caused by running the test suite alongside the job, and the
+consequence: a sound 5.3-hour estimate was written off as having measured a warm
+cache when it had not.
+
+This run reproduced the first half exactly - and I made the mirror-image error
+within an hour of quoting the section. The **first** species took 81 minutes and
+the other five took 36, 37, 37, 36 and 36. Seeing 81, I revised a correct
+3.5-hour estimate up to 8 hours and reported that. The first species pays for
+warming the raster cache; the rest do not.
+
+Both halves of the lesson are the same one. **One measurement is not a rate.**
+23e over-trusted a single slow run as evidence about the estimate; this
+over-trusted a single slow run as evidence about the job. The estimate was
+sound both times.
