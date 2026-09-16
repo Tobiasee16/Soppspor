@@ -367,6 +367,30 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sf);
   text-decoration-color:var(--ink-4)}
 .sheetList{margin:6px -18px 0}
 
+/* The search sheet is a frame, not a scrolling page.
+ *
+ * `.card` scrolls as a whole, which is right for the detail card and wrong
+ * here: it makes the field, the header and the notch part of the same scrolling
+ * column as the results, so a long list pushes the thing you are typing into
+ * off the top. Capping the sheet's height stopped it growing and did not stop
+ * that - the reported fault, twice.
+ *
+ * So this one sheet is a flex column. Everything above the list is fixed, the
+ * list takes whatever is left and scrolls inside it, and the frame cannot move
+ * however many suggestions arrive.
+ *
+ * `min-height:0` is the load-bearing line. A flex item will not shrink below
+ * its content by default, so without it the list refuses to be smaller than the
+ * results it holds, the column grows anyway, and the overflow never engages -
+ * which looks exactly like the bug this replaces. */
+#findSheet{display:flex;flex-direction:column;overflow:hidden}
+#findSheet > *{flex:0 0 auto}
+#findSheet #findList{flex:1 1 auto;min-height:0;overflow-y:auto;
+  -webkit-overflow-scrolling:touch;overscroll-behavior:contain;
+  margin-bottom:calc(-1 * max(16px, env(safe-area-inset-bottom)))}
+#findNote{margin:10px 0 0}
+#findSheet .msg{margin-top:8px}
+
 /* tab bar */
 .tabs{display:flex;background:var(--sheet);backdrop-filter:saturate(180%) blur(20px);
   -webkit-backdrop-filter:saturate(180%) blur(20px);border-top:.5px solid var(--sep);
@@ -513,10 +537,10 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
       <input class="field" id="findQ" type="search" inputmode="search"
              autocomplete="off" autocorrect="off" spellcheck="false"
              placeholder="Sted eller adresse">
-      <div class="sheetList" id="findList"></div>
-      <div class="msg" id="findMsg" hidden></div>
-      <p class="about" style="margin:10px 0 0">Søket går til <b>Kartverket</b>.
+      <p class="about" id="findNote">Søket går til <b>Kartverket</b>.
         Det du skriver lagres ikke her.</p>
+      <div class="msg" id="findMsg" hidden></div>
+      <div class="sheetList" id="findList"></div>
     </div>
 
     <!-- species chooser, opened from the map -->
@@ -3799,10 +3823,25 @@ function makeDismissable(sheet,onClose){
   function onControl(t){
     return !!(t&&t.closest&&t.closest("input,textarea,select"));
   }
+  /* Which scroller the finger is actually in.
+
+     The sheet used to be the only thing that scrolled, so asking it was enough.
+     The search sheet is a frame now and its result list is the scroller, so a
+     pull that begins in a half-scrolled list has to be read from that list
+     rather than from the sheet around it - otherwise scrolling results
+     dismisses the sheet. */
+  function scrolledAlready(t){
+    var el=t;
+    while(el&&el!==sheet){
+      if(el.scrollHeight>el.clientHeight+1)return (el.scrollTop||0)>0;
+      el=el.parentNode;
+    }
+    return (sheet.scrollTop||0)>0;
+  }
   function down(e){
     if(e.button>0||onControl(e.target))return;
     y0=e.clientY;dy=0;dragging=false;
-    fromTop=(sheet.scrollTop||0)<=0;
+    fromTop=!scrolledAlready(e.target);
     window.addEventListener("pointermove",move,{passive:false});
     window.addEventListener("pointerup",end);
     window.addEventListener("pointercancel",end);

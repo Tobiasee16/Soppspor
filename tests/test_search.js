@@ -436,5 +436,69 @@ const OSLO = [262000, 6650000];   // roughly the middle of the city, EPSG:25833
 }
 
 
+// ------------------------------------------------ the sheet is a frame now --
+/* Reported twice: the suggestions go off the top of the screen once there are
+   enough of them.
+ *
+ * The first fix capped the sheet's height under the keyboard. That was a real
+ * bug and not this one. `.card` scrolls as a whole - correct for the detail
+ * card, wrong here - so the notch, the header and the field are in the same
+ * scrolling column as the results, and a long list carries the thing you are
+ * typing into off the top however tightly the sheet is capped.
+ *
+ * So the search sheet is a flex column: everything above the list is fixed, the
+ * list takes what is left and scrolls inside it, and the frame cannot move.
+ *
+ * These cannot prove it renders - there is no browser here - but they pin the
+ * three declarations that make it work and the one that silently unmakes it. */
+{
+  const css = shell.slice(shell.indexOf("#findSheet{"),
+                          shell.indexOf("/* tab bar */"));
+  const sheet = shell.slice(shell.indexOf('id="findSheet"'),
+                            shell.indexOf('id="spSheet"'));
+
+  check("the sheet is a column, not a scrolling page",
+        /#findSheet\{[^}]*display:flex/.test(css) &&
+        /#findSheet\{[^}]*flex-direction:column/.test(css), css.slice(0, 70));
+  check("and clips rather than scrolling as a whole",
+        /#findSheet\{[^}]*overflow:hidden/.test(css));
+  check("everything in it is fixed by default",
+        /#findSheet > \*\{flex:0 0 auto\}/.test(css));
+  check("the result list is the one part that grows and scrolls",
+        /#findList\{[^}]*flex:1 1 auto/.test(css) &&
+        /#findList\{[^}]*overflow-y:auto/.test(css));
+
+  /* The line that looks redundant and is the whole thing. A flex item will not
+     shrink below its content, so without it the list refuses to be shorter than
+     the results it holds, the column grows anyway, and the overflow never
+     engages - which presents as exactly the bug being fixed. */
+  check("the list may shrink below its contents, or none of the above works",
+        /#findList\{[^}]*min-height:0/.test(css));
+
+  check("a flick at the end of the list does not scroll the sheet behind it",
+        /#findList\{[^}]*overscroll-behavior:contain/.test(css));
+
+  // Order matters: the list has to be last to take the remaining height.
+  const iField = sheet.indexOf('id="findQ"');
+  const iNote = sheet.indexOf('id="findNote"');
+  const iList = sheet.indexOf('id="findList"');
+  check("the field comes before the results", iField < iList && iField > 0);
+  check("the note sits under the field it explains, not under the results",
+        iNote > iField && iNote < iList, `${iField} ${iNote} ${iList}`);
+  check("and the results are the last thing in the sheet",
+        iList > iNote && !/<(p|input)\b/.test(sheet.slice(iList)),
+        sheet.slice(iList).replace(/\s+/g, " ").slice(0, 80));
+
+  /* The sheet no longer scrolls, so the drag can no longer ask it whether it is
+     scrolled - it has to ask the list the finger is actually in, or pulling
+     through a half-scrolled list dismisses the sheet. */
+  check("the drag reads the scroller the finger is in, not the sheet",
+        /function scrolledAlready\(/.test(shell) &&
+        /fromTop=!scrolledAlready\(e\.target\)/.test(shell));
+  check("and walks up from the target to find it",
+        /el\.scrollHeight>el\.clientHeight\+1/.test(shell));
+}
+
+
 console.log(fails ? `\n${fails} FAILED` : "\nall search checks passed");
 process.exit(fails ? 1 : 0);
