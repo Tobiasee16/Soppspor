@@ -105,6 +105,15 @@ not exist, and it was the only part of the schema tied to PostGIS specifically.
 Removed in `migrations/001_drop_unused_postgis.sql`. The one thing worth
 preserving about a backend choice is the ability to leave it.
 
+**The extension followed on 2026-09-16.** 001 left PostGIS installed on the
+grounds that dropping an extension is a much bigger claim than dropping a column
+nobody reads, and said to check first. What settled it was Supabase's linter
+reporting *RLS Disabled in Public* against `public.spatial_ref_sys` - PostGIS's
+own EPSG table, which holds nothing about anybody and cannot have RLS enabled on
+it by anyone short of a superuser. An unused dependency whose only remaining
+contribution is an unprotected table in the exposed schema is one to remove
+rather than to explain away. `migrations/003_drop_postgis.sql`.
+
 ## End-to-end encryption: proposed, and declined
 
 Recorded because it is the kind of question that comes back, and the answer is

@@ -1,6 +1,7 @@
 -- Soppspor: per-user storage for personal finds.
 --
--- Target: Supabase (Postgres 15+ with PostGIS). Apply with
+-- Target: Supabase (Postgres 15+). No PostGIS: see the note below and
+-- migrations/003_drop_postgis.sql. Apply with
 --   psql "$SUPABASE_DB_URL" -f backend/schema.sql
 -- or paste into the SQL editor. It is idempotent; running it twice is safe.
 --

@@ -12,10 +12,18 @@ should move here without a reason.
 
 ## Decisions, and why
 
-**Supabase.** Managed Postgres with PostGIS, so spots are real geodata rather
-than two float columns we later regret; auth and per-user isolation come with
-it rather than being written by hand; and it is open source and self-hostable,
-so choosing it now does not become a wall later.
+**Supabase.** Managed Postgres: auth and per-user isolation come with it
+rather than being written by hand, and it is open source and self-hostable, so
+choosing it now does not become a wall later.
+
+This used to say "with PostGIS, so spots are real geodata rather than two float
+columns we later regret". Both halves turned out to be wrong. Spots **are** two
+float columns, deliberately — every spatial question this app asks is answered
+on the device, which already holds all of that user's spots, so the geometry
+column was recomputed and reindexed on every save for a read path that did not
+exist. It went in `migrations/001`, and PostGIS itself followed in `003` once
+the linter showed that the only thing the extension still contributed was an
+unprotected table in the `public` schema.
 
 **Anonymous identity first.** A spot saves on first launch with no account, no
 email and no login wall — which is the whole point for someone who downloads
@@ -65,7 +73,13 @@ in the schema rather than in client code, where they could be forgotten:
    psql "$SUPABASE_DB_URL" -f backend/schema.sql
    ```
    or paste it into the SQL editor. It is idempotent.
-4. **Schedule the tombstone purge.** Paste
+4. **Drop PostGIS.** Paste `migrations/003_drop_postgis.sql` into the SQL
+   editor. Nothing in this schema uses it, and leaving it installed puts
+   `public.spatial_ref_sys` — a table belonging to the extension, which cannot
+   have RLS enabled on it by anyone but a superuser — in the schema PostgREST
+   exposes. That is the *RLS Disabled in Public* finding in Supabase's linter.
+   See [FIXING_SUPABASE.md](FIXING_SUPABASE.md) section 2b.
+5. **Schedule the tombstone purge.** Paste
    `migrations/004_schedule_tombstone_purge.sql` into the SQL editor. It
    enables `pg_cron`, schedules the job, and carries the queries to verify it
    afterwards.
@@ -74,7 +88,7 @@ in the schema rather than in client code, where they could be forgotten:
    that a deleted spot is removed permanently within 30 days, and nothing
    removes it unless this job runs. **Do this before publishing the policy**,
    not after.
-5. Give me the Project URL and anon key and I will wire the client sync layer
+6. Give me the Project URL and anon key and I will wire the client sync layer
    to them. Until then the app keeps working exactly as it does now, entirely
    on the device.
 

@@ -37,7 +37,7 @@ path exists as of step 2; the other two do not.
 
 ---
 
-## 2b. Drop PostGIS — PENDING
+## 2b. Drop PostGIS — DONE
 
 Supabase's linter reports **RLS Disabled in Public** for
 `public.spatial_ref_sys`. That is PostGIS's own EPSG table — about 8,500 rows
@@ -57,12 +57,35 @@ superuser. So the fix is to remove a dependency nothing uses — which migration
 Checked on 2026-09-14: no geometry or geography column, no `st_*` call and no
 `postgis.*` reference survives anywhere in `schema.sql` or the migrations.
 
-Run `backend/migrations/003_drop_postgis.sql`. It is one statement, it is safe
-to run twice, and it deliberately does **not** use `cascade` — a plain `drop
-extension` refuses if something still depends on PostGIS, which is a failure
-worth reading rather than working around.
+`backend/migrations/003_drop_postgis.sql` is one statement, safe to run twice,
+and deliberately does **not** use `cascade` — a plain `drop extension` refuses
+if something still depends on PostGIS, which is a failure worth reading rather
+than working around.
 
-Saved spots are untouched: `spots` has had no PostGIS column since 001.
+**Run 2026-09-16, and it succeeded**, which is itself the check: without
+`cascade` it could only have succeeded if nothing depended on the extension.
+
+Saved spots are untouched, and the reason is stronger than a count. `spots` has
+had no PostGIS column since 001, so there was nothing for a drop to reach even
+in principle — and nobody recorded a row count beforehand, so a count afterwards
+could not have proved anything on its own.
+
+Verify:
+
+```sql
+select extname from pg_extension where extname = 'postgis';   -- no rows
+select to_regclass('public.spatial_ref_sys');                 -- null
+select tablename from pg_tables
+ where schemaname = 'public' and rowsecurity = false;         -- no rows
+```
+
+The third is the one that closes the linter finding, and it closes it at the
+root: there is no unprotected table left in `public` to report, rather than a
+report being suppressed.
+
+If PostGIS is ever wanted back, install it outside the exposed schema —
+`create extension postgis schema extensions;` — because putting it back in
+`public` brings the finding back with it.
 
 ---
 
