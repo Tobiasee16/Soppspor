@@ -1,4 +1,4 @@
-/* Does the search sheet keep the field on screen? Asked of a real browser.
+/* Does the search panel keep the field on screen? Asked of a real browser.
  *
  * Every other suite here reads the shell as text or drives it against a stub
  * DOM. Neither can answer a layout question, and that gap cost three fixes for
@@ -50,6 +50,12 @@ async function measure(page) {
     const sheet = document.getElementById("findSheet").getBoundingClientRect();
     const list = document.getElementById("findList");
     const first = list.querySelector("button");
+    const tabs = document.querySelector(".tabs").getBoundingClientRect();
+    /* Whatever is drawn at the middle of the tab bar. The bar sitting on top of
+       the results is the other half of what the screenshots showed. */
+    const over = document.elementFromPoint(
+      Math.round(tabs.left + tabs.width / 2),
+      Math.round(tabs.top + tabs.height / 2));
     return {
       vh: window.innerHeight,
       sheetTop: Math.round(sheet.top),
@@ -58,6 +64,7 @@ async function measure(page) {
       firstRowTop: first ? Math.round(first.getBoundingClientRect().top) : null,
       listScrolls: list.scrollHeight > list.clientHeight + 1,
       listClient: list.clientHeight,
+      coversTabs: !!over && !!over.closest("#findSheet"),
     };
   });
 }
@@ -112,6 +119,8 @@ async function measure(page) {
         `row at ${m.firstRowTop}, field ends ${m.fieldBottom}`);
   check("the list is the thing that scrolls",
         m.listScrolls, `list ${m.listClient}px tall`);
+  check("the panel covers the tab bar rather than being drawn under it",
+        m.coversTabs, "the tab bar is on top of the results");
 
   /* A keyboard takes roughly half the screen. Android shrinks the window, which
      is this; iOS overlays it, which findLift handles and the unit tests cover.
@@ -127,36 +136,35 @@ async function measure(page) {
   check("and the list still scrolls rather than overflowing",
         m.listScrolls, `list ${m.listClient}px tall`);
 
-  /* The self-check, and it has already earned its place: it was first aimed at
-     `min-height:0`, which I had asserted was load-bearing, and it passed -
-     removing that declaration changes nothing measurable. The cap is what does
-     the work. Take it away and the sheet grows to 1591px and starts 1222px
-     above the screen, carrying the field with it, which is the reported bug
-     exactly. */
+  /* The self-check, and it has earned its place twice: aimed first at
+     `min-height:0`, which I had asserted was load-bearing and is not, and then
+     at the height cap, which was the fix at the time and is not the fix now.
+     So it is aimed at the anchor. Put the panel back on the bottom edge and let
+     it size to its contents - which is what it was through six failed fixes -
+     and it grows past the top of the screen with the field inside it. */
   await page.addStyleTag({
-    content: "#findSheet{max-height:none !important}" });
+    content: "#findSheet{top:auto !important;bottom:0 !important;" +
+             "height:auto !important}" });
   await page.waitForTimeout(150);
   const broken = await measure(page);
-  check("removing the height cap is detected, because that is the real fix",
+  check("re-anchoring the panel to the bottom is detected, which is the fix",
         broken.sheetTop < 0 || broken.fieldTop < 0,
         `sheet ${broken.sheetTop}, field ${broken.fieldTop}, ` +
         `scrolls ${broken.listScrolls}`);
 
   await ctx.close();
 
-  /* ------------------------------------------------ the iOS keyboard case --
-   * The one that was actually reported, twice, and could not be reproduced any
-   * other way. Chromium shrinks the window for a keyboard; iOS does not - it
-   * leaves innerHeight alone and shrinks the visual viewport underneath it. So
-   * the real case has to be built by hand, and once it was, the fault appeared
-   * on the first run.
+  /* ------------------------------------------------- with a keyboard up --
+   * The case that was reported, four times, and could not be reproduced any
+   * other way. Chromium shrinks the window for a keyboard; a phone does not.
+   * It either shrinks the visual viewport where it stands, or - and this is the
+   * one the screenshots showed - scrolls the visible part of the page upward so
+   * the focused field stays in view, carrying everything above the field off
+   * the top of the screen.
    *
-   * `bottom` is measured from the sheet's containing block, which stops above
-   * the tab bar rather than at the window's edge. Lifting by a keyboard height
-   * measured from innerHeight therefore raised the sheet by one tab bar too
-   * many: with twenty suggestions up it ended 43px above the screen - the tab
-   * bar to the pixel - taking the search field behind the status bar with it,
-   * which is why the note under it read as cut in half. */
+   * Both are faked here, because both broke the old bottom-anchored sheet and
+   * only one of them was ever simulated. The panel is anchored to the top now,
+   * so the second case has nothing to scroll: the field was never covered. */
   const ios = await browser.newContext({
     viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const p2 = await ios.newPage();
@@ -166,10 +174,11 @@ async function measure(page) {
     t.height = window.innerHeight; t.offsetTop = 0; t.offsetLeft = 0;
     t.width = window.innerWidth; t.scale = 1;
     Object.defineProperty(window, "visualViewport", { get: () => t });
-    /* `scroll` is the part that mattered. A browser that cannot resize the
-       window for a keyboard scrolls the visual viewport up instead, to keep the
-       focused field in view, and then the gap at the bottom is nearly zero
-       while half the screen is still keyboard. */
+    /* `scroll` is the part that mattered. A browser that will not resize the
+       window for a keyboard scrolls the visual viewport up instead, and then
+       the gap at the bottom of the window is nothing while half the screen is
+       still keyboard - which is why a guard written against that gap did
+       nothing at all on the phone it was written for. */
     window.__keyboard = (px, scroll) => {
       t.height = window.innerHeight - px;
       t.offsetTop = scroll || 0;
@@ -199,88 +208,76 @@ async function measure(page) {
     const el = (id) => document.getElementById(id);
     const b = (x) => x.getBoundingClientRect();
     const vv = window.visualViewport;
+    const list = el("findList");
     return { sheetTop: Math.round(b(el("findSheet")).top),
+             sheetBottom: Math.round(b(el("findSheet")).bottom),
              fieldTop: Math.round(b(el("findQ")).top),
+             fieldBottom: Math.round(b(el("findQ")).bottom),
              noteTop: Math.round(b(el("findNote")).top),
              noteBottom: Math.round(b(el("findNote")).bottom),
-             sheetBottom: Math.round(b(el("findSheet")).bottom),
+             listBottom: Math.round(b(list).bottom),
+             listScrolls: list.scrollHeight > list.clientHeight + 1,
              visTop: Math.round(vv.offsetTop),
-             visBottom: Math.round(vv.offsetTop + vv.height),
-             safeTop: (el("satProbe") || {}).offsetHeight || 0 };
+             visBottom: Math.round(vv.offsetTop + vv.height) };
   });
 
-  let k = await read();
-  check("with an iOS keyboard and a full list, the sheet stays on screen",
-        k.sheetTop >= 0, `sheet top at ${k.sheetTop}px`);
-  check("the search field is not pushed behind the status bar",
-        k.fieldTop >= 0, `field top at ${k.fieldTop}px`);
-  check("and the note under it is whole, not half cut off",
-        k.noteTop >= 0 && k.noteBottom <= k.sheetBottom + 1,
-        `note ${k.noteTop}-${k.noteBottom}, sheet ends ${k.sheetBottom}`);
-
-  /* A notched phone. Chromium reports no inset, so the probe is given one -
-     the sheet has to leave room for it rather than filling the viewport. */
-  await p2.addStyleTag({ content: "#satProbe{height:47px !important}" });
-  await p2.evaluate(() => window.__keyboard(336));
-  await p2.waitForTimeout(250);
-  k = await read();
-  check("a status bar is reserved rather than covered",
-        k.sheetTop >= k.safeTop, `sheet top ${k.sheetTop}, inset ${k.safeTop}`);
-
-  /* ------------------------------------------------ the reported phone --
-   * This is the one the screenshots showed, and none of the simulations above
-   * would have caught it. The browser does not resize the window; it scrolls
-   * the visual viewport up so the focused field stays visible. The gap at the
-   * bottom is then nearly zero while half the screen is still keyboard, so a
-   * guard written against that gap never fires - the sheet was never lifted,
-   * never capped, and rode off the top with the rest of the page.
-   *
-   * Capping by `vv.height` is wrong here too: correct only when the visible
-   * area starts at zero, and it leaves the sheet exactly `offsetTop` too tall
-   * otherwise. The cap is measured from the visible top instead. */
-  await p2.addStyleTag({ content: "#satProbe{height:0 !important}" });
-  for (const scroll of [336, 168]) {
-    await p2.evaluate((s) => window.__keyboard(336, s), scroll);
+  /* Both shapes of keyboard, and a half-scrolled one for good measure. The
+     old sheet failed the scrolled cases and passed the overlay one, which is
+     how it shipped twice. */
+  for (const scroll of [0, 168, 336]) {
+    await p2.evaluate((v) => window.__keyboard(336, v), scroll);
     await p2.waitForTimeout(250);
-    const v = await read();
-    check(`a viewport scrolled ${scroll}px keeps the sheet inside what is visible`,
-          v.sheetTop >= v.visTop,
-          `sheet top ${v.sheetTop}, visible from ${v.visTop}`);
-    check(`and the field with it at ${scroll}px`,
-          v.fieldTop >= v.visTop && v.fieldTop <= v.visBottom,
-          `field ${v.fieldTop} in ${v.visTop}-${v.visBottom}`);
+    const k = await read();
+    const where = scroll ? `scrolled ${scroll}px` : "overlaid";
+    check(`${where}: a full list does not carry the panel off the top`,
+          k.sheetTop >= k.visTop, `panel at ${k.sheetTop}, visible from ${k.visTop}`);
+    check(`${where}: the field you are typing into is visible`,
+          k.fieldTop >= k.visTop && k.fieldBottom <= k.visBottom,
+          `field ${k.fieldTop}-${k.fieldBottom} in ${k.visTop}-${k.visBottom}`);
+    check(`${where}: the note under the field is whole, not half cut off`,
+          k.noteTop >= k.visTop && k.noteBottom <= k.sheetBottom + 1,
+          `note ${k.noteTop}-${k.noteBottom}, panel ends ${k.sheetBottom}`);
+    check(`${where}: no result is stranded behind the keys`,
+          k.listBottom <= k.visBottom + 1 && k.listScrolls,
+          `list ends ${k.listBottom}, visible to ${k.visBottom}`);
   }
 
   /* An empty list must not eat the note. A negative bottom margin on the last
      flex item shortens the column, and with nothing in the list there is
      nothing to absorb it, so `overflow:hidden` took the bottom of the note -
-     the "cut in half" half of the report. */
+     the "text under the search pill disappears halfway" half of the report. */
   await p2.evaluate(() => {
     document.getElementById("findList").innerHTML = "";
-    window.__keyboard(336, 336);
+    window.__keyboard(336, 0);
   });
   await p2.waitForTimeout(220);
   const empty = await read();
   check("with no results at all, the note under the field is still whole",
         empty.noteBottom <= empty.sheetBottom + 1,
-        `note ends ${empty.noteBottom}, sheet ends ${empty.sheetBottom}`);
+        `note ends ${empty.noteBottom}, panel ends ${empty.sheetBottom}`);
 
-  await p2.evaluate(() => window.__keyboard(336, 0));
-  await p2.waitForTimeout(200);
-
-  /* The self-check for this half: compute the lift the old way, from the
-     window rather than from the element's own containing block. */
-  const baseline = await read();
+  /* The self-check for this half. Anchor the panel to the bottom again, which
+     is what it was for six attempts, and let a scrolled viewport do to it what
+     the phone did. */
   await p2.evaluate(() => {
-    const s = document.getElementById("findSheet");
-    const vv = window.visualViewport;
-    s.style.bottom = Math.round(window.innerHeight - vv.height - vv.offsetTop) + "px";
+    const l = document.getElementById("findList");
+    for (let i = 0; i < 25; i++) {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "findRow";
+      b.innerHTML = '<span class="nm">Storvatnet</span>';
+      l.appendChild(b);
+    }
   });
-  await p2.waitForTimeout(150);
+  await p2.addStyleTag({
+    content: "#findSheet{top:auto !important;bottom:0 !important;" +
+             "height:auto !important}" });
+  await p2.evaluate(() => window.__keyboard(336, 336));
+  await p2.waitForTimeout(200);
   const wrong = await read();
-  check("measuring the lift from the window instead is detected",
-        wrong.sheetTop < baseline.sheetTop,
-        `${wrong.sheetTop} vs ${baseline.sheetTop}`);
+  check("a bottom-anchored panel is detected, because that was the bug",
+        wrong.sheetTop < wrong.visTop || wrong.fieldTop < wrong.visTop,
+        `panel ${wrong.sheetTop}, field ${wrong.fieldTop}, ` +
+        `visible from ${wrong.visTop}`);
 
   await ios.close();
   await browser.close();

@@ -5385,3 +5385,70 @@ mutation check that passes is not a formality; it is the test telling you that
 your account of why the code works is wrong. Three fixes were shipped here on
 explanations that sounded right and were never tested as explanations. The one
 that was tested lasted about ninety seconds.
+
+### 32g. The search panel, seventh attempt: stop lifting it, move it
+
+Reported four times in the same words - the suggestions arrive and the search
+field leaves the top of the screen - and fixed six times without the phone
+agreeing once. Every one of those fixes was the same idea: a sheet anchored to
+the bottom of the screen, lifted clear of the keyboard by a computed amount.
+The last of them measured the lift against the sheet's own containing block
+and capped its height to the visible viewport. That was arithmetically correct
+and it changed nothing, which is the result that finally made the diagnosis
+obvious.
+
+**The anchor was the bug.** A field near the bottom of the window is a field
+the browser has to reveal when the keyboard opens. Safari will not shrink the
+window to do it, so it scrolls the visible area up the page instead - and
+everything above the field, which is the entire sheet, leaves the top of the
+screen. Nothing measured from inside the page survives that, because the
+browser is moving the page out from under whatever was measured. And it is
+worst exactly when the sheet is tallest, which is when results arrive: the
+reported symptom, precisely.
+
+So search is a screen now, not a sheet. The field is the first thing in it,
+pinned to the top of the app; results grow downward beneath it; the keyboard
+covers the tail of a list that scrolls. The browser never has to reveal the
+field because the field was never covered. This is what search does everywhere
+else on the platform, and the whole of it is CSS - the layout is correct with
+JavaScript switched off.
+
+What is left of `findLift` is now an improvement rather than the mechanism: it
+pins the panel to the rectangle `visualViewport` reports as visible, so no
+result is stranded behind the keys. The distinction is the point. Before, the
+layout was correct only while the arithmetic was, so one event that did not
+fire put the field off-screen. Now, if it never runs, the tail of the list is
+behind the keyboard and a scroll reaches it.
+
+Measured in Chromium at 390x844 with an iOS-shaped keyboard faked over it -
+the visible viewport shrunk by 336 px and scrolled up 0, 168 and 336 px, with
+twenty-five results in the list:
+
+| visible viewport | panel top | field | note | list ends |
+|---|---|---|---|---|
+| overlaid, 0-508 | 0 | 23-65 | whole | 492 |
+| scrolled, 168-676 | 168 | 191-233 | whole | 660 |
+| scrolled, 336-844 | 336 | 359-401 | whole | 828 |
+
+The self-check is aimed at the anchor rather than at the height cap, because
+the cap is not the fix any more: re-anchor the panel to the bottom and let it
+size to its contents, and it lands at -673 px with the field at -650 px, which
+is the screenshot the owner sent.
+
+Two smaller things went with it. The panel is a child of the app rather than of
+the map stage, so it covers the tab bar instead of being drawn under it - the
+bar sitting on top of the results is visible in the second screenshot. And the
+close control is the word *Avbryt* rather than a round cross, because
+`type="search"` draws its own cross inside the field to clear the text, and two
+crosses side by side, one clearing and one closing, is a guess a beginner
+should not have to make.
+
+**The lesson is about when to stop iterating on a mechanism.** Six attempts all
+varied the arithmetic of a lift; none questioned whether the sheet should be at
+the bottom at all. The signal that should have triggered that question came
+early and was ignored twice: a fix that is arithmetically correct, passes its
+tests, and changes nothing on the device is not a fix that needs better
+arithmetic. It is evidence that the model of the problem is wrong. The related
+habit, learned the same week: **ask for the screenshot first, not fifth.** One
+picture from the phone identified both faults in minutes after six rounds of
+simulation had identified neither.

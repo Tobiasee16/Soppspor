@@ -172,12 +172,6 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sf);
 @supports (height:1dvh){.card{max-height:74dvh}}
 .card.on{transform:translateY(0)}
 @media (prefers-reduced-motion:reduce){.card{transition:none}}
-/* env() cannot be read from JavaScript, and findLift needs the top inset: a
-   sheet that fills the visible viewport exactly still puts its notch under the
-   status bar on a notched phone. A zero-width probe is the standard way to get
-   the number, and costs nothing. */
-#satProbe{position:fixed;top:0;left:0;width:0;height:env(safe-area-inset-top,0px);
-  pointer-events:none;visibility:hidden}
 .grab{width:36px;height:5px;border-radius:3px;background:var(--ink-4);margin:8px auto 10px;
   opacity:.55;cursor:grab;touch-action:none}
 /* The notch is 36x5 px. It looks like the thing you pull, and it is far too
@@ -389,36 +383,54 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sf);
   text-decoration-color:var(--ink-4)}
 .sheetList{margin:6px -18px 0}
 
-/* The search sheet is a frame, not a scrolling page.
+/* Search is a screen, not a bottom sheet - and that is the fix, not a
+ * redecoration.
  *
- * `.card` scrolls as a whole, which is right for the detail card and wrong
- * here: it makes the field, the header and the notch part of the same scrolling
- * column as the results, so a long list pushes the thing you are typing into
- * off the top. Capping the sheet's height stopped it growing and did not stop
- * that - the reported fault, twice.
+ * Six goes at this lifted a bottom-anchored sheet clear of the keyboard by
+ * arithmetic, and the last two were reported back unchanged: "the search pill
+ * still shoots beyond the roof of my phone". The arithmetic was not the
+ * problem. The anchor was.
  *
- * So this one sheet is a flex column. Everything above the list is fixed, the
- * list takes whatever is left and scrolls inside it, and the frame cannot move
- * however many suggestions arrive.
+ * A field near the bottom of the window is a field the browser has to reveal
+ * when the keyboard opens. Safari will not shrink the window to do it, so it
+ * scrolls the visible area up the page instead - and everything above the
+ * field, which is the whole sheet, leaves the top of the screen with it. No
+ * amount of measuring fixes that, because the browser is moving the page out
+ * from under whatever was measured. Worst exactly when suggestions arrive,
+ * because that is when the sheet is tallest.
  *
- * `min-height:0` is the usual companion to that - a flex item will not shrink
- * below its content without it - and it is kept because it is correct, not
- * because it is doing the work here. It was claimed as load-bearing and
- * measurement said otherwise: with a definite cap on the sheet, removing it
- * changes nothing at all. The cap is what keeps the field on screen, and it
- * lives on `.card`.
+ * So the field goes at the top, where it is already visible and the browser has
+ * no reason to scroll anything, and results grow downward beneath it. The
+ * keyboard covers the tail of the list, which is what scrolling a list is for.
+ * This is what search does everywhere else on the platform, and it needs no
+ * script at all: these rules are correct with JavaScript switched off.
  *
- * What this column *does* buy is that the list scrolls instead of the whole
- * sheet, so the field and the header stay put while you read results rather
- * than scrolling away with them. That is worth having and it is not the same
- * claim. */
-#findSheet{display:flex;flex-direction:column;overflow:hidden}
+ * Absolute against `.app` rather than the map stage, so it covers the tab bar
+ * instead of being drawn under it - the bar sitting on top of the results is
+ * the other half of what the screenshots showed - while still staying inside
+ * the phone-shaped frame the app draws on a wide screen. */
+#findSheet{position:absolute;top:0;left:0;right:0;bottom:0;z-index:30;
+  display:flex;flex-direction:column;overflow:hidden;
+  border-radius:0;max-height:none;padding-top:env(safe-area-inset-top)}
 #findSheet > *{flex:0 0 auto}
+/* The field shares the first row with its close button, so the thing you type
+   into is the first thing on the screen rather than the fourth. There is no
+   heading: the placeholder says what the field is, and a heading here is 44px
+   of the screen spent repeating it. */
+.findBar{display:flex;align-items:center;gap:10px}
+.findBar .field{flex:1 1 auto;margin-top:0}
+/* A word rather than the round cross the other sheets use. `type="search"`
+   draws its own cross inside the field to clear the text, and two crosses side
+   by side, one clearing and one closing, is a guess a beginner should not have
+   to make. */
+.findBar .close{border:none;background:transparent;color:var(--tint);
+  font-family:var(--sf);font-size:16px;font-weight:500;cursor:pointer;
+  flex:0 0 auto;padding:0 2px;min-height:44px;display:flex;align-items:center}
 /* No negative bottom margin here, however tempting it is to let the list reach
-   the sheet's edge. A negative margin on the last flex item shortens the
+   the panel's edge. A negative margin on the last flex item shortens the
    column by that much, and with an empty list there is nothing to absorb it -
    so `overflow:hidden` ate the bottom 16px of the note above, which is exactly
-   the "text under the search field is cut in half" that was reported. */
+   the "text under the search pill disappears halfway" that was reported. */
 #findSheet #findList{flex:1 1 auto;min-height:0;overflow-y:auto;
   -webkit-overflow-scrolling:touch;overscroll-behavior:contain}
 #findNote{margin:10px 0 0}
@@ -559,23 +571,6 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
       <b>Ingen soner her ennå.</b> Anslaget er foreløpig regnet ut for
       Kristiansand. Kart, stier, nedbør og dine egne steder virker over hele
       landet.</div>
-
-    <!-- place and address search, opened from the map -->
-    <div id="satProbe"></div>
-    <div class="card" id="findSheet" role="dialog" aria-label="Søk">
-      <div class="grab"></div>
-      <div class="cardTop">
-        <h2>Søk</h2>
-        <button class="close" id="findClose" aria-label="Lukk">✕</button>
-      </div>
-      <input class="field" id="findQ" type="search" inputmode="search"
-             autocomplete="off" autocorrect="off" spellcheck="false"
-             placeholder="Sted eller adresse">
-      <p class="about" id="findNote">Søket går til <b>Kartverket</b>.
-        Det du skriver lagres ikke her.</p>
-      <div class="msg" id="findMsg" hidden></div>
-      <div class="sheetList" id="findList"></div>
-    </div>
 
     <!-- species chooser, opened from the map -->
     <div class="card" id="spSheet" role="dialog" aria-label="Velg art">
@@ -907,6 +902,23 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
       <svg viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/>
         <circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/></svg>Innstillinger</button>
   </nav>
+
+  <!-- Place and address search, opened from the map. A child of the app rather
+       than of the map stage, because it is a screen: it covers the tab bar as
+       well, and the field is the first thing in it. -->
+  <div class="card" id="findSheet" role="dialog" aria-label="Søk">
+    <div class="grab"></div>
+    <div class="findBar">
+      <input class="field" id="findQ" type="search" inputmode="search"
+             autocomplete="off" autocorrect="off" spellcheck="false"
+             placeholder="Sted eller adresse">
+      <button class="close" id="findClose">Avbryt</button>
+    </div>
+    <p class="about" id="findNote">Søket går til <b>Kartverket</b>.
+      Det du skriver lagres ikke her.</p>
+    <div class="msg" id="findMsg" hidden></div>
+    <div class="sheetList" id="findList"></div>
+  </div>
 </div>
 
 <script>
@@ -3746,65 +3758,44 @@ if(findQ){
       var q=findQ.value.trim();
       if(q.length>=2)findRun(q);}});
 }
-/* iOS lays the keyboard over the window rather than shrinking it, so a sheet
-   anchored to the bottom ends up behind the keys with its results out of
-   sight - which is most of a search box. visualViewport reports the part still
-   visible; lifting the sheet by the difference keeps the field and the first
-   few results above them. Guarded, because the API is absent on older Safari
-   and the sheet is fine as it is on a desktop. */
+/* Where the panel goes while a keyboard is up.
+ *
+ * The panel fills the app, and the app is not what you can see: a keyboard
+ * covers the bottom of it, and a browser that will not shrink the window
+ * scrolls the visible part around inside it instead. visualViewport reports
+ * that visible rectangle, so the panel is pinned to it and no result ends up
+ * behind the keys.
+ *
+ * What makes this different from the six attempts before it is what happens
+ * when it does not run. Those lifted a bottom-anchored sheet by a computed
+ * amount, so the layout was correct only while the arithmetic was: one event
+ * that did not fire, or one guard that did not match this browser, and the
+ * field went off the top of the screen. Here the layout is already right
+ * without it - the field sits at the top, where a keyboard cannot cover it -
+ * and this only tidies the bottom edge. If it never runs, the tail of the
+ * list is behind the keyboard and a scroll reaches it. */
 function findLift(){
-  if(!window.visualViewport)return;
-  if(!findSheet.classList.contains("on")){
-    findSheet.style.bottom="";findSheet.style.maxHeight="";return;}
   var vv=window.visualViewport;
-  /* Where the visible area ends, in layout coordinates. */
-  var seen=vv.offsetTop+vv.height;
-  /* How much of the window the keyboard covers - which is the question, and is
-     NOT the same as how much room is left at the bottom.
-     
-     A browser that cannot resize the window for a keyboard scrolls the visual
-     viewport up instead, to keep the focused field in view. Then the gap at the
-     bottom is nearly zero while half the screen is still keyboard, and a guard
-     written against that gap never fires. That is why this did nothing at all
-     on the phone it was written for: the sheet was never lifted, never capped,
-     and rode up off the top with the rest of the page.
-     
-     `vv.height` shrinks either way, so it is the honest trigger. `offsetTop`
-     then says where the visible area starts, and the placement below uses both. */
-  var covered=Math.round(window.innerHeight-vv.height);
-  if(covered>40){
-    /* `bottom` is measured from the containing block, and the containing block
-       is not the window - it stops above the tab bar. Lifting by the keyboard
-       height measured from `innerHeight` therefore raises the sheet by one tab
-       bar too many, and a full list then runs off the top.
-       
-       Measured, with an iOS-style keyboard faked in Chromium and twenty
-       suggestions up: the sheet ended at -43px, which is the tab bar to the
-       pixel. This asks the element where its own bottom actually is instead. */
-    var host=findSheet.offsetParent;
-    var hostBottom=host?host.getBoundingClientRect().bottom:window.innerHeight;
-    /* Never below where the sheet already sits: with a scrolled viewport its
-       bottom is inside the visible area already, and pushing it lower would
-       only bury it behind the tab bar. */
-    var lift=Math.max(0,Math.round(hostBottom-seen));
-    findSheet.style.bottom=lift+"px";
-    /* Then cap by the distance from the sheet's real bottom edge up to the top
-       of what can be seen. Capping by `vv.height` instead is only correct when
-       the visible area starts at zero - which is the overlay case and not the
-       scrolled one, where it leaves the sheet exactly `offsetTop` too tall and
-       therefore that far off the top.
-       
-       The status bar is left alone as well: filling the visible viewport
-       exactly still tucks the notch and the header under it on a notched
-       phone, and env() cannot be read from script without the probe. */
-    var probe=document.getElementById("satProbe");
-    var safeTop=(probe&&probe.offsetHeight)||0;
-    var roof=vv.offsetTop+safeTop+8;
-    findSheet.style.maxHeight=
-      Math.max(160,Math.round((hostBottom-lift)-roof))+"px";
-  }else{
-    findSheet.style.bottom="";findSheet.style.maxHeight="";
-  }
+  if(!vv)return;
+  if(!findSheet.classList.contains("on")){findFree();return;}
+  /* A keyboard either shrinks the visible viewport where it stands, or
+     scrolls it up the page. Both show here, so there is no need to work out
+     which kind of browser this is - which is what the last guard got wrong,
+     by watching the gap at the bottom of the window instead. */
+  if(window.innerHeight-vv.height<=40&&!vv.offsetTop){findFree();return;}
+  var host=findSheet.offsetParent;
+  var hostTop=host?host.getBoundingClientRect().top:0;
+  findSheet.style.top=Math.round(vv.offsetTop-hostTop)+"px";
+  findSheet.style.height=Math.round(vv.height)+"px";
+  /* The strip reserved for the status bar is only above the panel while the
+     panel starts at the top of the page. Once the page has scrolled under
+     the bar, that strip is just a gap over the field. */
+  findSheet.style.paddingTop=vv.offsetTop>0?"0px":"";
+}
+/* Back to the CSS, which is the layout that is correct on its own. */
+function findFree(){
+  findSheet.style.top="";findSheet.style.height="";
+  findSheet.style.paddingTop="";
 }
 if(window.visualViewport){
   window.visualViewport.addEventListener("resize",findLift);
@@ -3826,8 +3817,10 @@ function findReset(){
 }
 function findShut(){
   findSheet.classList.remove("on");
-  findSheet.style.bottom="";
-  findSheet.style.maxHeight="";
+  findFree();
+  /* Let the keyboard go with the panel. Leaving the field focused under a
+     closed panel leaves the keys up over the map. */
+  try{findQ.blur();}catch(e){}
   findReset();
 }
 document.getElementById("findBtn").addEventListener("click",function(){
@@ -3842,7 +3835,7 @@ document.getElementById("findClose").addEventListener("click",findShut);
 
 var spSheet=document.getElementById("spSheet");
 function closeSheets(){card.classList.remove("on");spSheet.classList.remove("on");
-  if(findSheet){findSheet.classList.remove("on");findSheet.style.bottom="";}}
+  if(findSheet){findSheet.classList.remove("on");findFree();}}
 document.getElementById("cardClose").addEventListener("click",function(){
   card.classList.remove("on");selected=-1;draw();});
 
@@ -3952,7 +3945,7 @@ document.getElementById("spClose").addEventListener("click",function(){
   spSheet.classList.remove("on");});
 makeDismissable(spSheet);
 makeDismissable(findSheet,function(){
-  findSheet.style.bottom="";findSheet.style.maxHeight="";});
+  findFree();try{findQ.blur();}catch(e){}findReset();});
 
 /* Holding a finger on the spot is the gesture for "remember this", and it
    works with gloves on and without reading anything. */
