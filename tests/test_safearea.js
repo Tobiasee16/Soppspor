@@ -27,8 +27,11 @@ function rule(sel) {
   return css.slice(i, css.indexOf("}", i));
 }
 
-// Anything pinned to the top must clear the notch or the Dynamic Island.
-for (const sel of [".speciespill", ".condpill", ".banner", ".panel", ".ob"]) {
+/* Anything pinned to the top must clear the notch or the Dynamic Island.
+   The search bar, the species filter and the conditions are one column now -
+   `.topwrap` - and clear the cutout through it rather than each on their own,
+   the same arrangement as the three at the bottom left. */
+for (const sel of [".topwrap", ".banner", ".panel", ".ob"]) {
   const r = rule(sel);
   check(`${sel} clears the top cutout`, !!r && /safe-area-inset-top/.test(r),
         r ? "" : "rule not found");
@@ -37,14 +40,22 @@ for (const sel of [".speciespill", ".condpill", ".banner", ".panel", ".ob"]) {
 // Anything pinned to a side must clear it in landscape, where the cutout moves.
 // The bottom-left three - credit, legend, scale bar - are in one column now
 // and clear the cutout through it rather than each on their own.
-for (const sel of [".speciespill", ".condpill", ".botleft",
-                   ".banner", ".covernote"]) {
+for (const sel of [".topwrap", ".botleft", ".banner", ".covernote"]) {
   const r = rule(sel);
   check(`${sel} clears a side cutout`, !!r && /safe-area-inset-left/.test(r),
         r ? "" : "rule not found");
 }
 check(".fabs clears a right-hand cutout",
       /safe-area-inset-right/.test(rule(".fabs") || ""));
+/* The column has to pay for the right-hand side as well: the species filter is
+   at that end of the top row now, where it was at the left. */
+check(".topwrap clears a right-hand cutout",
+      /safe-area-inset-right/.test(rule(".topwrap") || ""));
+// And nothing inside it should pay a second time.
+for (const sel of [".speciespill", ".condpill"]) {
+  const r = rule(sel) || "";
+  check(`${sel} does not count the inset twice`, !/safe-area-inset/.test(r), r);
+}
 
 // The tab bar is the only thing that sits on the home indicator, so it is the
 // only thing that should pay for it.

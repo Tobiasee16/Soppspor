@@ -135,4 +135,9 @@ class TestTheSheetsCanBePulledDown:
             assert f"makeDismissable({sheet_id}" in shell or \
                    f'makeDismissable(document.getElementById("{sheet_id}")' in shell, \
                    f"{sheet_id} draws a notch but is never made dismissable"
-        assert len(with_notch) >= 3, with_notch
+        # A floor rather than a count, so that a markup change cannot empty the
+        # list and make the loop above pass by finding nothing. It was three
+        # until search stopped being a sheet at all: the search bar sits on the
+        # map now and its suggestions hang from it, so there is no notch to
+        # promise a pull and nothing to pull.
+        assert len(with_notch) >= 2, with_notch

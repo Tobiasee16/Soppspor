@@ -61,12 +61,77 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sf);
 .zpair .fab{box-shadow:none;background:transparent;border-radius:0}
 .zpair .fab+.fab{border-top:.5px solid var(--sep)}
 
-/* the species control lives on the map, next to the zoom tools */
-.speciespill{position:absolute;top:calc(12px + env(safe-area-inset-top));
+/* The controls that sit on the map, in one column down the top of the screen:
+ * search on the left, the species filter on the right, the day's conditions
+ * under the filter, and the suggestions hanging under both.
+ *
+ * The wrapper does not take taps. The map underneath has to stay draggable in
+ * the gaps between the pills, so the column passes them through and each
+ * control takes its own back. */
+.topwrap{position:absolute;z-index:7;
+  top:calc(12px + env(safe-area-inset-top));
   left:max(12px, env(safe-area-inset-left));
+  right:max(12px, env(safe-area-inset-right));
+  display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.topwrap > *{pointer-events:auto}
+.toprow{display:flex;align-items:flex-start;gap:8px;pointer-events:none}
+.toprow > *{pointer-events:auto}
+/* While the field has focus the suggestions have to be above the banners, which
+   otherwise draw over them. */
+.topwrap.searching{z-index:12}
+
+/* The search bar. A field rather than a button that opens one: tapping a
+   magnifier to be handed a field to tap is a step that buys nothing, and it
+   put the field at the bottom of the screen, which is where six attempts at
+   keeping it out from under the keyboard went wrong. */
+.findpill{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:7px;
+  min-height:44px;padding:0 6px 0 12px;border-radius:19px;
+  background:var(--sheet);backdrop-filter:blur(16px);
+  -webkit-backdrop-filter:blur(16px);box-shadow:0 2px 9px #00000026}
+.findpill .mag{width:17px;height:17px;flex:0 0 auto;fill:none;
+  stroke:var(--ink-3);stroke-width:2;stroke-linecap:round}
+/* 16px, or iOS zooms the whole page in when the field takes focus and the map
+   is left at a scale nobody asked for. */
+#findQ{flex:1 1 auto;min-width:0;border:none;background:transparent;outline:none;
+  font-family:var(--sf);font-size:16px;color:var(--ink);padding:0;
+  -webkit-appearance:none}
+#findQ::placeholder{color:var(--ink-3)}
+.findx{display:none}
+/* Typing takes the whole row: the filter and the conditions are not what you
+   are looking at while you search, and a 170px field is not much of a search
+   box. `Avbryt` rather than a cross, because `type=search` draws its own cross
+   inside the field to clear the text and two crosses side by side is a guess
+   nobody should have to make. */
+.topwrap.searching .speciespill,.topwrap.searching .condpill{display:none}
+.topwrap.searching .findx{display:flex;align-items:center;flex:0 0 auto;
+  border:none;background:transparent;color:var(--tint);font-family:var(--sf);
+  font-size:15px;font-weight:500;cursor:pointer;padding:0 6px;min-height:38px}
+
+/* The suggestions hang from the bar and stop short of the keyboard, with the
+   map still there behind them, beside them and below them. The point of
+   searching on a map is to see where the answer is, so the list is a panel on
+   the map rather than a screen instead of it.
+ *
+ * The cap is in CSS as a share of the viewport, and script narrows it to the
+ * room actually left above the keyboard. That order matters: if the script
+ * never runs the list is merely longer than the gap and a scroll reaches the
+ * end of it. Nothing moves off the top of the screen, which is the failure the
+ * six previous attempts all had in common. */
+.finddrop{display:flex;flex-direction:column;overflow:hidden;
+  border-radius:16px;background:var(--sheet);backdrop-filter:blur(20px);
+  -webkit-backdrop-filter:blur(20px);box-shadow:0 6px 22px #00000033;
+  max-height:56vh}
+@supports (height:1svh){.finddrop{max-height:56svh}}
+.finddrop .sheetList{margin:0;min-height:0;overflow-y:auto;
+  -webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+.finddrop .msg{flex:0 0 auto;padding:11px 15px;font-size:13.5px;
+  line-height:1.45;color:var(--ink-2)}
+
+/* the species control, at the other end of the search bar's row */
+.speciespill{flex:0 1 auto;max-width:52%;
   background:var(--sheet);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
   border:none;border-radius:19px;padding:7px 11px 7px 13px;box-shadow:0 2px 9px #00000026;
-  z-index:6;max-width:calc(100% - 78px);cursor:pointer;text-align:left;
+  cursor:pointer;text-align:left;
   font-family:var(--sf);color:var(--ink);display:flex;align-items:center;gap:9px}
 .speciespill:active{background:var(--fill-2)}
 .speciespill .txt{min-width:0;overflow:hidden}
@@ -81,12 +146,12 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sf);
   padding:4px 8px;font-family:var(--mono);font-size:10px;color:var(--ink-2);
   display:flex;align-items:center;gap:6px;pointer-events:none;z-index:5}
 .scalepill i{display:block;height:2px;background:var(--ink-2);width:44px;border-radius:1px}
-.condpill{position:absolute;top:calc(60px + env(safe-area-inset-top));
-  left:max(12px, env(safe-area-inset-left));
+/* under the filter, and aligned with it rather than with the search bar */
+.condpill{align-self:flex-end;max-width:100%;
   background:var(--sheet);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
   border:none;border-radius:15px;padding:5px 11px;box-shadow:0 2px 9px #00000026;
-  z-index:6;cursor:pointer;font-family:var(--sf);font-size:12px;color:var(--ink-2);
-  display:flex;align-items:center;gap:6px;max-width:calc(100% - 78px)}
+  cursor:pointer;font-family:var(--sf);font-size:12px;color:var(--ink-2);
+  display:flex;align-items:center;gap:6px}
 .condpill:active{background:var(--fill-2)}
 .condpill i{width:7px;height:7px;border-radius:4px;flex:0 0 auto;background:var(--ink-3)}
 .condpill b{font-weight:600;color:var(--ink)}
@@ -383,59 +448,6 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sf);
   text-decoration-color:var(--ink-4)}
 .sheetList{margin:6px -18px 0}
 
-/* Search is a screen, not a bottom sheet - and that is the fix, not a
- * redecoration.
- *
- * Six goes at this lifted a bottom-anchored sheet clear of the keyboard by
- * arithmetic, and the last two were reported back unchanged: "the search pill
- * still shoots beyond the roof of my phone". The arithmetic was not the
- * problem. The anchor was.
- *
- * A field near the bottom of the window is a field the browser has to reveal
- * when the keyboard opens. Safari will not shrink the window to do it, so it
- * scrolls the visible area up the page instead - and everything above the
- * field, which is the whole sheet, leaves the top of the screen with it. No
- * amount of measuring fixes that, because the browser is moving the page out
- * from under whatever was measured. Worst exactly when suggestions arrive,
- * because that is when the sheet is tallest.
- *
- * So the field goes at the top, where it is already visible and the browser has
- * no reason to scroll anything, and results grow downward beneath it. The
- * keyboard covers the tail of the list, which is what scrolling a list is for.
- * This is what search does everywhere else on the platform, and it needs no
- * script at all: these rules are correct with JavaScript switched off.
- *
- * Absolute against `.app` rather than the map stage, so it covers the tab bar
- * instead of being drawn under it - the bar sitting on top of the results is
- * the other half of what the screenshots showed - while still staying inside
- * the phone-shaped frame the app draws on a wide screen. */
-#findSheet{position:absolute;top:0;left:0;right:0;bottom:0;z-index:30;
-  display:flex;flex-direction:column;overflow:hidden;
-  border-radius:0;max-height:none;padding-top:env(safe-area-inset-top)}
-#findSheet > *{flex:0 0 auto}
-/* The field shares the first row with its close button, so the thing you type
-   into is the first thing on the screen rather than the fourth. There is no
-   heading: the placeholder says what the field is, and a heading here is 44px
-   of the screen spent repeating it. */
-.findBar{display:flex;align-items:center;gap:10px}
-.findBar .field{flex:1 1 auto;margin-top:0}
-/* A word rather than the round cross the other sheets use. `type="search"`
-   draws its own cross inside the field to clear the text, and two crosses side
-   by side, one clearing and one closing, is a guess a beginner should not have
-   to make. */
-.findBar .close{border:none;background:transparent;color:var(--tint);
-  font-family:var(--sf);font-size:16px;font-weight:500;cursor:pointer;
-  flex:0 0 auto;padding:0 2px;min-height:44px;display:flex;align-items:center}
-/* No negative bottom margin here, however tempting it is to let the list reach
-   the panel's edge. A negative margin on the last flex item shortens the
-   column by that much, and with an empty list there is nothing to absorb it -
-   so `overflow:hidden` ate the bottom 16px of the note above, which is exactly
-   the "text under the search pill disappears halfway" that was reported. */
-#findSheet #findList{flex:1 1 auto;min-height:0;overflow-y:auto;
-  -webkit-overflow-scrolling:touch;overscroll-behavior:contain}
-#findNote{margin:10px 0 0}
-#findSheet .msg{margin-top:8px}
-
 /* tab bar */
 .tabs{display:flex;background:var(--sheet);backdrop-filter:saturate(180%) blur(20px);
   -webkit-backdrop-filter:saturate(180%) blur(20px);border-top:.5px solid var(--sep);
@@ -530,19 +542,35 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
   <div class="stage">
     <canvas id="map"></canvas>
 
-    <button class="speciespill" id="spPill" aria-haspopup="dialog">
-      <span class="txt"><b id="pillName">Traktkantarell</b>
-        <span id="pillMeta">Kristiansand · anslag</span></span>
-      <span class="cv">⌄</span>
-    </button>
+    <!-- Search left, species filter right, the day's conditions under the
+         filter, suggestions under both. -->
+    <div class="topwrap" id="topWrap">
+      <div class="toprow">
+        <div class="findpill">
+          <svg class="mag" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="10.6" cy="10.6" r="6.4"/><path d="M15.4 15.4 21 21"/></svg>
+          <input id="findQ" type="search" inputmode="search" autocomplete="off"
+                 autocorrect="off" spellcheck="false" placeholder="Søk etter sted"
+                 aria-label="Søk etter sted eller adresse">
+          <button type="button" class="findx" id="findClose">Avbryt</button>
+        </div>
+        <button class="speciespill" id="spPill" aria-haspopup="dialog">
+          <span class="txt"><b id="pillName">Traktkantarell</b>
+            <span id="pillMeta">Kristiansand · anslag</span></span>
+          <span class="cv">⌄</span>
+        </button>
+      </div>
 
-    <button class="condpill" id="condPill" hidden><i id="condDot"></i>
-      <span id="condTxt"></span></button>
+      <button class="condpill" id="condPill" hidden><i id="condDot"></i>
+        <span id="condTxt"></span></button>
+
+      <div class="finddrop" id="findDrop" aria-label="Forslag" hidden>
+        <div class="msg" id="findMsg" hidden></div>
+        <div class="sheetList" id="findList"></div>
+      </div>
+    </div>
 
     <div class="fabs">
-      <button class="fab" id="findBtn" aria-label="Søk etter sted eller adresse">
-        <svg viewBox="0 0 24 24"><circle cx="10.6" cy="10.6" r="6.4"/>
-          <path d="M15.4 15.4 21 21"/></svg></button>
       <button class="fab" id="compass" aria-label="Vend kartet mot nord" hidden>
         <svg viewBox="0 0 24 24" id="compassRose" aria-hidden="true">
           <path d="M12 3 16 13 12 11 8 13Z" fill="currentColor" stroke="none"/>
@@ -903,22 +931,6 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--tint);outline-o
         <circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/></svg>Innstillinger</button>
   </nav>
 
-  <!-- Place and address search, opened from the map. A child of the app rather
-       than of the map stage, because it is a screen: it covers the tab bar as
-       well, and the field is the first thing in it. -->
-  <div class="card" id="findSheet" role="dialog" aria-label="Søk">
-    <div class="grab"></div>
-    <div class="findBar">
-      <input class="field" id="findQ" type="search" inputmode="search"
-             autocomplete="off" autocorrect="off" spellcheck="false"
-             placeholder="Sted eller adresse">
-      <button class="close" id="findClose">Avbryt</button>
-    </div>
-    <p class="about" id="findNote">Søket går til <b>Kartverket</b>.
-      Det du skriver lagres ikke her.</p>
-    <div class="msg" id="findMsg" hidden></div>
-    <div class="sheetList" id="findList"></div>
-  </div>
 </div>
 
 <script>
@@ -3522,7 +3534,8 @@ var card=document.getElementById("card"),cardBody=document.getElementById("cardB
    is stored: no history, no last query, no analytics. What you typed goes to
    Kartverket to be answered and nowhere else. */
 var FIND_SHOW=8, FIND_FETCH=25;
-var findSheet=document.getElementById("findSheet"),
+var topWrap=document.getElementById("topWrap"),
+    findDrop=document.getElementById("findDrop"),
     findQ=document.getElementById("findQ"),
     findList=document.getElementById("findList"),
     findMsg=document.getElementById("findMsg");
@@ -3658,6 +3671,14 @@ function findDist(e,n){
 function findSay(t){
   findMsg.textContent=t||"";
   findMsg.hidden=!t;
+  findShow();
+}
+/* The dropdown exists only while it has something in it. An empty rounded box
+   hanging under the bar over the map is worse than no box. */
+function findShow(){
+  var any=findList.children.length>0||!findMsg.hidden;
+  findDrop.hidden=!any;
+  if(any)findLift();
 }
 function findRender(rows){
   findList.innerHTML="";
@@ -3673,6 +3694,7 @@ function findRender(rows){
       findList.appendChild(b);
     })(rows[i]);
   }
+  findShow();
 }
 /* An address is worth about three metres a pixel and a named wood rather less,
    because "Nordmarka" is a region and dropping the reader inside one tree of it
@@ -3758,49 +3780,40 @@ if(findQ){
       var q=findQ.value.trim();
       if(q.length>=2)findRun(q);}});
 }
-/* Where the panel goes while a keyboard is up.
+/* How far down the suggestions are allowed to reach.
  *
- * The panel fills the app, and the app is not what you can see: a keyboard
- * covers the bottom of it, and a browser that will not shrink the window
- * scrolls the visible part around inside it instead. visualViewport reports
- * that visible rectangle, so the panel is pinned to it and no result ends up
- * behind the keys.
+ * Two limits, and the smaller wins. The room actually left above the
+ * keyboard, less a strip so the map is visible between the list and the
+ * keys; and a share of what can be seen, so the list never becomes the
+ * screen even with no keyboard up at all. The map is the thing being
+ * searched, and a search that hides it answers a question you cannot check.
  *
- * What makes this different from the six attempts before it is what happens
- * when it does not run. Those lifted a bottom-anchored sheet by a computed
- * amount, so the layout was correct only while the arithmetic was: one event
- * that did not fire, or one guard that did not match this browser, and the
- * field went off the top of the screen. Here the layout is already right
- * without it - the field sits at the top, where a keyboard cannot cover it -
- * and this only tidies the bottom edge. If it never runs, the tail of the
- * list is behind the keyboard and a scroll reaches it. */
+ * What matters as much is the failure mode. The field is at the top of the
+ * screen, where a keyboard cannot cover it and the browser therefore never
+ * scrolls the page to reveal it - the fault reported four times and fixed
+ * six. So if none of this runs, the list is merely longer than the gap and a
+ * scroll reaches the end of it. Nothing leaves the screen. */
 function findLift(){
   var vv=window.visualViewport;
-  if(!vv)return;
-  if(!findSheet.classList.contains("on")){findFree();return;}
-  /* A keyboard either shrinks the visible viewport where it stands, or
-     scrolls it up the page. Both show here, so there is no need to work out
-     which kind of browser this is - which is what the last guard got wrong,
-     by watching the gap at the bottom of the window instead. */
-  if(window.innerHeight-vv.height<=40&&!vv.offsetTop){findFree();return;}
-  var host=findSheet.offsetParent;
-  var hostTop=host?host.getBoundingClientRect().top:0;
-  findSheet.style.top=Math.round(vv.offsetTop-hostTop)+"px";
-  findSheet.style.height=Math.round(vv.height)+"px";
-  /* The strip reserved for the status bar is only above the panel while the
-     panel starts at the top of the page. Once the page has scrolled under
-     the bar, that strip is just a gap over the field. */
-  findSheet.style.paddingTop=vv.offsetTop>0?"0px":"";
-}
-/* Back to the CSS, which is the layout that is correct on its own. */
-function findFree(){
-  findSheet.style.top="";findSheet.style.height="";
-  findSheet.style.paddingTop="";
+  var seenTop=vv?Math.round(vv.offsetTop):0;
+  var seenH=vv?vv.height:window.innerHeight;
+  /* Insurance, and cheap. If a browser ever does scroll the page up under a
+     keyboard, the whole column goes with it rather than off the top. It should
+     not happen here - the field is at the top of the screen and there is
+     nothing to reveal - but being wrong about exactly that cost six fixes, so
+     the column follows what is visible instead of trusting it not to move. */
+  if(topWrap)topWrap.style.transform=seenTop?"translateY("+seenTop+"px)":"";
+  if(!findDrop||findDrop.hidden)return;
+  var top=findDrop.getBoundingClientRect().top;
+  var room=Math.round(seenTop+seenH-top-16);
+  var share=Math.round(seenH*0.56);
+  findDrop.style.maxHeight=Math.max(120,Math.min(room,share))+"px";
 }
 if(window.visualViewport){
   window.visualViewport.addEventListener("resize",findLift);
   window.visualViewport.addEventListener("scroll",findLift);
 }
+window.addEventListener("resize",findLift);
 /* Everything a search leaves behind. Reopening the sheet used to show the
    previous query still in the field, the previous results still listed, and
    their distances still measured from wherever the map was when they were
@@ -3816,26 +3829,30 @@ function findReset(){
   findSay("");
 }
 function findShut(){
-  findSheet.classList.remove("on");
-  findFree();
-  /* Let the keyboard go with the panel. Leaving the field focused under a
-     closed panel leaves the keys up over the map. */
+  topWrap.classList.remove("searching");
+  topWrap.style.transform="";
+  /* Let the keyboard go with it. A field still focused under a closed list
+     leaves the keys up over the map. */
   try{findQ.blur();}catch(e){}
   findReset();
 }
-document.getElementById("findBtn").addEventListener("click",function(){
-  closeSheets();
-  findReset();
-  findSheet.classList.add("on");
-  /* Focused only after the sheet is up: focusing a field behind a closed sheet
-     is what makes iOS raise the keyboard over nothing. */
-  setTimeout(function(){try{findQ.focus();}catch(e){}findLift();},260);
-});
+/* Focus is what opens a search here - there is no button to press first. The
+   row gives the field its full width while it is being typed into, and hands
+   the filter and the conditions back when it is done.
+
+   Blur deliberately does not close it. Tapping a suggestion blurs the field
+   before the tap lands, so closing on blur would close the list out from under
+   the finger. Avbryt, Escape, choosing somewhere, or touching the map all
+   close it. */
+findQ.addEventListener("focus",function(){
+  topWrap.classList.add("searching");findLift();});
+findQ.addEventListener("keydown",function(e){
+  if(e.key==="Escape"){e.preventDefault();findShut();}});
 document.getElementById("findClose").addEventListener("click",findShut);
 
 var spSheet=document.getElementById("spSheet");
 function closeSheets(){card.classList.remove("on");spSheet.classList.remove("on");
-  if(findSheet){findSheet.classList.remove("on");findFree();}}
+  if(findQ)findShut();}
 document.getElementById("cardClose").addEventListener("click",function(){
   card.classList.remove("on");selected=-1;draw();});
 
@@ -3944,8 +3961,6 @@ makeDismissable(card,function(){selected=-1;draw();});
 document.getElementById("spClose").addEventListener("click",function(){
   spSheet.classList.remove("on");});
 makeDismissable(spSheet);
-makeDismissable(findSheet,function(){
-  findFree();try{findQ.blur();}catch(e){}findReset();});
 
 /* Holding a finger on the spot is the gesture for "remember this", and it
    works with gloves on and without reading anything. */

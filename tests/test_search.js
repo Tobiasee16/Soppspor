@@ -36,13 +36,12 @@ function grab(name) {
   return shell.slice(start, i + 1);
 }
 
-/* The search panel's own markup. It used to be sliceable between two ids,
-   which stopped working the moment the panel left the map stage to become the
-   last child of the app - the slice came out backwards and every check in it
-   passed against an empty string. Matching the tags is duller and cannot do
-   that. */
+/* The map's top controls, as markup. Sliced by matching tags rather than
+   between two ids: the id-to-id trick broke silently the first time the block
+   moved, coming out backwards so that every check inside it passed against an
+   empty string. */
 function panel() {
-  const at = shell.indexOf('id="findSheet"');
+  const at = shell.indexOf('id="topWrap"');
   const i = shell.lastIndexOf("<div", at);
   const re = /<\/?div\b/g;
   re.lastIndex = i;
@@ -225,101 +224,112 @@ const OSLO = [262000, 6650000];   // roughly the middle of the city, EPSG:25833
         !/localStorage[.]setItem[(]"[^"]*(?:sok|search|find)/i.test(shell));
 }
 
-// ------------------------------------ the panel and the on-screen keyboard --
-/* Reported four times across six attempts, in the same words each time: the
-   suggestions come up and the search pill leaves the top of the screen.
+// ----------------------------------- the dropdown and the on-screen keyboard --
+/* Reported four times in the same words - the suggestions come up and the
+   search pill leaves the top of the screen - and fixed six times with the
+   phone disagreeing every time. All six lifted a bottom-anchored sheet by a
+   computed amount. The anchor was the bug: a field near the bottom of the
+   window is one the browser has to reveal when the keyboard opens, and Safari
+   reveals it by scrolling the page, which carries the sheet off the top.
  *
- * Every one of those attempts lifted a bottom-anchored sheet by a computed
- * amount. The last one measured the lift to the sheet's own containing block
- * and capped it to the visible viewport, which was arithmetically right and
- * still wrong on the phone, because a browser that will not shrink its window
- * for a keyboard scrolls the page up to reveal the focused field instead - and
- * carries the sheet above it off the screen.
- *
- * The panel is anchored to the top now, so there is nothing to reveal and
- * nothing to scroll. What is left of findLift is an improvement on a layout
- * that is already correct: it pins the panel to the rectangle that is visible,
- * so the tail of the list is not behind the keys. The checks below are written
- * around that distinction - each says what the panel does when the script does
- * nothing at all. */
+ * The bar is at the top now and the suggestions hang under it, so there is
+ * nothing to reveal and nothing to scroll. All findLift does is decide how far
+ * down the list may reach. The checks below are written around that: each says
+ * what happens when the script does nothing at all, and the answer is always
+ * "the list is too long and you scroll it", never "the field is gone". */
 {
-  const src = grab("findLift") + "\n" + grab("findFree") + "\n";
+  const src = grab("findLift") + "\n";
 
-  function lift({ open = true, innerHeight = 800, vvHeight = 800, offsetTop = 0,
-                  hasVV = true, hostTop = 0 } = {}) {
-    /* `top` is measured against the panel's containing block, which is the app
-       frame. On a phone that starts at the window's top; on a wide screen the
-       app is inset, so the element is asked rather than assumed. */
-    const host = { getBoundingClientRect: () => ({ top: hostTop }) };
-    const sheet = { style: {}, offsetParent: host,
-                    classList: { contains: () => open } };
+  function cap({ hidden = false, innerHeight = 800, vvHeight = 800,
+                 offsetTop = 0, hasVV = true, top = 62 } = {}) {
+    const wrap = { style: {} };
+    const drop = { hidden, style: {}, getBoundingClientRect: () => ({ top }) };
     const win = hasVV
       ? { innerHeight, visualViewport: { height: vvHeight, offsetTop } }
       : { innerHeight };
-    new Function("findSheet", "window", src + "findLift();")(sheet, win);
-    return sheet.style;
+    new Function("topWrap", "findDrop", "window", src + "findLift();")(
+      wrap, drop, win);
+    return { drop: drop.style, wrap: wrap.style };
   }
 
-  const shown = (st) => `top ${JSON.stringify(st.top)}, ` +
-                        `height ${JSON.stringify(st.height)}, ` +
-                        `padding ${JSON.stringify(st.paddingTop)}`;
+  /* No keyboard: the limit is the share of the screen the list may take, so
+     the map is still most of what you are looking at. */
+  let st = cap({ innerHeight: 800, vvHeight: 800 });
+  check("with no keyboard the list is capped to a share of the screen",
+        st.drop.maxHeight === "448px", st.drop.maxHeight);
 
-  let st = lift({ vvHeight: 800 });
-  check("with no keyboard the panel is left to the stylesheet entirely",
-        st.top === "" && st.height === "" && st.paddingTop === "", shown(st));
+  /* A keyboard laid over the window. 464 visible, top at 62, so there is 386px
+     of room - and the share is the smaller of the two. */
+  st = cap({ innerHeight: 800, vvHeight: 464 });
+  check("a keyboard shortens the list rather than moving anything",
+        st.drop.maxHeight === "260px", st.drop.maxHeight);
+  check("and leaves a strip of map between the list and the keys",
+        260 + 62 < 464 - 100, "the list ends well above the keyboard");
 
-  /* A keyboard laid over the window: the visible viewport shrinks where it
-     stands, so the panel keeps its top and gives up the covered bottom. */
-  st = lift({ innerHeight: 800, vvHeight: 450 });
-  check("a keyboard over the window shortens the panel rather than moving it",
-        st.top === "0px" && st.height === "450px", shown(st));
-  check("and the status bar stays reserved, because the panel still starts there",
-        st.paddingTop === "", shown(st));
+  /* A tall list on a short screen: room is what is left above the keys, less a
+     margin, and it is the binding limit here. */
+  st = cap({ innerHeight: 800, vvHeight: 300, top: 62 });
+  check("on a short viewport the room above the keys is what binds",
+        st.drop.maxHeight === "168px", st.drop.maxHeight);
 
-  /* The reported phone. The window does not shrink at all; the visible part of
-     it scrolls up the page. This is the case every earlier guard missed, and it
-     is the one the screenshots showed. */
-  st = lift({ innerHeight: 800, vvHeight: 450, offsetTop: 336 });
-  check("a scrolled viewport is followed, which is the case that was missed",
-        st.top === "336px" && st.height === "450px", shown(st));
-  check("and the reserved status bar goes, since the page has scrolled under it",
-        st.paddingTop === "0px", shown(st));
+  /* And it never collapses to nothing, however little is left. */
+  st = cap({ innerHeight: 800, vvHeight: 120, top: 62 });
+  check("an absurdly small viewport still leaves a usable list",
+        parseInt(st.drop.maxHeight, 10) >= 120, st.drop.maxHeight);
 
-  /* On a wide screen the app is a phone-shaped frame with a margin above it,
-     so the visible viewport's offset is not the panel's offset. */
-  st = lift({ innerHeight: 800, vvHeight: 450, offsetTop: 336, hostTop: 20 });
-  check("the offset is measured against the app frame, not the window",
-        st.top === "316px", shown(st));
+  /* A hidden dropdown is not measured or styled. */
+  st = cap({ hidden: true, innerHeight: 800, vvHeight: 464 });
+  check("a dropdown with nothing in it is left alone",
+        st.drop.maxHeight === undefined, JSON.stringify(st.drop));
 
-  /* Android resizes the window instead of overlaying it, and then `100svh` has
-     already done the work. */
-  st = lift({ innerHeight: 450, vvHeight: 450 });
-  check("a window that resizes for the keyboard needs no help at all",
-        st.top === "" && st.height === "", shown(st));
+  /* Insurance rather than mechanism: if a browser ever does scroll the page up
+     under the keyboard, the column follows instead of riding off the top. */
+  st = cap({ innerHeight: 800, vvHeight: 464, offsetTop: 336, top: 398 });
+  check("a scrolled viewport takes the whole column with it",
+        st.wrap.transform === "translateY(336px)", st.wrap.transform);
+  check("and the list is still measured from where it actually ended up",
+        st.drop.maxHeight === "260px", st.drop.maxHeight);
 
-  st = lift({ open: false, innerHeight: 800, vvHeight: 450 });
-  check("a closed panel is left with nothing inline on it",
-        st.top === "" && st.height === "" && st.paddingTop === "", shown(st));
+  st = cap({ innerHeight: 800, vvHeight: 800, offsetTop: 0 });
+  check("an unscrolled viewport leaves no transform behind",
+        st.wrap.transform === "", JSON.stringify(st.wrap));
 
-  st = lift({ hasVV: false });
-  check("no visualViewport means no styling at all, not a crash",
-        st.top === undefined && st.height === undefined, shown(st));
+  st = cap({ hasVV: false, innerHeight: 800 });
+  check("no visualViewport means the window is the limit, not a crash",
+        st.drop.maxHeight === "448px", st.drop.maxHeight);
 
-  /* Every way out has to hand the panel back to the stylesheet, or it reopens
-     pinned to a keyboard that is no longer there. */
-  check("closing, dragging shut and closing everything all free the panel",
-        /function findShut\(\)\{[\s\S]*?findFree\(\)/.test(shell) &&
-        /makeDismissable\(findSheet[\s\S]{0,120}findFree\(\)/.test(shell) &&
-        /function closeSheets\([\s\S]{0,220}findFree\(\)/.test(shell));
-  check("and closing puts the keyboard away with it",
+  /* The dropdown exists only while it has something in it. An empty rounded
+     box hanging under the bar over the map is worse than no box. */
+  const showSrc = grab("findShow") + "\nfunction findLift(){}\n";
+  function shown({ rows = 0, msg = false } = {}) {
+    const drop = { hidden: null };
+    new Function("findDrop", "findList", "findMsg", showSrc + "findShow();")(
+      drop, { children: { length: rows } }, { hidden: !msg });
+    return drop.hidden;
+  }
+  check("with no results and nothing to say, there is no dropdown",
+        shown() === true);
+  check("results bring it up", shown({ rows: 3 }) === false);
+  check("and so does something to say on its own", shown({ msg: true }) === false);
+
+  /* Every way out has to put the column back the way it was, or the next
+     search opens pinned to a keyboard that is no longer there. */
+  check("closing releases the column and the keyboard with it",
+        /function findShut\(\)\{[\s\S]*?transform=""/.test(shell) &&
         /function findShut\(\)\{[\s\S]*?findQ\.blur\(\)/.test(shell));
+  check("and touching the map closes the search",
+        /function closeSheets\([\s\S]{0,160}findShut\(\)/.test(shell));
+  check("Escape closes it too",
+        /"Escape"[\s\S]{0,60}findShut\(\)/.test(shell));
 
-  // And the wall of text that made the sheet tall in the first place.
-  const note = (panel().match(/<p class="about"[\s\S]*?<\/p>/) || [""])[0];
-  check("the note under the field is a line, not a paragraph",
-        note.replace(/<[^>]+>/g, "").trim().split(/\s+/).length <= 16,
-        note.replace(/<[^>]+>/g, "").trim());
-  check("but it still says where the query goes", /Kartverket/.test(note));
+  /* Blur must not close it. Tapping a suggestion blurs the field before the tap
+     lands, so closing on blur closes the list out from under the finger. */
+  check("blur does not close the list out from under a tap",
+        !/findQ\.addEventListener\("blur"/.test(shell));
+
+  // And the note that used to make the sheet tall is gone with the sheet.
+  check("there is no paragraph of explanation over the map",
+        !/id="findNote"/.test(shell));
 }
 
 
@@ -355,14 +365,17 @@ const OSLO = [262000, 6650000];   // roughly the middle of the city, EPSG:25833
   check("and bumps the sequence, so a late answer is ignored",
         /findSeq\+\+/.test(src));
 
-  check("closing the sheet resets it",
+  /* There is no longer an opening step that could forget to reset: the field
+     is on the map, so the reset has to happen on the way out instead, by every
+     route out. */
+  check("closing resets it",
         /function findShut\(\)\{[\s\S]*?findReset\(\);[\s\S]*?\}/.test(shell));
-  check("and so does opening it, before the field is focused", (() => {
-    const open = shell.slice(shell.indexOf('getElementById("findBtn")'));
-    const reset = open.indexOf("findReset()");
-    const focus = open.indexOf("findQ.focus()");
-    return reset > -1 && focus > -1 && reset < focus;
-  })());
+  check("and every way out goes through that one function",
+        /getElementById\("findClose"\)\.addEventListener\("click",findShut\)/
+          .test(shell) &&
+        /"Escape"[\s\S]{0,60}findShut\(\)/.test(shell) &&
+        /function closeSheets\([\s\S]{0,160}findShut\(\)/.test(shell) &&
+        /function findGo\([\s\S]*?findShut\(\)/.test(shell));
 }
 
 
@@ -473,82 +486,81 @@ const OSLO = [262000, 6650000];   // roughly the middle of the city, EPSG:25833
 }
 
 
-// ----------------------------------------------- search is its own screen --
-/* The remake, after six lifts of a bottom sheet failed to keep the field on
-   the screen.
+// -------------------------------------------- the map's top controls --
+/* Search left, species filter right, the day's conditions under the filter,
+ * suggestions hanging under both.
  *
- * The panel is anchored to the top of the app: the field is the first thing in
- * it, results grow downward under it, and the keyboard covers the tail of a
- * list that scrolls. A browser never has to scroll the page to reveal the
- * field, because the field was never covered. That is the whole fix, and it is
- * in CSS, so these checks are worth more than the ones they replace - they pin
- * a layout that does not depend on our script running at the right moment.
+ * The search bar is a field rather than a button that opens one, and it lives
+ * at the top of the screen. That is the whole of the keyboard fix: a field the
+ * keyboard cannot cover is a field the browser never has to scroll into view.
+ * It is in CSS and markup, so it holds with the script switched off.
  *
- * They cannot prove it renders; tests/test_layout.js measures that in a real
+ * These cannot prove it renders; tests/test_layout.js measures it in a real
  * browser with a keyboard faked over it. */
 {
-  const css = shell.slice(shell.indexOf("#findSheet{"),
+  const css = shell.slice(shell.indexOf(".topwrap{"),
                           shell.indexOf("/* tab bar */"));
   const sheet = panel();
 
-  check("the panel is anchored to the top of the screen, not the bottom",
-        /#findSheet\{[^}]*top:0/.test(css) && /#findSheet\{[^}]*bottom:0/.test(css),
-        css.slice(0, 80));
-  check("it fills the app rather than being capped to a fraction of it",
-        /#findSheet\{[^}]*max-height:none/.test(css));
-  check("and sits above the tab bar instead of under it",
-        /#findSheet\{[^}]*z-index:30/.test(css));
-  check("the notch on a phone is reserved rather than covered",
-        /#findSheet\{[^}]*padding-top:env\(safe-area-inset-top\)/.test(css));
+  // --- the column
+  check("the controls are one column down the top of the screen",
+        /\.topwrap\{[^}]*position:absolute/.test(css) &&
+        /\.topwrap\{[^}]*flex-direction:column/.test(css), css.slice(0, 90));
+  check("the map stays draggable in the gaps between them",
+        /\.topwrap\{[^}]*pointer-events:none/.test(css) &&
+        /\.topwrap > \*\{pointer-events:auto\}/.test(css));
+  check("and the suggestions outrank the banners while you are typing",
+        /\.topwrap\.searching\{z-index:12\}/.test(css));
 
-  /* What the column buys: the list scrolls rather than the whole panel, so the
-     field stays put while results are read. */
-  check("the panel is a column, not a scrolling page",
-        /#findSheet\{[^}]*display:flex/.test(css) &&
-        /#findSheet\{[^}]*flex-direction:column/.test(css), css.slice(0, 70));
-  check("and clips rather than scrolling as a whole",
-        /#findSheet\{[^}]*overflow:hidden/.test(css));
-  check("everything in it is fixed by default",
-        /#findSheet > \*\{flex:0 0 auto\}/.test(css));
-  check("the result list is the one part that grows and scrolls",
-        /#findList\{[^}]*flex:1 1 auto/.test(css) &&
-        /#findList\{[^}]*overflow-y:auto/.test(css));
-  check("the list is still allowed to shrink below its contents",
-        /#findList\{[^}]*min-height:0/.test(css));
-  check("a flick at the end of the list does not scroll what is behind it",
-        /#findList\{[^}]*overscroll-behavior:contain/.test(css));
+  // --- the row
+  const iFind = sheet.indexOf('id="findQ"');
+  const iSp = sheet.indexOf('id="spPill"');
+  const iCond = sheet.indexOf('id="condPill"');
+  const iDrop = sheet.indexOf('id="findDrop"');
+  check("search is on the left of the row and the species filter on the right",
+        iFind > 0 && iSp > iFind, `${iFind} then ${iSp}`);
+  check("the conditions sit under the filter, not under the search bar",
+        iCond > iSp && /\.condpill\{[^}]*align-self:flex-end/.test(css),
+        `${iSp} then ${iCond}`);
+  check("and the suggestions come under both",
+        iDrop > iCond, `${iCond} then ${iDrop}`);
+  check("the search bar takes the width the filter does not",
+        /\.findpill\{[^}]*flex:1 1 auto/.test(css) &&
+        /\.speciespill\{[^}]*flex:0 1 auto/.test(css));
 
-  /* Order matters more here than it did: the field has to be the first thing
-     on the screen, because that is what keeps a keyboard from moving it. */
-  const iField = sheet.indexOf('id="findQ"');
-  const iNote = sheet.indexOf('id="findNote"');
-  const iList = sheet.indexOf('id="findList"');
-  const iTag = sheet.lastIndexOf("<", iField);   // the field's own opening tag
-  check("the field is the first thing in the panel that anyone can touch",
-        iField > 0 && !/<(button|input|a)\b/.test(sheet.slice(0, iTag)),
-        sheet.slice(0, iTag).replace(/\s+/g, " ").slice(-70));
-  check("there is no heading above it repeating what the placeholder says",
-        !/<h2\b/.test(sheet));
-  check("the note sits under the field it explains, not under the results",
-        iNote > iField && iNote < iList, `${iField} ${iNote} ${iList}`);
-  check("and the results are the last thing in the panel",
-        iList > iNote && !/<(p|input)\b/.test(sheet.slice(iList)),
-        sheet.slice(iList).replace(/\s+/g, " ").slice(0, 80));
+  // --- the field itself
+  check("it is a real field, not a button that opens one",
+        /<input id="findQ"/.test(sheet));
+  check("and it is 16px, or iOS zooms the map in when it takes focus",
+        /#findQ\{[^}]*font-size:16px/.test(css));
+  check("typing gives the field the whole row",
+        /\.topwrap\.searching \.speciespill,\.topwrap\.searching \.condpill\{display:none\}/
+          .test(css));
+  check("and offers a word rather than a second cross beside the field's own",
+        /id="findClose">Avbryt</.test(sheet) &&
+        /\.findx\{display:none\}/.test(css));
+  check("the magnifier is not a button any more, so nothing has to be pressed first",
+        !/id="findBtn"/.test(shell));
 
-  /* The panel is a child of the app, not of the map stage. In the stage it was
-     drawn under the tab bar, which is visible in the second screenshot of the
-     fault: results with the bar sitting on top of them. */
-  check("the panel is a child of the app rather than of the map stage",
-        shell.indexOf('id="findSheet"') > shell.indexOf("</nav>"),
-        "still inside the stage");
+  // --- the dropdown
+  check("the suggestions are capped without any script running",
+        /\.finddrop\{[^}]*max-height:56vh/.test(css) &&
+        /@supports \(height:1svh\)\{\.finddrop\{max-height:56svh\}\}/.test(css));
+  check("the list inside it is what scrolls",
+        /\.finddrop \.sheetList\{[^}]*overflow-y:auto/.test(css) &&
+        /\.finddrop \.sheetList\{[^}]*min-height:0/.test(css));
+  check("a flick at the end of the list does not scroll the map behind it",
+        /\.finddrop \.sheetList\{[^}]*overscroll-behavior:contain/.test(css));
+  check("and the panel clips rather than scrolling as a whole",
+        /\.finddrop\{[^}]*overflow:hidden/.test(css));
+  check("the message and the results are both inside it",
+        sheet.indexOf('id="findMsg"') > iDrop &&
+        sheet.indexOf('id="findList"') > iDrop);
 
-  /* The panel does not scroll as a whole, so the drag cannot ask it whether it
-     is scrolled - it has to ask the list the finger is actually in, or pulling
-     through a half-scrolled list dismisses the panel. */
-  check("the drag reads the scroller the finger is in, not the panel",
+  /* The dropdown scrolls inside itself, so a drag that starts in it must not be
+     read as a drag of the map. */
+  check("the drag reads the scroller the finger is in",
         /function scrolledAlready\(/.test(shell) &&
-        /fromTop=!scrolledAlready\(e\.target\)/.test(shell));
-  check("and walks up from the target to find it",
         /el\.scrollHeight>el\.clientHeight\+1/.test(shell));
 }
 

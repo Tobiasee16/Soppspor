@@ -5452,3 +5452,58 @@ arithmetic. It is evidence that the model of the problem is wrong. The related
 habit, learned the same week: **ask for the screenshot first, not fifth.** One
 picture from the phone identified both faults in minutes after six rounds of
 simulation had identified neither.
+
+### 32h. And then the owner rearranged the top of the map
+
+32g was right about the anchor and went one step too far with it. Moving the
+field to the top fixed the keyboard fault; making the whole thing a screen also
+took the map away, and the map is what is being searched. The owner said so the
+same day, and named the arrangement:
+
+> "Maybe we should just do a pill search bar at the top. And not make it cover
+> the entire screen. Like make the dropdown from the top stop before it comes
+> down to the keyboard, and leave some room so we can see the background. [...]
+> the layout should be search bar top left species filter top right weather
+> data under the filter."
+
+So the top of the map is now one column: a search pill on the left, the species
+filter on the right, the day's conditions under the filter, and the suggestions
+hanging under both. The column passes taps through and each control takes its
+own back, so the map is still draggable in the gaps. The search FAB is gone -
+the bar is the control - and so is the species pill's old spot at the top left.
+
+The keyboard fix survives unchanged, because it was never about the panel being
+full-screen. It was about the field being at the top, where a keyboard cannot
+cover it and the browser therefore never scrolls the page to reveal it.
+
+How far the suggestions reach is now two limits, smaller wins: the room left
+above the keyboard less a strip of map, and 56% of what can be seen, so the
+list never becomes the screen even with no keyboard at all. The CSS carries the
+share on its own (`max-height:56svh`), and script narrows it to the room
+actually left. That order is the point: if the script never runs the list is
+merely longer than the gap and a scroll reaches the end of it.
+
+Measured in Chromium at 390x844 with a 336 px keyboard faked over it, twenty
+five results in the list:
+
+| visible viewport | field | list ends | map left below |
+|---|---|---|---|
+| none (844) | 25-43 | 537 | 256 px |
+| overlaid, 0-508 | 25-43 | 348 | 160 px |
+| scrolled, 168-676 | 193-211 | 516 | 160 px |
+| scrolled, 336-844 | 361-379 | 684 | 160 px |
+
+The scrolled rows are insurance rather than mechanism. Nothing should scroll
+the page now, but being wrong about exactly that cost six fixes, so the column
+follows the visible rectangle instead of trusting it not to move - and if that
+never fires, the column is where it always was, at the top of the screen.
+
+Two mutation checks, one per half: remove the cap and the list runs from 537 to
+1513, down over the whole map; hold the cap at a fixed 700 px and it reaches
+764, well past a keyboard that starts at 508.
+
+The close control is the word *Avbryt* rather than a cross, because
+`type="search"` draws its own cross inside the field to clear the text, and two
+crosses side by side - one clearing, one closing - is a guess a beginner should
+not have to make. The paragraph of explanation that used to sit under the field
+is gone entirely: it was there to fill a sheet, and there is no sheet.
